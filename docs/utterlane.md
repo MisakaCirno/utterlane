@@ -705,6 +705,13 @@ type WorkspaceFile = {
 
   /** 脚本列表滚动位置 */
   scriptListScrollTop?: number;
+  /** Segments 视图各列宽度 */
+  segmentsColumnWidths?: {
+    order?: number;
+    status?: number;
+    takes?: number;
+    duration?: number;
+  };
 
   /** 时间轴滚动位置 */
   timelineScrollLeft?: number;
@@ -981,5 +988,16 @@ type WorkspaceFile = {
 * 状态栏是否在首版显示输入设备信息
 * 快捷键是否只在窗口内生效，还是支持更高级的全局行为
 * Linux 是否进入首发支持范围
+* 全局字体大小缩放
+
+  * 在设置中提供字体大小调节（如 Small / Default / Large 三档，或任意倍率）
+  * 实现方式建议：将 UI 中散落的字号统一到一组 CSS 变量（如 `--fs-body` / `--fs-small` / `--fs-label`），再由一个全局 scale 因子驱动
+  * 静态 UI 壳稳定后作为独立一轮改造引入，避免真业务接入过程中反复返工
+* 多语言支持
+
+  * 首版建议支持简体中文与英文
+  * 实现方式建议：引入 `react-i18next`，将所有硬编码文案抽到 `zh-CN.json` / `en-US.json`
+  * 菜单标签、状态栏文本、Inspector 字段名、错误提示均纳入翻译范围
+  * 与字体缩放一样，放在静态 UI 壳稳定后作为独立一轮改造引入
 
 ---

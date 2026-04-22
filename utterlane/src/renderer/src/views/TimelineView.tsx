@@ -1,0 +1,222 @@
+import {
+  ChevronLeft,
+  ChevronRight,
+  Mic,
+  Pause,
+  Play,
+  RotateCcw,
+  Rewind,
+  SkipBack,
+  SkipForward,
+  Square
+} from 'lucide-react'
+import { cn } from '@renderer/lib/cn'
+import { useEditorStore } from '@renderer/store/editorStore'
+import { formatDuration } from '@renderer/lib/format'
+
+function IconButton({
+  children,
+  onClick,
+  active,
+  danger,
+  disabled,
+  title
+}: {
+  children: React.ReactNode
+  onClick?: () => void
+  active?: boolean
+  danger?: boolean
+  disabled?: boolean
+  title?: string
+}): React.JSX.Element {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      className={cn(
+        'flex h-6 w-6 items-center justify-center rounded-sm text-fg-muted',
+        'disabled:cursor-not-allowed disabled:opacity-40',
+        !disabled && !active && 'hover:bg-chrome-hover hover:text-fg',
+        active && !danger && 'bg-accent text-white',
+        active && danger && 'bg-rec text-white'
+      )}
+    >
+      {children}
+    </button>
+  )
+}
+
+function RowLabel({ children }: { children: React.ReactNode }): React.JSX.Element {
+  return (
+    <span className="absolute left-2 text-2xs uppercase tracking-wider text-fg-dim">
+      {children}
+    </span>
+  )
+}
+
+function ControlBar(): React.JSX.Element {
+  const segment = useEditorStore((s) =>
+    s.selectedSegmentId ? s.segmentsById[s.selectedSegmentId] : undefined
+  )
+  const playback = useEditorStore((s) => s.playback)
+  const takeCount = segment?.takes.length ?? 0
+
+  return (
+    <div className="shrink-0 border-b border-border bg-bg-panel">
+      <div className="relative flex h-8 items-center justify-center border-b border-border-subtle px-2">
+        <RowLabel>Segment</RowLabel>
+        <div className="flex items-center gap-0.5 rounded-sm border border-border bg-bg-deep p-0.5">
+          <IconButton title="上一句">
+            <ChevronLeft size={13} />
+          </IconButton>
+          <IconButton title="下一句">
+            <ChevronRight size={13} />
+          </IconButton>
+          <div className="mx-0.5 h-4 w-px bg-border" />
+          <IconButton title="上一个 Take" disabled={takeCount < 2}>
+            <SkipBack size={12} />
+          </IconButton>
+          <IconButton title="下一个 Take" disabled={takeCount < 2}>
+            <SkipForward size={12} />
+          </IconButton>
+          <div className="mx-0.5 h-4 w-px bg-border" />
+          <IconButton
+            title="播放当前句"
+            active={playback === 'segment'}
+            disabled={!segment?.selectedTakeId}
+          >
+            <Play size={12} />
+          </IconButton>
+          <IconButton title="暂停">
+            <Pause size={12} />
+          </IconButton>
+          <IconButton title="停止">
+            <Square size={11} />
+          </IconButton>
+          <div className="mx-0.5 h-4 w-px bg-border" />
+          <IconButton title="录音" active={playback === 'recording'} danger>
+            <Mic size={12} />
+          </IconButton>
+          <IconButton title="重录" disabled={!segment?.selectedTakeId}>
+            <RotateCcw size={12} />
+          </IconButton>
+        </div>
+      </div>
+
+      <div className="relative flex h-8 items-center justify-center px-2">
+        <RowLabel>Project</RowLabel>
+        <div className="flex items-center gap-0.5 rounded-sm border border-border bg-bg-deep p-0.5">
+          <IconButton title="从头播放项目">
+            <Rewind size={12} />
+          </IconButton>
+          <IconButton title="播放项目" active={playback === 'project'}>
+            <Play size={12} />
+          </IconButton>
+          <IconButton title="暂停项目">
+            <Pause size={12} />
+          </IconButton>
+          <IconButton title="停止项目">
+            <Square size={11} />
+          </IconButton>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function TimelineContent(): React.JSX.Element {
+  const order = useEditorStore((s) => s.order)
+  const segmentsById = useEditorStore((s) => s.segmentsById)
+  const selectedId = useEditorStore((s) => s.selectedSegmentId)
+  const selectSegment = useEditorStore((s) => s.selectSegment)
+
+  const pxPerMs = 0.08
+  const unrecordedWidth = 60
+
+  const startMsById = new Map<string, number>()
+  {
+    let acc = 0
+    for (const id of order) {
+      startMsById.set(id, acc)
+      const seg = segmentsById[id]
+      const take = seg?.takes.find((t) => t.id === seg.selectedTakeId)
+      acc += take?.durationMs ?? 0
+    }
+  }
+
+  return (
+    <div className="flex flex-1 flex-col overflow-hidden">
+      <div className="relative h-6 shrink-0 overflow-hidden border-b border-border bg-bg-deep">
+        <div className="absolute inset-0 flex">
+          {Array.from({ length: 30 }, (_, i) => (
+            <div
+              key={i}
+              className="flex shrink-0 items-end border-r border-border-subtle pb-0.5 pl-1 font-mono text-[9px] text-fg-dim"
+              style={{ width: 120 }}
+            >
+              {String(Math.floor(i / 60)).padStart(2, '0')}:{String(i % 60).padStart(2, '0')}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-auto">
+        <div className="relative h-24 min-w-max p-2">
+          <div className="flex h-full items-stretch gap-0.5">
+            {order.map((id, idx) => {
+              const seg = segmentsById[id]
+              if (!seg) return null
+              const current = seg.takes.find((t) => t.id === seg.selectedTakeId)
+              const hasAudio = !!current
+              const width = hasAudio ? current.durationMs * pxPerMs : unrecordedWidth
+              const isSelected = selectedId === id
+              const startMs = startMsById.get(id) ?? 0
+
+              return (
+                <div
+                  key={id}
+                  onClick={() => selectSegment(id)}
+                  title={seg.text}
+                  className={cn(
+                    'relative flex shrink-0 cursor-pointer flex-col justify-between rounded-sm border px-1.5 py-1 text-[10px]',
+                    hasAudio
+                      ? isSelected
+                        ? 'border-accent bg-accent-soft text-white'
+                        : 'border-border bg-bg-raised text-fg hover:border-border-strong'
+                      : isSelected
+                        ? 'border-accent bg-bg-deep text-fg-muted'
+                        : 'border-dashed border-border bg-bg-deep text-fg-dim hover:border-border-strong'
+                  )}
+                  style={{ width, minWidth: unrecordedWidth }}
+                >
+                  <div className="flex items-center gap-1">
+                    <span className="font-mono tabular-nums opacity-70">{idx + 1}</span>
+                    <span className="truncate">{seg.text}</span>
+                  </div>
+                  <div className="flex items-center justify-between font-mono tabular-nums opacity-70">
+                    <span>{formatDuration(startMs)}</span>
+                    {hasAudio ? (
+                      <span>{formatDuration(current.durationMs)}</span>
+                    ) : (
+                      <span>未录制</span>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+export function TimelineView(): React.JSX.Element {
+  return (
+    <div className="flex h-full flex-col bg-bg">
+      <ControlBar />
+      <TimelineContent />
+    </div>
+  )
+}
