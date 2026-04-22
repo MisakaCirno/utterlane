@@ -40,8 +40,9 @@ Utterlane 的核心思路是：
 * 播放整个项目
 * 导出 WAV
 * 导出 SRT
-* 菜单栏
+* 自定义标题栏（内含菜单栏）
 * 状态栏（基础占位与全局状态显示）
+* 仅中部 3 个核心视图的有限 dock
 
 ### MVP明确不做
 
@@ -50,7 +51,8 @@ Utterlane 的核心思路是：
 * AI 润稿
 * AI 配音
 * 智能切句
-* 自由布局 / Dock 系统
+* 完整自由 Dock 系统
+* 视图悬浮为独立窗口
 * 多窗口编辑
 * 多轨编辑
 * 波形精细编辑
@@ -118,7 +120,11 @@ Utterlane 的 MVP 目标不是做成完整的 NLE/DAW，而是先跑通下面这
 * Radix UI (Primitives)：无头组件库（Headless UI）。
 
   * 只拿行为层，不拿视觉层。
-* react-resizable-panels：窗格化布局引擎。
+* **dockview**：用于实现仅中部 3 个核心视图的有限 dock。
+
+  * 仅工作区视图参与 dock，不影响标题栏、状态栏。
+  * 不支持独立浮窗与多窗口弹出。
+  * MVP 中仅使用其工作区内部停靠、分组、调整尺寸等能力。
 * Lucide React：矢量图标库。
 
 #### 状态管理与高性能渲染
@@ -142,6 +148,8 @@ Utterlane 的 MVP 目标不是做成完整的 NLE/DAW，而是先跑通下面这
 * Radix 仅使用 Primitives，不使用 Themes
 * Canvas 仅用于时间轴与波形绘制
 * FFmpeg 仅使用 LGPL 路线，不启用 GPL / nonfree 组件
+* Dock 方案仅服务于中部工作区，不扩大到整个窗口系统
+* 窗口采用自定义标题栏方案，菜单栏内嵌在标题栏中，不额外占用一整行
 
 ---
 
@@ -292,6 +300,7 @@ Take 是 Segment 下的一次录音尝试。
 * 用户交互
 * 本地 UI 状态
 * 当前选中对象联动
+* 中部 dock 工作区的布局状态联动
 
 ### Main 层负责
 
@@ -322,6 +331,7 @@ Take 是 Segment 下的一次录音尝试。
 * Renderer 不直接接触原生录音后端
 * 导出逻辑不放在 Renderer 中执行
 * 录音逻辑与导出逻辑分离
+* Dock 布局状态属于工作区状态，不属于工程内容
 
 ---
 
@@ -342,41 +352,55 @@ Take 是 Segment 下的一次录音尝试。
 
 ### 总体布局
 
-* 编辑器总体布局固定
-* 支持拖动分隔条调整尺寸
-* 支持记住上次布局
-* 暂不支持 PR 式自由拖拽停靠和任意重组
+* 自定义标题栏固定（内含菜单栏）
+* 状态栏固定
+* 中部工作区支持有限 dock
+* 仅 3 个核心视图参与 dock：
+
+  * Segments 视图
+  * Inspector 视图
+  * Timeline 视图（含 Control Bar）
+* 不支持视图悬浮为独立窗口
+* 不支持多窗口弹出
+* 必须支持重置默认布局
+* 必须支持保存与恢复工作区布局
 
 #### 顶部
 
-* 标题栏
+* 自定义标题栏（内含菜单栏）
 
-#### 中部
+#### 中部工作区
 
-* 上半部分面板
-
-  * 左侧：Segments 视图
-  * 右侧：Inspector 视图
-* 下半部分面板
-
-  * 顶部：Control Bar
-  * 下方：Timeline 内容区
+* Segments 视图
+* Inspector 视图
+* Timeline 视图（Control Bar 固定附着在 Timeline 视图内部）
 
 #### 底部
 
 * 状态栏
 
-### 标题栏
+### Dock 范围与约束
+
+* 仅中部 3 个核心视图允许调整位置和大小
+* 自定义标题栏与状态栏不参与 dock
+* Timeline 视图与 Control Bar 不拆分为两个独立 dock 面板
+* 默认布局仍应提供“上左 Segments / 上右 Inspector / 下方 Timeline”的标准工作区
+* 用户可在窗口内调整三个核心视图的排布关系，但不能把它们拖出主窗口
+* dockview 仅用于工作区内部的布局、分组和尺寸调整，不启用浮动组与弹出窗口能力
+
+### 自定义标题栏
+
+采用类似 VSCode 的自定义标题栏方案，菜单栏直接集成在标题栏中，而不是额外占用独立一行。
 
 分为三部分：
 
-* 左侧：软件图标、菜单栏
-* 中间：当前项目路径或项目标题
+* 左侧：软件图标、菜单入口
+* 中间：当前项目路径或项目标题，以及可用于拖拽窗口的区域
 * 右侧：窗口控制按钮（最小化、最大化 / 还原、关闭）
 
-### 菜单栏
+### 标题栏内菜单
 
-MVP 菜单栏建议至少包含：
+MVP 菜单建议至少包含：
 
 * File：新建、打开、保存、导入文案、导出音频、导出字幕、退出
 * Edit：撤销（预留）、重做（预留）、删除
@@ -501,7 +525,7 @@ Inspector 分为两个页面：
 * 工程目录
 * 音频目录
 
-### Control & Timeline视图
+### Timeline视图
 
 用于展示整个项目的时序结构，并提供当前句与整个项目的高频控制。
 
@@ -569,6 +593,7 @@ Inspector 分为两个页面：
 
 * 录音、局部播放、全局播放三种状态互斥
 * 没有 `selectedTakeId` 的 Segment 不能局部播放，也不能重录，但可以录音
+* Control Bar 始终跟随 Timeline 视图，不单独参与 dock
 
 ---
 
@@ -686,13 +711,8 @@ type WorkspaceFile = {
   /** 时间轴缩放比例 */
   timelineZoom?: number;
 
-  /** 布局信息 */
-  layout?: {
-    /** 顶部面板高度 */
-    topPaneHeight?: number;
-    /** 上部拆分左侧宽度 */
-    upperSplitLeftWidth?: number;
-  };
+  /** 有限 dock 布局状态 */
+  dockLayout?: unknown;
 
   /** 窗口信息 */
   window?: {
@@ -714,6 +734,7 @@ type WorkspaceFile = {
 
 * 删掉 `workspace.json` 不应影响工程内容本身
 * 会影响导出结果的内容不能放进 `workspace.json`
+* 有限 dock 布局状态属于 `workspace.json`，不属于工程内容
 
 ---
 
@@ -808,7 +829,7 @@ type WorkspaceFile = {
 * 切换当前选中 Segment
 * 滚动 Segment 列表
 * 缩放 / 滚动 Timeline
-* 调整面板尺寸
+* 更新有限 dock 布局状态
 * 窗口移动 / 缩放
 
 ### 录音落盘
@@ -842,18 +863,28 @@ type WorkspaceFile = {
 
 ## 开发顺序与里程碑
 
+### 第零阶段：有限 dock 原型冻结
+
+* 明确 UI 风格基准与禁区
+* 明确自定义标题栏（内含菜单）与状态栏固定
+* 明确中部 3 个核心视图的有限 dock 规则
+* 明确 Timeline 与 Control Bar 必须绑定为同一视图
+* 使用 dockview 完成静态编辑器壳与假数据原型
+* 完成默认布局、重置布局、布局保存 / 恢复原型验证
+
 ### 第一阶段：工程骨架
 
 * 初始化 Electron + electron-vite + React + TypeScript 工程
+* 确认自定义标题栏方案与窗口基础行为
 * 搭建基础目录结构
 * 定义核心类型：Project / Segment / Take / Workspace
 * 实现 `project.json` / `segments.json` / `workspace.json` 的读写模块
 
 ### 第二阶段：静态编辑器壳
 
-* 完成标题栏、菜单栏、状态栏的基础布局
-* 完成 Segments 视图、Inspector 视图、Control & Timeline 视图的静态骨架
-* 完成可调尺寸布局
+* 完成自定义标题栏（内含菜单）、状态栏的正式布局
+* 完成基于 dockview 的有限 dock 工作区骨架
+* 完成 Segments 视图、Inspector 视图、Timeline 视图的静态骨架
 * 接入基础全局状态管理
 
 ### 第三阶段：录音闭环
@@ -892,6 +923,8 @@ type WorkspaceFile = {
 * 原生录音后端是否能稳定接入 Electron utility process
 * 录音写入 `temp/` 后再转正的流程是否可靠
 * 多个 Take 切换后，Timeline 长度与导出结果是否一致
+* 基于 dockview 的有限 dock 布局状态是否能可靠保存与恢复
+* Timeline 视图在 dock 重排后，Control Bar 是否仍保持正确绑定
 * Canvas 渲染 Timeline 的性能是否足够支撑拖拽与滚动
 * FFmpeg 在目标平台上的打包与调用是否稳定
 
@@ -899,6 +932,7 @@ type WorkspaceFile = {
 
 * 尽早发现录音稳定性、平台兼容性、导出链路问题
 * 在大规模写 UI 前先验证关键技术闭环
+* 在真实功能接入前先确认有限 dock 方案不会破坏编辑器联动
 
 ---
 
@@ -917,7 +951,8 @@ type WorkspaceFile = {
 7. 调整多个 Segment 的顺序
 8. 播放当前句
 9. 播放整个项目
-10. 导出 WAV 和 SRT
+10. 调整 3 个核心视图的布局与大小
+11. 导出 WAV 和 SRT
 
 ### 数据验收
 
@@ -925,6 +960,7 @@ type WorkspaceFile = {
 * Segment 顺序不乱
 * `selectedTakeId` 不乱
 * Timeline 和列表仍然一致
+* 工作区布局可以恢复
 * 工程文件不容易因为异常退出损坏
 
 ### 体验验收
@@ -933,11 +969,13 @@ type WorkspaceFile = {
 * 用户能理解“播放当前句”和“播放项目”的区别
 * 用户能找到当前哪个 Take 是生效的
 * 用户能在不看额外文档的情况下完成基础导出
+* 用户能在主窗口内调整 3 个核心视图的布局，而不会破坏整体工作区
 
 ---
 
 ## 仍待明确但不阻塞开工的事项
 
+* 自定义标题栏在 Windows 与 macOS 下的最终实现策略
 * 原生录音后端最终是 Node-API addon 还是 sidecar 进程
 * 首发时是否默认显示实时输入电平
 * 状态栏是否在首版显示输入设备信息
