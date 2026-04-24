@@ -10,6 +10,21 @@ import {
   SkipForward,
   Square
 } from 'lucide-react'
+import {
+  DndContext,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent
+} from '@dnd-kit/core'
+import {
+  SortableContext,
+  arrayMove,
+  horizontalListSortingStrategy,
+  useSortable
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import { cn } from '@renderer/lib/cn'
 import { useEditorStore } from '@renderer/store/editorStore'
 import { formatDuration } from '@renderer/lib/format'
@@ -125,15 +140,81 @@ function ControlBar(): React.JSX.Element {
   )
 }
 
+const PX_PER_MS = 0.08
+const UNRECORDED_CLIP_WIDTH = 60
+
+/**
+ * 单个 Timeline clip。整块 clip 是 drag handle（DAW / 视频剪辑里这是惯例）。
+ * 用 PointerSensor.distance 防止单击选中被误判为拖拽。
+ */
+function TimelineClip({
+  id,
+  idx,
+  startMs
+}: {
+  id: string
+  idx: number
+  startMs: number
+}): React.JSX.Element | null {
+  const seg = useEditorStore((s) => s.segmentsById[id])
+  const isSelected = useEditorStore((s) => s.selectedSegmentId === id)
+  const selectSegment = useEditorStore((s) => s.selectSegment)
+
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id
+  })
+
+  if (!seg) return null
+  const current = seg.takes.find((t) => t.id === seg.selectedTakeId)
+  const hasAudio = !!current
+  const width = hasAudio ? current.durationMs * PX_PER_MS : UNRECORDED_CLIP_WIDTH
+
+  const style: React.CSSProperties = {
+    width,
+    minWidth: UNRECORDED_CLIP_WIDTH,
+    transform: CSS.Transform.toString(transform),
+    transition,
+    zIndex: isDragging ? 10 : undefined
+  }
+
+  return (
+    <div
+      ref={setNodeRef}
+      {...attributes}
+      {...listeners}
+      onClick={() => selectSegment(id)}
+      title={seg.text}
+      className={cn(
+        'relative flex shrink-0 cursor-pointer flex-col justify-between rounded-sm border px-1.5 py-1 text-[10px]',
+        hasAudio
+          ? isSelected
+            ? 'border-accent bg-accent-soft text-white'
+            : 'border-border bg-bg-raised text-fg hover:border-border-strong'
+          : isSelected
+            ? 'border-accent bg-bg-deep text-fg-muted'
+            : 'border-dashed border-border bg-bg-deep text-fg-dim hover:border-border-strong',
+        isDragging && 'shadow-lg ring-1 ring-accent'
+      )}
+      style={style}
+    >
+      <div className="flex items-center gap-1">
+        <span className="font-mono tabular-nums opacity-70">{idx + 1}</span>
+        <span className="truncate">{seg.text}</span>
+      </div>
+      <div className="flex items-center justify-between font-mono tabular-nums opacity-70">
+        <span>{formatDuration(startMs)}</span>
+        {hasAudio ? <span>{formatDuration(current.durationMs)}</span> : <span>未录制</span>}
+      </div>
+    </div>
+  )
+}
+
 function TimelineContent(): React.JSX.Element {
   const order = useEditorStore((s) => s.order)
   const segmentsById = useEditorStore((s) => s.segmentsById)
-  const selectedId = useEditorStore((s) => s.selectedSegmentId)
-  const selectSegment = useEditorStore((s) => s.selectSegment)
+  const reorderSegments = useEditorStore((s) => s.reorderSegments)
 
-  const pxPerMs = 0.08
-  const unrecordedWidth = 60
-
+  // 每个 clip 的起点时间戳，基于前序 clip 累积时长。先算好避免在 map 里 mutate。
   const startMsById = new Map<string, number>()
   {
     let acc = 0
@@ -143,6 +224,18 @@ function TimelineContent(): React.JSX.Element {
       const take = seg?.takes.find((t) => t.id === seg.selectedTakeId)
       acc += take?.durationMs ?? 0
     }
+  }
+
+  // 同 SegmentsView：4px 激活阈值防止单击选中被当成拖拽
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }))
+
+  const handleDragEnd = (e: DragEndEvent): void => {
+    const { active, over } = e
+    if (!over || active.id === over.id) return
+    const from = order.indexOf(String(active.id))
+    const to = order.indexOf(String(over.id))
+    if (from < 0 || to < 0) return
+    reorderSegments(arrayMove(order, from, to))
   }
 
   return (
@@ -163,49 +256,19 @@ function TimelineContent(): React.JSX.Element {
 
       <div className="flex-1 overflow-auto">
         <div className="relative h-24 min-w-max p-2">
-          <div className="flex h-full items-stretch gap-0.5">
-            {order.map((id, idx) => {
-              const seg = segmentsById[id]
-              if (!seg) return null
-              const current = seg.takes.find((t) => t.id === seg.selectedTakeId)
-              const hasAudio = !!current
-              const width = hasAudio ? current.durationMs * pxPerMs : unrecordedWidth
-              const isSelected = selectedId === id
-              const startMs = startMsById.get(id) ?? 0
-
-              return (
-                <div
-                  key={id}
-                  onClick={() => selectSegment(id)}
-                  title={seg.text}
-                  className={cn(
-                    'relative flex shrink-0 cursor-pointer flex-col justify-between rounded-sm border px-1.5 py-1 text-[10px]',
-                    hasAudio
-                      ? isSelected
-                        ? 'border-accent bg-accent-soft text-white'
-                        : 'border-border bg-bg-raised text-fg hover:border-border-strong'
-                      : isSelected
-                        ? 'border-accent bg-bg-deep text-fg-muted'
-                        : 'border-dashed border-border bg-bg-deep text-fg-dim hover:border-border-strong'
-                  )}
-                  style={{ width, minWidth: unrecordedWidth }}
-                >
-                  <div className="flex items-center gap-1">
-                    <span className="font-mono tabular-nums opacity-70">{idx + 1}</span>
-                    <span className="truncate">{seg.text}</span>
-                  </div>
-                  <div className="flex items-center justify-between font-mono tabular-nums opacity-70">
-                    <span>{formatDuration(startMs)}</span>
-                    {hasAudio ? (
-                      <span>{formatDuration(current.durationMs)}</span>
-                    ) : (
-                      <span>未录制</span>
-                    )}
-                  </div>
-                </div>
-              )
-            })}
-          </div>
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={handleDragEnd}
+          >
+            <SortableContext items={order} strategy={horizontalListSortingStrategy}>
+              <div className="flex h-full items-stretch gap-0.5">
+                {order.map((id, idx) => (
+                  <TimelineClip key={id} id={id} idx={idx} startMs={startMsById.get(id) ?? 0} />
+                ))}
+              </div>
+            </SortableContext>
+          </DndContext>
         </div>
       </div>
     </div>
