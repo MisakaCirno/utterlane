@@ -50,7 +50,8 @@ export const zhCN = {
     help: 'Help',
     help_about: '关于 Utterlane',
     help_license: '许可证（MPL-2.0）',
-    help_homepage: '项目主页'
+    help_homepage: '项目主页',
+    help_open_logs: '打开日志目录'
   },
 
   welcome: {

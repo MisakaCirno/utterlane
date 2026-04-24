@@ -126,7 +126,13 @@ function buildMenus(
       items: [
         { kind: 'item', label: t('menu.help_about') },
         { kind: 'item', label: t('menu.help_license') },
-        { kind: 'item', label: t('menu.help_homepage') }
+        { kind: 'item', label: t('menu.help_homepage') },
+        { kind: 'separator' },
+        {
+          kind: 'item',
+          label: t('menu.help_open_logs'),
+          onSelect: () => void window.api.logs.openFolder()
+        }
       ]
     }
   ]

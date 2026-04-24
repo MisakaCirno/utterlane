@@ -25,6 +25,8 @@ const RECORDING_WRITE_TAKE = 'recording:write-take'
 const EXPORT_AUDIO_WAV = 'export:audio-wav'
 const EXPORT_SUBTITLES_SRT = 'export:subtitles-srt'
 
+const LOGS_OPEN_FOLDER = 'logs:open-folder'
+
 /** 与 main 的 OpenResult 保持同步；preload 不 import main 代码，所以在这里复述结构 */
 export type OpenResult =
   | { ok: true; bundle: ProjectBundle }
@@ -131,6 +133,11 @@ const api = {
     audioWav: (): Promise<ExportResult> => ipcRenderer.invoke(EXPORT_AUDIO_WAV),
     /** 弹保存对话框，按 order + selectedTakeId 生成 SRT 字幕 */
     subtitlesSrt: (): Promise<ExportResult> => ipcRenderer.invoke(EXPORT_SUBTITLES_SRT)
+  },
+
+  logs: {
+    /** 在系统文件管理器里打开日志目录。成功返回 null，失败返回错误文案。 */
+    openFolder: (): Promise<string | null> => ipcRenderer.invoke(LOGS_OPEN_FOLDER)
   }
 }
 

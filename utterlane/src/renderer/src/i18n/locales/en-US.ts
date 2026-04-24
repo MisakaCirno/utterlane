@@ -48,7 +48,8 @@ export const enUS: TranslationSchema = {
     help: 'Help',
     help_about: 'About Utterlane',
     help_license: 'License (MPL-2.0)',
-    help_homepage: 'Project Homepage'
+    help_homepage: 'Project Homepage',
+    help_open_logs: 'Open Logs Folder'
   },
 
   welcome: {

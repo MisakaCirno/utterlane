@@ -6,7 +6,12 @@ import { preferencesStore, registerPreferencesIpc } from './preferences'
 import { projectSession, registerProjectIpc } from './project-storage'
 import { registerRecordingIpc } from './recording'
 import { registerExportIpc } from './export'
+import { initLogger } from './logger'
+import { registerLogsIpc } from './logger/ipc'
 import type { WindowBounds } from '@shared/preferences'
+
+// 日志必须最早 init：后面任何模块的 log 调用、uncaughtException 捕获都依赖它
+initLogger()
 
 /** 窗口尺寸下限：低于此值 UI 会严重挤压，拒绝接受更小的持久化值 */
 const MIN_WINDOW_WIDTH = 900
@@ -123,6 +128,7 @@ app.whenReady().then(async () => {
   registerProjectIpc()
   registerRecordingIpc()
   registerExportIpc()
+  registerLogsIpc()
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
