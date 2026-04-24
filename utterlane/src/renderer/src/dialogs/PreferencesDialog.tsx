@@ -1,7 +1,7 @@
 import * as Dialog from '@radix-ui/react-dialog'
-import { X } from 'lucide-react'
+import { AlignCenter, AlignLeft, AlignRight, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import { DEFAULT_PREFERENCES, type DockThemeKey } from '@shared/preferences'
+import { DEFAULT_PREFERENCES, type DockThemeKey, type TextAlign } from '@shared/preferences'
 import { usePreferencesStore } from '@renderer/store/preferencesStore'
 import { themeRegistry } from '@renderer/shell/themes'
 import { cn } from '@renderer/lib/cn'
@@ -109,6 +109,25 @@ export function PreferencesDialog({
                   }))}
                 />
               </Row>
+
+              <Row label={t('preferences.label_segment_text_align')}>
+                <AlignPicker
+                  value={
+                    appearance.segmentTextAlign ?? DEFAULT_PREFERENCES.appearance!.segmentTextAlign!
+                  }
+                  onChange={(v) => update({ appearance: { segmentTextAlign: v } })}
+                />
+              </Row>
+
+              <Row label={t('preferences.label_inspector_text_align')}>
+                <AlignPicker
+                  value={
+                    appearance.inspectorTextAlign ??
+                    DEFAULT_PREFERENCES.appearance!.inspectorTextAlign!
+                  }
+                  onChange={(v) => update({ appearance: { inspectorTextAlign: v } })}
+                />
+              </Row>
             </Section>
 
             <Section title={t('preferences.section_project_defaults')}>
@@ -161,6 +180,45 @@ function Row({ label, children }: { label: string; children: React.ReactNode }):
     <div className="flex items-center gap-3">
       <div className="w-24 shrink-0 text-right text-2xs text-fg-muted">{label}</div>
       <div className="flex-1">{children}</div>
+    </div>
+  )
+}
+
+/**
+ * 三按钮组：左 / 中 / 右对齐。active 的那一个用 accent 背景高亮。
+ * 比 Select 更直观——按钮里的图标就是对齐效果本身。
+ */
+function AlignPicker({
+  value,
+  onChange
+}: {
+  value: TextAlign
+  onChange: (v: TextAlign) => void
+}): React.JSX.Element {
+  const items: Array<{ value: TextAlign; icon: React.ReactNode }> = [
+    { value: 'left', icon: <AlignLeft size={12} /> },
+    { value: 'center', icon: <AlignCenter size={12} /> },
+    { value: 'right', icon: <AlignRight size={12} /> }
+  ]
+  return (
+    <div className="flex gap-1">
+      {items.map((it) => {
+        const isCurrent = it.value === value
+        return (
+          <button
+            key={it.value}
+            onClick={() => onChange(it.value)}
+            className={cn(
+              'flex h-6 flex-1 items-center justify-center rounded-sm border',
+              isCurrent
+                ? 'border-accent bg-accent text-white'
+                : 'border-border bg-bg-raised text-fg-muted hover:border-border-strong hover:text-fg'
+            )}
+          >
+            {it.icon}
+          </button>
+        )
+      })}
     </div>
   )
 }

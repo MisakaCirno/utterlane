@@ -220,6 +220,8 @@ export const enUS: TranslationSchema = {
     label_dock_theme: 'Dock theme',
     label_font_scale: 'Font scale',
     label_language: 'Language',
+    label_segment_text_align: 'Segment Timeline alignment',
+    label_inspector_text_align: 'Inspector alignment',
     label_sample_rate: 'Default sample rate',
     label_channels: 'Default channels',
     font_scale_small: 'Compact',

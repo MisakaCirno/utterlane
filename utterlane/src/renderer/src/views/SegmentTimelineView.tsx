@@ -12,7 +12,13 @@ import {
 } from 'lucide-react'
 import { cn } from '@renderer/lib/cn'
 import { useEditorStore } from '@renderer/store/editorStore'
+import { usePreferencesStore } from '@renderer/store/preferencesStore'
 import { WaveformView } from '@renderer/components/WaveformView'
+import { DEFAULT_PREFERENCES, type TextAlign } from '@shared/preferences'
+
+function alignClass(align: TextAlign): string {
+  return align === 'center' ? 'text-center' : align === 'right' ? 'text-right' : 'text-left'
+}
 
 /**
  * SegmentTimelineView — 当前选中 Segment 的「细节 + 时间轴」面板。
@@ -202,6 +208,9 @@ function SegmentTextEditor(): React.JSX.Element {
     s.selectedSegmentId ? (s.segmentsById[s.selectedSegmentId]?.text ?? '') : ''
   )
   const editSegmentText = useEditorStore((s) => s.editSegmentText)
+  const align = usePreferencesStore(
+    (s) => s.prefs.appearance?.segmentTextAlign ?? DEFAULT_PREFERENCES.appearance!.segmentTextAlign!
+  )
 
   return (
     <div className="shrink-0 border-b border-border-subtle bg-bg px-3 py-2">
@@ -211,9 +220,10 @@ function SegmentTextEditor(): React.JSX.Element {
         onChange={(e) => selectedId && editSegmentText(selectedId, e.target.value)}
         placeholder={t('timeline.segment_text_placeholder')}
         className={cn(
-          'w-full resize-none rounded-sm border border-border bg-bg-deep px-2 py-1 text-center',
+          'w-full resize-none rounded-sm border border-border bg-bg-deep px-2 py-1',
           'text-xs leading-5 outline-none focus:border-accent',
-          'disabled:cursor-not-allowed disabled:opacity-60'
+          'disabled:cursor-not-allowed disabled:opacity-60',
+          alignClass(align)
         )}
         rows={2}
       />

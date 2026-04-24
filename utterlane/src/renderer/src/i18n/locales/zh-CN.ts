@@ -220,6 +220,8 @@ export const zhCN = {
     label_dock_theme: 'Dock 主题',
     label_font_scale: '字体缩放',
     label_language: '界面语言',
+    label_segment_text_align: 'Segment Timeline 文案对齐',
+    label_inspector_text_align: 'Inspector 文案对齐',
     label_sample_rate: '默认采样率',
     label_channels: '默认声道',
     font_scale_small: '紧凑',

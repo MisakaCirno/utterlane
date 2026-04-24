@@ -3,10 +3,16 @@ import { Play, Square, Mic, RotateCcw, Trash2, Check, Circle } from 'lucide-reac
 import { useTranslation } from 'react-i18next'
 import { cn } from '@renderer/lib/cn'
 import { useEditorStore } from '@renderer/store/editorStore'
+import { usePreferencesStore } from '@renderer/store/preferencesStore'
 import { confirm } from '@renderer/store/confirmStore'
 import { formatDuration } from '@renderer/lib/format'
 import { Field } from '@renderer/components/Field'
 import { subscribeLevel } from '@renderer/services/recorder'
+import { DEFAULT_PREFERENCES, type TextAlign } from '@shared/preferences'
+
+function alignClass(align: TextAlign): string {
+  return align === 'center' ? 'text-center' : align === 'right' ? 'text-right' : 'text-left'
+}
 
 /**
  * 输入电平条。订阅 recorder.subscribeLevel 获取实时 RMS，
@@ -104,6 +110,10 @@ export function InspectorView(): React.JSX.Element {
   const cancelRecording = useEditorStore((s) => s.cancelRecording)
   const playCurrentSegment = useEditorStore((s) => s.playCurrentSegment)
   const stopPlayback = useEditorStore((s) => s.stopPlayback)
+  const textAlign = usePreferencesStore(
+    (s) =>
+      s.prefs.appearance?.inspectorTextAlign ?? DEFAULT_PREFERENCES.appearance!.inspectorTextAlign!
+  )
 
   if (!segment || !selectedId) {
     return (
@@ -144,7 +154,8 @@ export function InspectorView(): React.JSX.Element {
             onChange={(e) => editSegmentText(selectedId, e.target.value)}
             className={cn(
               'w-full resize-none rounded-sm border border-border bg-bg-deep px-2 py-1',
-              'text-xs leading-5 outline-none focus:border-accent'
+              'text-xs leading-5 outline-none focus:border-accent',
+              alignClass(textAlign)
             )}
             rows={3}
           />

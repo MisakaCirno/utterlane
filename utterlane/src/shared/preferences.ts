@@ -21,6 +21,8 @@ export type DockThemeKey =
   | 'replit'
   | 'lightSpaced'
 
+export type TextAlign = 'left' | 'center' | 'right'
+
 export type WindowBounds = {
   width?: number
   height?: number
@@ -44,6 +46,10 @@ export type AppPreferences = {
     /** 字体缩放倍率，1 = 默认；预留给后续字号系统 */
     fontScale?: number
     locale?: 'zh-CN' | 'en-US'
+    /** Segment Timeline 里文案编辑框的对齐方式（默认居中，适合展示） */
+    segmentTextAlign?: TextAlign
+    /** Inspector 里文案编辑框的对齐方式（默认左对齐，适合长文本编辑） */
+    inspectorTextAlign?: TextAlign
   }
 
   layout?: {
@@ -72,7 +78,9 @@ export const DEFAULT_PREFERENCES: AppPreferences = {
   appearance: {
     dockTheme: 'dark',
     fontScale: 1,
-    locale: 'zh-CN'
+    locale: 'zh-CN',
+    segmentTextAlign: 'center',
+    inspectorTextAlign: 'left'
   },
   projectDefaults: {
     sampleRate: 48000,
