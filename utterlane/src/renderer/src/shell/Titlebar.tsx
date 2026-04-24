@@ -6,6 +6,7 @@ import { useEditorStore } from '@renderer/store/editorStore'
 import { usePreferencesStore } from '@renderer/store/preferencesStore'
 import { DEFAULT_PREFERENCES, type DockThemeKey } from '@shared/preferences'
 import { closeCurrentProject, newProject, openProject } from '@renderer/actions/project'
+import { useDialogStore } from '@renderer/store/dialogStore'
 import { themeRegistry } from './themes'
 
 type MenuItem =
@@ -24,7 +25,8 @@ type MenuDef = { label: string; items: MenuItem[] }
 function buildMenus(
   themeKey: DockThemeKey,
   setTheme: (key: DockThemeKey) => void,
-  hasProject: boolean
+  hasProject: boolean,
+  openImportScript: () => void
 ): MenuDef[] {
   return [
     {
@@ -41,7 +43,12 @@ function buildMenus(
         { kind: 'separator' },
         { kind: 'item', label: 'Save', shortcut: 'Ctrl+S', disabled: !hasProject },
         { kind: 'separator' },
-        { kind: 'item', label: 'Import Script…', disabled: !hasProject },
+        {
+          kind: 'item',
+          label: 'Import Script…',
+          disabled: !hasProject,
+          onSelect: openImportScript
+        },
         {
           kind: 'submenu',
           label: 'Export',
@@ -220,6 +227,7 @@ export function Titlebar(): React.JSX.Element {
     (s) => s.prefs.appearance?.dockTheme ?? DEFAULT_PREFERENCES.appearance!.dockTheme!
   )
   const updatePrefs = usePreferencesStore((s) => s.update)
+  const openImportScript = useDialogStore((s) => s.openImportScript)
   const [maximized, setMaximized] = useState(false)
 
   const hasProject = project !== null
@@ -228,8 +236,13 @@ export function Titlebar(): React.JSX.Element {
   // 主进程广播后 store 自动刷新，从而驱动下次重建，形成闭环。
   const menus = useMemo(
     () =>
-      buildMenus(themeKey, (key) => updatePrefs({ appearance: { dockTheme: key } }), hasProject),
-    [themeKey, updatePrefs, hasProject]
+      buildMenus(
+        themeKey,
+        (key) => updatePrefs({ appearance: { dockTheme: key } }),
+        hasProject,
+        openImportScript
+      ),
+    [themeKey, updatePrefs, hasProject, openImportScript]
   )
 
   useEffect(() => {

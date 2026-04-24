@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 import type { AppPreferences } from '@shared/preferences'
-import type { ProjectBundle, WorkspaceFile } from '@shared/project'
+import type { ProjectBundle, SegmentsFile, WorkspaceFile } from '@shared/project'
 
 // IPC 通道名需要和 main 侧保持一致。
 // 这里复制字面量而不是 import 主进程的常量，是因为 preload 打包时
@@ -16,12 +16,16 @@ const PROJECT_OPEN_PATH = 'project:open-path'
 const PROJECT_CLOSE = 'project:close'
 const PROJECT_CURRENT = 'project:current'
 const PROJECT_SAVE_WORKSPACE = 'project:save-workspace'
+const PROJECT_SAVE_SEGMENTS = 'project:save-segments'
 
 /** 与 main 的 OpenResult 保持同步；preload 不 import main 代码，所以在这里复述结构 */
 export type OpenResult =
   | { ok: true; bundle: ProjectBundle }
   | { ok: false; reason: 'busy'; heldByPid: number }
   | { ok: false; reason: 'invalid'; message: string }
+
+/** 与 main 的 SaveSegmentsResult 保持同步 */
+export type SaveSegmentsResult = { ok: true } | { ok: false; message: string }
 
 const api = {
   window: {
@@ -74,7 +78,14 @@ const api = {
     getCurrent: (): Promise<string | null> => ipcRenderer.invoke(PROJECT_CURRENT),
 
     /** 上报整份 workspace 状态给 main 做 debounce 保存 */
-    saveWorkspace: (next: WorkspaceFile): void => ipcRenderer.send(PROJECT_SAVE_WORKSPACE, next)
+    saveWorkspace: (next: WorkspaceFile): void => ipcRenderer.send(PROJECT_SAVE_WORKSPACE, next),
+
+    /**
+     * 立即保存 segments.json。等 main 写盘成功 / 失败后才返回，
+     * renderer 据此切换 saved 标记、在失败时提示用户。
+     */
+    saveSegments: (next: SegmentsFile): Promise<SaveSegmentsResult> =>
+      ipcRenderer.invoke(PROJECT_SAVE_SEGMENTS, next)
   }
 }
 

@@ -1,12 +1,18 @@
 import { basename } from 'path'
 import { randomUUID } from 'crypto'
-import { makeNewProjectFile, type ProjectBundle, type WorkspaceFile } from '@shared/project'
+import {
+  makeNewProjectFile,
+  type ProjectBundle,
+  type SegmentsFile,
+  type WorkspaceFile
+} from '@shared/project'
 import { preferencesStore } from '../preferences'
 import {
   loadProjectFile,
   loadSegmentsFile,
   loadWorkspaceFile,
   ProjectFileError,
+  saveSegmentsFile,
   saveWorkspaceFile,
   writeProjectSkeleton
 } from './io'
@@ -132,6 +138,23 @@ class ProjectSession {
       this.workspaceSaveTimer = null
       void this.flushWorkspace()
     }, WORKSPACE_SAVE_DEBOUNCE_MS)
+  }
+
+  /**
+   * 保存 segments.json。
+   *
+   * segments.json 属于工程内容，每次变更都要立即落盘——不做 debounce，
+   * 避免用户编辑文本 / 重排 / 新增 Take 后立即崩溃导致数据丢失。
+   * renderer 侧如果短时间内多次触发（例如连续打字），可以自行在 editorStore
+   * 中做 debounce；到达这里的每一次调用都会直接原子写入。
+   *
+   * 返回 Promise 以便调用方（IPC handler）能把成功 / 失败反馈给 renderer。
+   */
+  async saveSegments(file: SegmentsFile): Promise<void> {
+    if (!this.currentPath) {
+      throw new Error('没有活动工程，无法保存 segments.json')
+    }
+    await saveSegmentsFile(this.currentPath, file)
   }
 
   async flushWorkspace(): Promise<void> {

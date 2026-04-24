@@ -1,6 +1,6 @@
 import { BrowserWindow, dialog, ipcMain } from 'electron'
 import { promises as fs } from 'fs'
-import type { WorkspaceFile } from '@shared/project'
+import type { SegmentsFile, WorkspaceFile } from '@shared/project'
 import { projectSession, type OpenResult } from './session'
 import { projectPaths } from './paths'
 
@@ -13,8 +13,12 @@ export const PROJECT_IPC = {
   openPath: 'project:open-path',
   close: 'project:close',
   current: 'project:current',
-  saveWorkspace: 'project:save-workspace'
+  saveWorkspace: 'project:save-workspace',
+  saveSegments: 'project:save-segments'
 } as const
+
+/** saveSegments 的 IPC 返回值；renderer 侧据此切换 saved 标记。 */
+export type SaveSegmentsResult = { ok: true } | { ok: false; message: string }
 
 async function isDirEmpty(dir: string): Promise<boolean> {
   try {
@@ -104,4 +108,21 @@ export function registerProjectIpc(): void {
   ipcMain.on(PROJECT_IPC.saveWorkspace, (_e, next: WorkspaceFile) => {
     projectSession.scheduleWorkspaceSave(next)
   })
+
+  /**
+   * segments.json 保存：立即原子写。renderer 等 result 回来后更新 saved 标记。
+   * 任何写入失败都返回 message 给 renderer，让用户有明确反馈——
+   * 工程内容丢失风险最高，宁可让用户看到错误，也不静默。
+   */
+  ipcMain.handle(
+    PROJECT_IPC.saveSegments,
+    async (_e, next: SegmentsFile): Promise<SaveSegmentsResult> => {
+      try {
+        await projectSession.saveSegments(next)
+        return { ok: true }
+      } catch (err) {
+        return { ok: false, message: (err as Error).message }
+      }
+    }
+  )
 }

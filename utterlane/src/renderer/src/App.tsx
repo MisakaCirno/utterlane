@@ -3,13 +3,17 @@ import { Titlebar } from './shell/Titlebar'
 import { StatusBar } from './shell/StatusBar'
 import { Workspace } from './shell/Workspace'
 import { WelcomeView } from './views/WelcomeView'
+import { ImportScriptDialog } from './dialogs/ImportScriptDialog'
 import { useEditorStore } from './store/editorStore'
 import { connectPreferencesStore, usePreferencesStore } from './store/preferencesStore'
+import { useDialogStore } from './store/dialogStore'
 import { openProjectPath } from './actions/project'
 
 function App(): React.JSX.Element {
   const hasProject = useEditorStore((s) => s.project !== null)
   const hydrated = usePreferencesStore((s) => s.hydrated)
+  const importScriptOpen = useDialogStore((s) => s.importScriptOpen)
+  const closeImportScript = useDialogStore((s) => s.closeImportScript)
 
   // 启动时：
   //   1. 拉取偏好并订阅变更
@@ -38,6 +42,10 @@ function App(): React.JSX.Element {
       <Titlebar />
       {!hydrated ? <div className="flex-1 bg-bg" /> : hasProject ? <Workspace /> : <WelcomeView />}
       <StatusBar />
+      <ImportScriptDialog
+        open={importScriptOpen}
+        onOpenChange={(open) => !open && closeImportScript()}
+      />
     </div>
   )
 }

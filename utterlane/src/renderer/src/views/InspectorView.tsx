@@ -42,7 +42,10 @@ export function InspectorView(): React.JSX.Element {
   const segment = useEditorStore((s) =>
     s.selectedSegmentId ? s.segmentsById[s.selectedSegmentId] : undefined
   )
+  const editSegmentText = useEditorStore((s) => s.editSegmentText)
+  const deleteSegment = useEditorStore((s) => s.deleteSegment)
   const setSelectedTake = useEditorStore((s) => s.setSelectedTake)
+  const deleteTake = useEditorStore((s) => s.deleteTake)
 
   if (!segment || !selectedId) {
     return (
@@ -53,6 +56,11 @@ export function InspectorView(): React.JSX.Element {
   }
 
   const index = order.indexOf(selectedId)
+
+  const onDeleteSegment = (): void => {
+    const confirmed = window.confirm(`确定删除这条 Segment 吗？\n"${segment.text}"`)
+    if (confirmed) deleteSegment(selectedId)
+  }
 
   return (
     <div className="flex h-full flex-col bg-bg">
@@ -65,7 +73,7 @@ export function InspectorView(): React.JSX.Element {
         <Field label="文案">
           <textarea
             value={segment.text}
-            readOnly
+            onChange={(e) => editSegmentText(selectedId, e.target.value)}
             className={cn(
               'w-full resize-none rounded-sm border border-border bg-bg-deep px-2 py-1',
               'text-xs leading-5 outline-none focus:border-accent'
@@ -92,6 +100,11 @@ export function InspectorView(): React.JSX.Element {
         <ToolbarButton disabled={!segment.selectedTakeId}>
           <RotateCcw size={11} />
           重录
+        </ToolbarButton>
+        <div className="ml-auto" />
+        <ToolbarButton danger onClick={onDeleteSegment}>
+          <Trash2 size={11} />
+          删除 Segment
         </ToolbarButton>
       </div>
 
@@ -140,7 +153,11 @@ export function InspectorView(): React.JSX.Element {
                 >
                   {isCurrent ? '当前' : '设为当前'}
                 </button>
-                <button className="rounded-sm p-1 text-fg-muted hover:bg-bg-raised hover:text-rec">
+                <button
+                  onClick={() => deleteTake(selectedId, take.id)}
+                  className="rounded-sm p-1 text-fg-muted hover:bg-bg-raised hover:text-rec"
+                  aria-label="删除 Take"
+                >
                   <Trash2 size={11} />
                 </button>
               </div>
