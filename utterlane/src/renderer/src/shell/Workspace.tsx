@@ -8,6 +8,7 @@ import { usePreferencesStore } from '@renderer/store/preferencesStore'
 import { DEFAULT_PREFERENCES } from '@shared/preferences'
 import { getThemeByKey } from './themes'
 import { applyDefaultLayout, setWorkspaceApi } from './workspaceHandle'
+import { DockTab } from './DockTab'
 
 const components: Record<string, React.FunctionComponent<IDockviewPanelProps>> = {
   segments: () => <SegmentsView />,
@@ -74,6 +75,7 @@ export function Workspace(): React.JSX.Element {
         className="h-full"
         theme={theme}
         components={components}
+        defaultTabComponent={DockTab}
         onReady={onWorkspaceReady}
         disableFloatingGroups
         disableDnd={false}

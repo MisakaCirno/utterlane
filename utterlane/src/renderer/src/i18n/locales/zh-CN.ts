@@ -200,6 +200,14 @@ export const zhCN = {
     kind_srt: 'SRT 字幕'
   },
 
+  tab_menu: {
+    header_position: 'Tab 栏位置',
+    position_top: '上方',
+    position_bottom: '下方',
+    position_left: '左侧',
+    position_right: '右侧'
+  },
+
   preferences: {
     menu_entry: '偏好设置…',
     title: '偏好设置',

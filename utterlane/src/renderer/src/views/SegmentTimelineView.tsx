@@ -211,7 +211,7 @@ function SegmentTextEditor(): React.JSX.Element {
         onChange={(e) => selectedId && editSegmentText(selectedId, e.target.value)}
         placeholder={t('timeline.segment_text_placeholder')}
         className={cn(
-          'w-full resize-none rounded-sm border border-border bg-bg-deep px-2 py-1',
+          'w-full resize-none rounded-sm border border-border bg-bg-deep px-2 py-1 text-center',
           'text-xs leading-5 outline-none focus:border-accent',
           'disabled:cursor-not-allowed disabled:opacity-60'
         )}

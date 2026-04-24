@@ -200,6 +200,14 @@ export const enUS: TranslationSchema = {
     kind_srt: 'SRT subtitles'
   },
 
+  tab_menu: {
+    header_position: 'Tab bar position',
+    position_top: 'Top',
+    position_bottom: 'Bottom',
+    position_left: 'Left',
+    position_right: 'Right'
+  },
+
   preferences: {
     menu_entry: 'Preferences…',
     title: 'Preferences',
