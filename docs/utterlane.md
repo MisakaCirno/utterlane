@@ -350,6 +350,32 @@ Take 是 Segment 下的一次录音尝试。
 * 整体风格以简约、清晰、功能性强为主
 * 可参考 Adobe AU、PR、AE，以及 VSCode 等软件的风格与配色
 
+### 欢迎页
+
+当应用启动时没有打开任何工程，主窗口显示欢迎页而不是编辑器。
+
+#### 触发条件
+
+* 首次启动（`preferences.json` 不存在或 `recentProjects` 为空）
+* 上次打开的工程路径失效（目录被用户删除 / 移动 / 重命名）
+* 用户主动从菜单关闭当前工程
+
+#### 内容
+
+* 软件 Logo 与版本号
+* 主要入口：新建工程 / 打开工程
+* 最近工程列表（来自 `preferences.json` 的 `recentProjects`）
+
+  * 显示工程名称与所在目录
+  * 点击条目直接打开
+  * 条目对应路径失效时以灰色显示并支持移除
+
+#### 行为
+
+* 打开工程后欢迎页被编辑器壳替换
+* 关闭工程（而非退出软件）时回到欢迎页
+* 欢迎页本身也使用自定义标题栏与状态栏，但不显示中部 dock 工作区
+
 ### 总体布局
 
 * 自定义标题栏固定（内含菜单栏）
@@ -597,6 +623,44 @@ Inspector 分为两个页面：
 
 ---
 
+## 应用启动与工程生命周期
+
+### 启动流程
+
+1. 读取 `preferences.json`（不存在则生成出厂默认）
+2. 根据 `recentProjects` 决定是否自动打开上次的工程
+
+   * 如果配置允许「启动时打开上次工程」且该路径仍然有效：直接进入编辑器
+   * 否则进入欢迎页
+3. 应用全局偏好（主题、字体缩放、语言、窗口位置）
+
+### 工程打开
+
+* 打开工程前先做路径校验：`project.json` 存在且可读
+* 校验通过后加载 `segments.json` 与 `workspace.json`
+* 加载完成前编辑器视图应显示 loading 占位
+* 将该路径移到 `recentProjects` 首位
+
+### 单实例锁
+
+* 同一工程只允许一个编辑器实例打开
+* 打开已被其他实例占用的工程时，应给出明确提示并拒绝打开
+* 实现方式建议：在工程目录下放置 lock 文件（包含进程 PID 与启动时间），打开工程时检测；应用异常退出后遗留的 lock 应能自动识别为失效
+* 单实例锁只针对单个工程，不限制同时打开多个不同工程（若后续支持多工程窗口）
+
+### 工程关闭
+
+* 先执行挂起中的保存任务
+* 再释放 lock 文件
+* 回到欢迎页（而不是退出应用）
+
+### 退出应用
+
+* 依次关闭所有已打开工程，按上述「工程关闭」流程处理
+* 最后落盘 `preferences.json`
+
+---
+
 ## 用户使用流程
 
 1. 用户创建一个新项目，输入项目的基本信息（如项目名称、音频设置等）。
@@ -637,6 +701,20 @@ type Segment = {
   selectedTakeId?: string;
 }
 ```
+
+### 存储层级
+
+Utterlane 的持久化数据分为三个层级，承担不同职责：
+
+* **App 偏好**（`preferences.json`）：跨工程共享的全局偏好，跟「用户」走，不跟「工程」走
+* **Project 内容**（`project.json` / `segments.json` / `audios/`）：工程的核心内容，决定导出结果
+* **Project 工作区**（`workspace.json`）：当前工程的临时上下文，丢掉不影响工程内容与导出结果
+
+判断规则：
+
+* 如果删掉这份数据会改变导出结果 → 属于 Project 内容
+* 如果一份数据「换一个工程打开后用户仍希望它生效」→ 属于 App 偏好
+* 如果一份数据只在「当前工程里做到哪了」的意义上有用 → 属于 Project 工作区
 
 ### 存储数据结构
 
@@ -695,6 +773,8 @@ type ProjectFile = {
 
 #### `Workspace`
 
+仅承载「当前工程的上下文位置」，不承载任何「软件使用习惯」。
+
 ```typescript
 type WorkspaceFile = {
   /** 模式版本 */
@@ -702,38 +782,16 @@ type WorkspaceFile = {
 
   /** 当前选中的 Segment ID */
   selectedSegmentId?: string;
+  /** 当前选中的 Take ID（在所选 Segment 内） */
+  lastPreviewedTakeId?: string;
 
   /** 脚本列表滚动位置 */
   scriptListScrollTop?: number;
-  /** Segments 视图各列宽度 */
-  segmentsColumnWidths?: {
-    order?: number;
-    status?: number;
-    takes?: number;
-    duration?: number;
-  };
 
   /** 时间轴滚动位置 */
   timelineScrollLeft?: number;
   /** 时间轴缩放比例 */
   timelineZoom?: number;
-
-  /** 有限 dock 布局状态 */
-  dockLayout?: unknown;
-
-  /** 窗口信息 */
-  window?: {
-    /** 窗口宽度 */
-    width?: number;
-    /** 窗口高度 */
-    height?: number;
-    /** 窗口 X 坐标 */
-    x?: number;
-    /** 窗口 Y 坐标 */
-    y?: number;
-    /** 窗口是否最大化 */
-    maximized?: boolean;
-  };
 }
 ```
 
@@ -741,21 +799,96 @@ type WorkspaceFile = {
 
 * 删掉 `workspace.json` 不应影响工程内容本身
 * 会影响导出结果的内容不能放进 `workspace.json`
-* 有限 dock 布局状态属于 `workspace.json`，不属于工程内容
+* Dock 布局、列宽、窗口位置等跨工程共享的偏好不放 `workspace.json`，归 `preferences.json`
+
+#### `AppPreferences`
+
+跨工程共享的全局偏好，存放在操作系统的 user data 目录（Electron `app.getPath('userData')`）。
+
+```typescript
+type AppPreferencesFile = {
+  /** 模式版本 */
+  schemaVersion: number;
+
+  /** 界面外观 */
+  appearance?: {
+    /** Dock 主题 key */
+    dockTheme?: string;
+    /** 字体缩放倍率 */
+    fontScale?: number;
+    /** 界面语言 */
+    locale?: 'zh-CN' | 'en-US';
+  };
+
+  /** 工作区布局（跨工程共享） */
+  layout?: {
+    /** 有限 dock 布局状态 */
+    dockLayout?: unknown;
+    /** Segments 视图各列宽度 */
+    segmentsColumnWidths?: {
+      order?: number;
+      status?: number;
+      takes?: number;
+      duration?: number;
+    };
+  };
+
+  /** 窗口信息 */
+  window?: {
+    width?: number;
+    height?: number;
+    x?: number;
+    y?: number;
+    maximized?: boolean;
+  };
+
+  /** 新建工程时的默认音频设置 */
+  projectDefaults?: {
+    sampleRate?: number;
+    channels?: 1 | 2;
+  };
+
+  /** 最近打开的工程路径列表（绝对路径；按最近优先） */
+  recentProjects?: string[];
+}
+```
+
+边界原则：
+
+* `preferences.json` 丢失后应回落到出厂默认，不应影响任何工程内容
+* 不在 `preferences.json` 中保存与具体工程绑定的状态（比如当前选中的 Segment）
+* 删掉 `preferences.json` 相当于「恢复出厂设置」
 
 ---
 
 ## 项目目录结构
 
+工程本身的目录结构（跟着工程走）：
+
 ```text
 - `project.json`：存储项目元信息的文件
-- `workspace.json`：存储工作区信息的文件
+- `workspace.json`：存储当前工程工作区信息的文件（选中 Segment、滚动位置等）
 - `segments.json`：存储 Segment 和 Take 结构信息的文件
 - `audios`：存储音频文件的目录
   - `[Segment UUID]`：一个 Segment 对应一个目录
     - `[Take UUID].wav`：Segment 下的每个 Take 对应一个音频文件
 - `temp`：临时路径
 ```
+
+## 应用目录结构
+
+全局偏好目录（跟着用户走，不进任何工程目录）：
+
+```text
+Electron `app.getPath('userData')` 下：
+- `preferences.json`：App 级偏好（主题、布局、列宽、窗口位置、最近工程列表等）
+```
+
+不同平台该目录的实际位置：
+
+* Windows：`%APPDATA%\Utterlane\preferences.json`
+* macOS：`~/Library/Application Support/Utterlane/preferences.json`
+* Linux：`~/.config/Utterlane/preferences.json`
 
 ### 路径规则
 
@@ -806,10 +939,11 @@ type WorkspaceFile = {
 ### 核心原则
 
 * `project.json` 和 `segments.json` 必须原子写入
-* `workspace.json` 使用节流保存
+* `workspace.json` 和 `preferences.json` 使用节流保存
 * 录音和重录都先写到 `temp/`，成功后再转正
 * 工程内容改动后自动保存
 * 菜单栏保留 Save 作为手动触发入口
+* 三层存储（App 偏好 / Project 内容 / Project 工作区）之间互不影响：任一层写入失败不应导致另外两层状态丢失
 
 ### 保存触发
 
@@ -836,8 +970,15 @@ type WorkspaceFile = {
 * 切换当前选中 Segment
 * 滚动 Segment 列表
 * 缩放 / 滚动 Timeline
+
+#### 节流保存 `preferences.json`
+
 * 更新有限 dock 布局状态
-* 窗口移动 / 缩放
+* 调整 Segments 列宽
+* 切换 dock 主题 / 字体缩放 / 语言
+* 窗口移动 / 缩放 / 最大化状态变化
+* 修改新建工程默认音频设置
+* 打开 / 新建工程后更新 `recentProjects`
 
 ### 录音落盘
 
@@ -868,6 +1009,42 @@ type WorkspaceFile = {
 
 ---
 
+## 数据完整性与恢复
+
+### 录音中断
+
+* 录音过程中应用崩溃或强制退出后，`temp/` 里遗留的半截 WAV 直接丢弃
+* 不尝试拼接 / 恢复不完整的录音，因为重录一句的成本很低
+* 启动工程时统一清理 `temp/` 下所有遗留文件
+
+### 缺失的 Take 文件
+
+* 如果 `segments.json` 引用了某个 Take，但对应 WAV 文件在磁盘上不存在：
+
+  * 不自动删除 Take 记录，保留该 Take 为「缺失」状态
+  * 在 UI 上用明确的标识提示（比如缺失图标 + 文案提示）
+  * 允许用户手动指定任意一个 WAV 文件作为该 Take 的映射来源
+  * 选择的 WAV 会被复制到该 Take 的正式路径，Take 恢复可用
+* 导出前检查发现缺失 Take 时应明确提示
+
+### 孤儿 WAV 清理
+
+* 文件系统中存在但 `segments.json` 没有引用的 WAV 文件，视为孤儿
+* 不在主程序中自动删除（避免误删用户备份）
+* 提供一个独立的清理工具（或菜单入口）：
+
+  * 扫描 `audios/` 下所有 WAV，对照 `segments.json` 找出孤儿
+  * 列出孤儿文件，支持预览
+  * 用户可以选择：删除 / 保留 / 保存为某个 Segment 的某个 Take（走「缺失的 Take 文件」同一入口的反向流程）
+
+### JSON 文件损坏
+
+* 原子写入（先写临时文件再 rename）可最大程度避免半写入损坏
+* 启动时检测到 `project.json` 或 `segments.json` 解析失败时，应给出明确错误，不尝试静默回滚
+* `workspace.json` 或 `preferences.json` 损坏时可以安全回落到默认值
+
+---
+
 ## 开发顺序与里程碑
 
 ### 第零阶段：有限 dock 原型冻结
@@ -884,8 +1061,9 @@ type WorkspaceFile = {
 * 初始化 Electron + electron-vite + React + TypeScript 工程
 * 确认自定义标题栏方案与窗口基础行为
 * 搭建基础目录结构
-* 定义核心类型：Project / Segment / Take / Workspace
+* 定义核心类型：Project / Segment / Take / Workspace / AppPreferences
 * 实现 `project.json` / `segments.json` / `workspace.json` 的读写模块
+* 实现 `preferences.json` 的读写模块（独立于工程存储）
 
 ### 第二阶段：静态编辑器壳
 
@@ -999,5 +1177,15 @@ type WorkspaceFile = {
   * 实现方式建议：引入 `react-i18next`，将所有硬编码文案抽到 `zh-CN.json` / `en-US.json`
   * 菜单标签、状态栏文本、Inspector 字段名、错误提示均纳入翻译范围
   * 与字体缩放一样，放在静态 UI 壳稳定后作为独立一轮改造引入
+* Schema 版本迁移工具
+
+  * 开发阶段暂不考虑工程文件的跨版本迁移，所有 schema 变动当作 breaking change 处理
+  * 后续稳定后再开发一个独立的「工程文件升级工具」，负责高版本兼容低版本（或反之）的字段映射
+  * 不把迁移逻辑塞进主程序启动路径，以免影响正常打开流程
+* 平台打包与签名
+
+  * macOS notarization、`NSMicrophoneUsageDescription` 权限声明
+  * Windows 代码签名证书
+  * 首版功能闭环完成后再处理，不阻塞 MVP 开发
 
 ---
