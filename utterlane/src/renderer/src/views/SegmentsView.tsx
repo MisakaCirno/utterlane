@@ -15,6 +15,7 @@ import {
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { useEditorStore } from '@renderer/store/editorStore'
+import { usePreferencesStore } from '@renderer/store/preferencesStore'
 import { cn } from '@renderer/lib/cn'
 import { formatDuration } from '@renderer/lib/format'
 import { Circle, CircleCheck, Layers, GripVertical } from 'lucide-react'
@@ -57,6 +58,13 @@ const MIN_WIDTHS = {
   status: 64,
   takes: 40,
   duration: 64
+}
+
+const DEFAULT_WIDTHS: ColWidths = {
+  order: 44,
+  status: 80,
+  takes: 56,
+  duration: 80
 }
 
 function buildGridTemplate(w: ColWidths): string {
@@ -167,11 +175,18 @@ export function SegmentsView(): React.JSX.Element {
   const order = useEditorStore((s) => s.order)
   const reorderSegments = useEditorStore((s) => s.reorderSegments)
 
-  const [widths, setWidths] = useState<ColWidths>({
-    order: 44,
-    status: 80,
-    takes: 56,
-    duration: 80
+  // 初始列宽从 preferences 读，缺项回落默认。
+  // 拖拽过程用本地 state 做流畅回显（不走 IPC 每帧往返），松手时再写回 preferences。
+  // preferences 在运行期的外部变更（例如设置对话框重置）不会实时同步到这里——
+  // 场景极少，暂不值得为此加订阅副作用。
+  const [widths, setWidths] = useState<ColWidths>(() => {
+    const saved = usePreferencesStore.getState().prefs.layout?.segmentsColumnWidths
+    return {
+      order: saved?.order ?? DEFAULT_WIDTHS.order,
+      status: saved?.status ?? DEFAULT_WIDTHS.status,
+      takes: saved?.takes ?? DEFAULT_WIDTHS.takes,
+      duration: saved?.duration ?? DEFAULT_WIDTHS.duration
+    }
   })
   const gridStyle = { gridTemplateColumns: buildGridTemplate(widths) }
 
@@ -236,6 +251,12 @@ export function SegmentsView(): React.JSX.Element {
         document.body.style.cursor = ''
         window.removeEventListener('mousemove', onMove)
         window.removeEventListener('mouseup', onUp)
+        // 拖拽结束后把最终列宽写进 preferences。
+        // 用 setWidths((w) => w) 的 setter 拿到最新值，避免闭包里的 widths 是旧值。
+        setWidths((finalWidths) => {
+          usePreferencesStore.getState().update({ layout: { segmentsColumnWidths: finalWidths } })
+          return finalWidths
+        })
       }
 
       window.addEventListener('mousemove', onMove)
