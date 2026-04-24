@@ -6,6 +6,7 @@ import { useEditorStore } from '@renderer/store/editorStore'
 import { usePreferencesStore } from '@renderer/store/preferencesStore'
 import { DEFAULT_PREFERENCES, type DockThemeKey } from '@shared/preferences'
 import { closeCurrentProject, newProject, openProject } from '@renderer/actions/project'
+import { exportAudioWav, exportSubtitlesSrt } from '@renderer/actions/export'
 import { useDialogStore } from '@renderer/store/dialogStore'
 import { themeRegistry } from './themes'
 import { resetWorkspaceLayout } from './workspaceHandle'
@@ -54,8 +55,18 @@ function buildMenus(
           kind: 'submenu',
           label: 'Export',
           items: [
-            { kind: 'item', label: 'Export Audio (WAV)…', disabled: !hasProject },
-            { kind: 'item', label: 'Export Subtitles (SRT)…', disabled: !hasProject }
+            {
+              kind: 'item',
+              label: 'Export Audio (WAV)…',
+              disabled: !hasProject,
+              onSelect: exportAudioWav
+            },
+            {
+              kind: 'item',
+              label: 'Export Subtitles (SRT)…',
+              disabled: !hasProject,
+              onSelect: exportSubtitlesSrt
+            }
           ]
         },
         { kind: 'separator' },

@@ -21,6 +21,9 @@ const PROJECT_SAVE_SEGMENTS = 'project:save-segments'
 
 const RECORDING_WRITE_TAKE = 'recording:write-take'
 
+const EXPORT_AUDIO_WAV = 'export:audio-wav'
+const EXPORT_SUBTITLES_SRT = 'export:subtitles-srt'
+
 /** 与 main 的 OpenResult 保持同步；preload 不 import main 代码，所以在这里复述结构 */
 export type OpenResult =
   | { ok: true; bundle: ProjectBundle }
@@ -29,6 +32,11 @@ export type OpenResult =
 
 /** 与 main 的 SaveSegmentsResult 保持同步 */
 export type SaveSegmentsResult = { ok: true } | { ok: false; message: string }
+
+/** 与 main 的 ExportResult 保持同步 */
+export type ExportResult =
+  | { ok: true; filePath: string; skipped: number }
+  | { ok: false; message: string; canceled?: boolean }
 
 const api = {
   window: {
@@ -111,6 +119,13 @@ const api = {
      */
     writeTake: (segmentId: string, takeId: string, buffer: ArrayBuffer): Promise<WriteTakeResult> =>
       ipcRenderer.invoke(RECORDING_WRITE_TAKE, { segmentId, takeId, buffer })
+  },
+
+  export: {
+    /** 弹保存对话框，按 order + selectedTakeId 拼接所有 Take 到一个 WAV */
+    audioWav: (): Promise<ExportResult> => ipcRenderer.invoke(EXPORT_AUDIO_WAV),
+    /** 弹保存对话框，按 order + selectedTakeId 生成 SRT 字幕 */
+    subtitlesSrt: (): Promise<ExportResult> => ipcRenderer.invoke(EXPORT_SUBTITLES_SRT)
   }
 }
 

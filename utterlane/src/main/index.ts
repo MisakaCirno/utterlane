@@ -5,6 +5,7 @@ import icon from '../../resources/icon.png?asset'
 import { preferencesStore, registerPreferencesIpc } from './preferences'
 import { projectSession, registerProjectIpc } from './project-storage'
 import { registerRecordingIpc } from './recording'
+import { registerExportIpc } from './export'
 import type { WindowBounds } from '@shared/preferences'
 
 /** 窗口尺寸下限：低于此值 UI 会严重挤压，拒绝接受更小的持久化值 */
@@ -121,6 +122,7 @@ app.whenReady().then(async () => {
   registerPreferencesIpc()
   registerProjectIpc()
   registerRecordingIpc()
+  registerExportIpc()
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
