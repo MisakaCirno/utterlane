@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 import type { AppPreferences } from '@shared/preferences'
 import type { ProjectBundle, SegmentsFile, WorkspaceFile } from '@shared/project'
+import type { WriteTakeResult } from '@shared/recording'
 
 // IPC 通道名需要和 main 侧保持一致。
 // 这里复制字面量而不是 import 主进程的常量，是因为 preload 打包时
@@ -17,6 +18,8 @@ const PROJECT_CLOSE = 'project:close'
 const PROJECT_CURRENT = 'project:current'
 const PROJECT_SAVE_WORKSPACE = 'project:save-workspace'
 const PROJECT_SAVE_SEGMENTS = 'project:save-segments'
+
+const RECORDING_WRITE_TAKE = 'recording:write-take'
 
 /** 与 main 的 OpenResult 保持同步；preload 不 import main 代码，所以在这里复述结构 */
 export type OpenResult =
@@ -98,6 +101,16 @@ const api = {
      */
     saveSegments: (next: SegmentsFile): Promise<SaveSegmentsResult> =>
       ipcRenderer.invoke(PROJECT_SAVE_SEGMENTS, next)
+  },
+
+  recording: {
+    /**
+     * 把一段录好的 WAV 写进工程目录。
+     * 走 temp/<takeId>.wav → rename 到 audios/<segmentId>/<takeId>.wav，
+     * 返回相对路径方便直接塞进 Take.filePath。
+     */
+    writeTake: (segmentId: string, takeId: string, buffer: ArrayBuffer): Promise<WriteTakeResult> =>
+      ipcRenderer.invoke(RECORDING_WRITE_TAKE, { segmentId, takeId, buffer })
   }
 }
 

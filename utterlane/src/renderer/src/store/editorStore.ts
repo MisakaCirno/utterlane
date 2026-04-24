@@ -6,6 +6,7 @@ import {
   type WorkspaceFile
 } from '@shared/project'
 import type { PlaybackMode, Project, Segment } from '@renderer/types/project'
+import * as recorder from '@renderer/services/recorder'
 
 /**
  * 编辑器 store 承载「当前打开的工程」的全部内存状态。
@@ -40,6 +41,14 @@ type EditorState = {
   /** 磁盘上的 segments.json 是否和内存一致。UI 用来显示「已保存/未保存」提示 */
   saved: boolean
 
+  /**
+   * 当前录音会话的目标 Segment / Take ID。
+   * 录音期间即使用户切到别的 Segment，停止录音产生的 Take 仍然归属这个 Segment，
+   * 避免「录到一半点错」产生的归属错乱。
+   */
+  recordingSegmentId: string | null
+  recordingTakeId: string | null
+
   // 生命周期
   applyBundle: (bundle: ProjectBundle) => void
   clear: () => void
@@ -57,6 +66,13 @@ type EditorState = {
   reorderSegments: (nextOrder: string[]) => void
   setSelectedTake: (segmentId: string, takeId: string) => void
   deleteTake: (segmentId: string, takeId: string) => void
+
+  // 录音
+  startRecordingForSelected: () => Promise<void>
+  /** 重录：覆盖当前选中 Take 的音频文件，selectedTakeId 不变 */
+  startRerecordingSelected: () => Promise<void>
+  stopRecordingAndSave: () => Promise<void>
+  cancelRecording: () => Promise<void>
 }
 
 // ---------------------------------------------------------------------------
@@ -156,6 +172,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   playback: 'idle',
   saved: true,
+  recordingSegmentId: null,
+  recordingTakeId: null,
 
   applyBundle: (bundle) =>
     set({
@@ -169,7 +187,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       timelineScrollLeft: bundle.workspace.timelineScrollLeft ?? 0,
       timelineZoom: bundle.workspace.timelineZoom ?? 1,
       playback: 'idle',
-      saved: true
+      saved: true,
+      recordingSegmentId: null,
+      recordingTakeId: null
     }),
 
   clear: () => {
@@ -190,7 +210,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       timelineScrollLeft: 0,
       timelineZoom: 1,
       playback: 'idle',
-      saved: true
+      saved: true,
+      recordingSegmentId: null,
+      recordingTakeId: null
     })
   },
 
@@ -331,5 +353,127 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       }
     })
     scheduleSegmentsSave()
+  },
+
+  // -------- 录音 --------
+
+  /**
+   * 对当前选中 Segment 新增一个 Take。
+   * 要求：有活动工程 + 选中了某个 Segment + 当前不在录音 / 播放中。
+   * 失败时恢复 playback 为 idle，并用 alert 提示（后续换成 toast）。
+   */
+  startRecordingForSelected: async () => {
+    const state = get()
+    if (!state.project || !state.selectedSegmentId) return
+    if (state.playback !== 'idle') return
+
+    const segmentId = state.selectedSegmentId
+    const takeId = crypto.randomUUID()
+
+    set({ playback: 'recording', recordingSegmentId: segmentId, recordingTakeId: takeId })
+
+    try {
+      await recorder.startRecording({ channels: state.project.audio.channels })
+    } catch (err) {
+      set({ playback: 'idle', recordingSegmentId: null, recordingTakeId: null })
+      window.alert(`无法开始录音：${(err as Error).message}`)
+    }
+  },
+
+  /**
+   * 重录：沿用当前选中 Take 的 ID，录完后 writeTake 会原子覆盖同名文件，
+   * 新的 durationMs 会替换原记录，selectedTakeId 不变。
+   */
+  startRerecordingSelected: async () => {
+    const state = get()
+    if (!state.project || !state.selectedSegmentId) return
+    if (state.playback !== 'idle') return
+    const seg = state.segmentsById[state.selectedSegmentId]
+    if (!seg?.selectedTakeId) return
+
+    const segmentId = state.selectedSegmentId
+    const takeId = seg.selectedTakeId // 复用同 ID → writeTake 覆盖同文件
+
+    set({ playback: 'recording', recordingSegmentId: segmentId, recordingTakeId: takeId })
+
+    try {
+      await recorder.startRecording({ channels: state.project.audio.channels })
+    } catch (err) {
+      set({ playback: 'idle', recordingSegmentId: null, recordingTakeId: null })
+      window.alert(`无法开始录音：${(err as Error).message}`)
+    }
+  },
+
+  stopRecordingAndSave: async () => {
+    const state = get()
+    if (state.playback !== 'recording') return
+    const segmentId = state.recordingSegmentId
+    const takeId = state.recordingTakeId
+    if (!segmentId || !takeId) return
+
+    let result: { buffer: ArrayBuffer; durationMs: number }
+    try {
+      result = await recorder.stopRecording()
+    } catch (err) {
+      set({ playback: 'idle', recordingSegmentId: null, recordingTakeId: null })
+      window.alert(`停止录音失败：${(err as Error).message}`)
+      return
+    }
+
+    const writeRes = await window.api.recording.writeTake(segmentId, takeId, result.buffer)
+    if (!writeRes.ok) {
+      set({ playback: 'idle', recordingSegmentId: null, recordingTakeId: null })
+      window.alert(`录音落盘失败：${writeRes.message}`)
+      return
+    }
+
+    // 写盘成功后更新 segments：
+    //   - 如果 takeId 在 takes 里已经存在 → 重录：原地替换 durationMs（文件已被覆盖），selectedTakeId 不变
+    //   - 否则 → 新录：追加 Take，selectedTakeId 指向它
+    set((s) => {
+      const seg = s.segmentsById[segmentId]
+      if (!seg) return s
+      const existingIdx = seg.takes.findIndex((t) => t.id === takeId)
+      if (existingIdx >= 0) {
+        const nextTakes = seg.takes.slice()
+        nextTakes[existingIdx] = {
+          ...nextTakes[existingIdx],
+          filePath: writeRes.filePath,
+          durationMs: result.durationMs
+        }
+        return {
+          segmentsById: { ...s.segmentsById, [segmentId]: { ...seg, takes: nextTakes } },
+          playback: 'idle',
+          recordingSegmentId: null,
+          recordingTakeId: null,
+          ...markDirty()
+        }
+      }
+      return {
+        segmentsById: {
+          ...s.segmentsById,
+          [segmentId]: {
+            ...seg,
+            takes: [
+              ...seg.takes,
+              { id: takeId, filePath: writeRes.filePath, durationMs: result.durationMs }
+            ],
+            selectedTakeId: takeId
+          }
+        },
+        playback: 'idle',
+        recordingSegmentId: null,
+        recordingTakeId: null,
+        ...markDirty()
+      }
+    })
+    scheduleSegmentsSave()
+  },
+
+  cancelRecording: async () => {
+    const state = get()
+    if (state.playback !== 'recording') return
+    await recorder.cancelRecording().catch(() => {})
+    set({ playback: 'idle', recordingSegmentId: null, recordingTakeId: null })
   }
 }))

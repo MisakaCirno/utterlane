@@ -1,8 +1,54 @@
+import { useEffect, useState } from 'react'
 import { Play, Square, Mic, RotateCcw, Trash2, Check, Circle } from 'lucide-react'
 import { cn } from '@renderer/lib/cn'
 import { useEditorStore } from '@renderer/store/editorStore'
 import { formatDuration } from '@renderer/lib/format'
 import { Field } from '@renderer/components/Field'
+import { subscribeLevel } from '@renderer/services/recorder'
+
+/**
+ * 输入电平条。订阅 recorder.subscribeLevel 获取实时 RMS，
+ * 用 CSS transform scaleX 做条形指示；切 0.6 之上变黄、0.85 以上变红提示削波风险。
+ *
+ * RAF 节流：回调可能每 ~20ms 触发一次，靠 requestAnimationFrame 合并到下一帧渲染，
+ * 避免 React 高频重渲染。
+ */
+function LevelMeter(): React.JSX.Element {
+  const [level, setLevel] = useState(0)
+
+  useEffect(() => {
+    let pending = 0
+    let rafId: number | null = null
+    const flush = (): void => {
+      rafId = null
+      setLevel(pending)
+    }
+    const off = subscribeLevel((l) => {
+      pending = l
+      if (rafId === null) rafId = requestAnimationFrame(flush)
+    })
+    return () => {
+      off()
+      if (rafId !== null) cancelAnimationFrame(rafId)
+    }
+  }, [])
+
+  // 视觉范围扩大一下（RMS 普通讲话 0.05~0.2），0.5 ≈ 满刻度的 100%
+  const scaled = Math.min(1, level * 2)
+  const color = scaled > 0.85 ? 'bg-rec' : scaled > 0.6 ? 'bg-yellow-500' : 'bg-ok'
+
+  return (
+    <div className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2">
+      <span className="text-2xs text-fg-muted">电平</span>
+      <div className="relative h-2 flex-1 overflow-hidden rounded-sm bg-bg-deep">
+        <div
+          className={cn('h-full origin-left transition-[width] duration-75', color)}
+          style={{ width: `${Math.round(scaled * 100)}%` }}
+        />
+      </div>
+    </div>
+  )
+}
 
 function ToolbarButton({
   children,
@@ -46,6 +92,12 @@ export function InspectorView(): React.JSX.Element {
   const deleteSegment = useEditorStore((s) => s.deleteSegment)
   const setSelectedTake = useEditorStore((s) => s.setSelectedTake)
   const deleteTake = useEditorStore((s) => s.deleteTake)
+  const playback = useEditorStore((s) => s.playback)
+  const recordingSegmentId = useEditorStore((s) => s.recordingSegmentId)
+  const startRecording = useEditorStore((s) => s.startRecordingForSelected)
+  const startRerecording = useEditorStore((s) => s.startRerecordingSelected)
+  const stopRecording = useEditorStore((s) => s.stopRecordingAndSave)
+  const cancelRecording = useEditorStore((s) => s.cancelRecording)
 
   if (!segment || !selectedId) {
     return (
@@ -56,6 +108,11 @@ export function InspectorView(): React.JSX.Element {
   }
 
   const index = order.indexOf(selectedId)
+
+  // 只有这条 Segment 正在被录音时才把按钮切换成「停止 / 取消」；
+  // 其他 Segment 被录音时，当前这条按钮保持 idle 状态但整体 disabled
+  const isRecordingThis = playback === 'recording' && recordingSegmentId === selectedId
+  const isRecordingOther = playback === 'recording' && !isRecordingThis
 
   const onDeleteSegment = (): void => {
     const confirmed = window.confirm(`确定删除这条 Segment 吗？\n"${segment.text}"`)
@@ -84,29 +141,46 @@ export function InspectorView(): React.JSX.Element {
       </div>
 
       <div className="flex shrink-0 items-center gap-1 border-b border-border px-3 py-2">
-        <ToolbarButton>
+        <ToolbarButton disabled={isRecordingOther || isRecordingThis || !segment.selectedTakeId}>
           <Play size={11} />
           播放
         </ToolbarButton>
-        <ToolbarButton>
+        <ToolbarButton disabled={isRecordingOther || isRecordingThis}>
           <Square size={11} />
           停止
         </ToolbarButton>
         <div className="mx-1 h-4 w-px bg-border" />
-        <ToolbarButton>
-          <Mic size={11} />
-          录音
-        </ToolbarButton>
-        <ToolbarButton disabled={!segment.selectedTakeId}>
-          <RotateCcw size={11} />
-          重录
-        </ToolbarButton>
+        {isRecordingThis ? (
+          <>
+            <ToolbarButton active danger onClick={stopRecording}>
+              <Square size={11} />
+              停止录音
+            </ToolbarButton>
+            <ToolbarButton onClick={cancelRecording}>取消</ToolbarButton>
+          </>
+        ) : (
+          <>
+            <ToolbarButton onClick={startRecording} disabled={isRecordingOther}>
+              <Mic size={11} />
+              录音
+            </ToolbarButton>
+            <ToolbarButton
+              onClick={startRerecording}
+              disabled={isRecordingOther || !segment.selectedTakeId}
+            >
+              <RotateCcw size={11} />
+              重录
+            </ToolbarButton>
+          </>
+        )}
         <div className="ml-auto" />
-        <ToolbarButton danger onClick={onDeleteSegment}>
+        <ToolbarButton danger onClick={onDeleteSegment} disabled={isRecordingThis}>
           <Trash2 size={11} />
           删除 Segment
         </ToolbarButton>
       </div>
+
+      {isRecordingThis && <LevelMeter />}
 
       <div className="flex shrink-0 items-center justify-between border-b border-border px-3 py-1.5">
         <span className="text-2xs text-fg-muted">Takes</span>

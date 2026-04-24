@@ -74,8 +74,21 @@ function ControlBar(): React.JSX.Element {
   const segment = useEditorStore((s) =>
     s.selectedSegmentId ? s.segmentsById[s.selectedSegmentId] : undefined
   )
+  const selectedId = useEditorStore((s) => s.selectedSegmentId)
   const playback = useEditorStore((s) => s.playback)
+  const recordingSegmentId = useEditorStore((s) => s.recordingSegmentId)
+  const startRecording = useEditorStore((s) => s.startRecordingForSelected)
+  const startRerecording = useEditorStore((s) => s.startRerecordingSelected)
+  const stopRecording = useEditorStore((s) => s.stopRecordingAndSave)
   const takeCount = segment?.takes.length ?? 0
+
+  const isRecordingThis = playback === 'recording' && recordingSegmentId === selectedId
+  const isRecordingOther = playback === 'recording' && !isRecordingThis
+
+  const onRecordClick = (): void => {
+    if (isRecordingThis) void stopRecording()
+    else if (playback === 'idle') void startRecording()
+  }
 
   return (
     <div className="shrink-0 border-b border-border bg-bg-panel">
@@ -110,10 +123,20 @@ function ControlBar(): React.JSX.Element {
             <Square size={11} />
           </IconButton>
           <div className="mx-0.5 h-4 w-px bg-border" />
-          <IconButton title="录音" active={playback === 'recording'} danger>
-            <Mic size={12} />
+          <IconButton
+            title={isRecordingThis ? '停止录音' : '录音'}
+            active={isRecordingThis}
+            danger
+            disabled={isRecordingOther || !selectedId}
+            onClick={onRecordClick}
+          >
+            {isRecordingThis ? <Square size={11} /> : <Mic size={12} />}
           </IconButton>
-          <IconButton title="重录" disabled={!segment?.selectedTakeId}>
+          <IconButton
+            title="重录（覆盖当前 Take）"
+            disabled={isRecordingOther || isRecordingThis || !segment?.selectedTakeId}
+            onClick={() => void startRerecording()}
+          >
             <RotateCcw size={12} />
           </IconButton>
         </div>
