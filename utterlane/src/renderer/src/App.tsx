@@ -98,6 +98,12 @@ function App(): React.JSX.Element {
     <div className="flex h-full w-full flex-col overflow-hidden">
       <Titlebar />
       {!hydrated ? <div className="flex-1 bg-bg" /> : hasProject ? <Workspace /> : <WelcomeView />}
+      {/*
+        主内容与状态栏之间留 4px 深色带做视觉分隔——
+        不加的话 dockview panel 底部的滚动条 thumb（灰色）会和状态栏背景（灰色）
+        粘在一起。用 bg-bg-deep 是整套调色板里最深的灰，对比最明显。
+      */}
+      <div className="h-1 shrink-0 bg-bg-deep" />
       <StatusBar />
       <ImportScriptDialog
         open={importScriptOpen}
