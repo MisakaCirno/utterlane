@@ -83,6 +83,8 @@ function ControlBar(): React.JSX.Element {
   const playCurrentSegment = useEditorStore((s) => s.playCurrentSegment)
   const playProject = useEditorStore((s) => s.playProject)
   const stopPlayback = useEditorStore((s) => s.stopPlayback)
+  const togglePause = useEditorStore((s) => s.togglePausePlayback)
+  const paused = useEditorStore((s) => s.paused)
   const selectSegment = useEditorStore((s) => s.selectSegment)
   const order = useEditorStore((s) => s.order)
   const takeCount = segment?.takes.length ?? 0
@@ -166,10 +168,13 @@ function ControlBar(): React.JSX.Element {
           >
             {playback === 'segment' ? <Square size={11} /> : <Play size={12} />}
           </IconButton>
-          {/* 暂停：HTMLAudioElement 支持 pause，但我们的状态机目前只有 idle/segment/project
-              三态；pause 会引入「已暂停但未停止」的第四态，先占位禁用 */}
-          <IconButton title="暂停" disabled>
-            <Pause size={12} />
+          <IconButton
+            title={paused ? '继续' : '暂停'}
+            active={paused}
+            onClick={togglePause}
+            disabled={playback !== 'segment' && playback !== 'project'}
+          >
+            {paused ? <Play size={12} /> : <Pause size={12} />}
           </IconButton>
           <IconButton
             title="停止"
@@ -221,8 +226,13 @@ function ControlBar(): React.JSX.Element {
           >
             {playback === 'project' ? <Square size={11} /> : <Play size={12} />}
           </IconButton>
-          <IconButton title="暂停项目" disabled>
-            <Pause size={12} />
+          <IconButton
+            title={paused ? '继续项目' : '暂停项目'}
+            active={paused}
+            onClick={togglePause}
+            disabled={playback !== 'project'}
+          >
+            {paused ? <Play size={12} /> : <Pause size={12} />}
           </IconButton>
           <IconButton title="停止项目" onClick={stopPlayback} disabled={playback !== 'project'}>
             <Square size={11} />

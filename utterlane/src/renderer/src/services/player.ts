@@ -94,3 +94,21 @@ export async function playSequence(relativePaths: string[]): Promise<void> {
 export function isPlaying(): boolean {
   return currentAudio !== null
 }
+
+/**
+ * 暂停当前会话。调用后 audio 保持现位置；resume() 从原处继续。
+ * 无会话或已经 paused 则 no-op。
+ */
+export function pause(): void {
+  currentAudio?.pause()
+}
+
+/**
+ * 从暂停处继续。无会话则 no-op。
+ */
+export function resume(): void {
+  void currentAudio?.play().catch(() => {
+    // 极端情况下 HTMLAudio 可能拒绝 resume（切换设备 / Audio tab 休眠等）
+    // 这里吞掉错误；上层 playback 状态会在 ended / error 事件触发时修正
+  })
+}

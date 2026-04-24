@@ -46,11 +46,12 @@ export function installKeyboardShortcuts(): () => void {
       return
     }
 
-    // Space：播当前句 / 停止（常见 DAW 习惯）。Shift+Space：播项目
+    // Space：DAW 式 toggle。idle → 播当前句；播放中 → 暂停 / 继续
+    // Shift+Space：同样的逻辑作用于项目连读
     if (e.key === ' ' && !mod && !e.altKey) {
       e.preventDefault()
       if (state.playback === 'segment' || state.playback === 'project') {
-        state.stopPlayback()
+        state.togglePausePlayback()
       } else if (state.playback === 'idle') {
         if (e.shiftKey) void state.playProject()
         else void state.playCurrentSegment()

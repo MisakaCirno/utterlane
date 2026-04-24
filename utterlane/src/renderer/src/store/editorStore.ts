@@ -40,6 +40,13 @@ type EditorState = {
   timelineZoom: number
 
   playback: PlaybackMode
+  /**
+   * 是否处于暂停态。仅在 playback === 'segment' | 'project' 时有意义。
+   * 独立于 playback 的好处：stop / 切换 Segment 这类操作只需要改一个字段，
+   * 不用考虑「idle-paused」这种不存在的组合；UI 层按 (playback, paused) 元组
+   * 渲染按钮即可。
+   */
+  paused: boolean
   /** 磁盘上的 segments.json 是否和内存一致。UI 用来显示「已保存/未保存」提示 */
   saved: boolean
 
@@ -80,6 +87,7 @@ type EditorState = {
   playCurrentSegment: () => Promise<void>
   playProject: () => Promise<void>
   stopPlayback: () => void
+  togglePausePlayback: () => void
 }
 
 // ---------------------------------------------------------------------------
@@ -178,6 +186,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   timelineZoom: 1,
 
   playback: 'idle',
+  paused: false,
   saved: true,
   recordingSegmentId: null,
   recordingTakeId: null,
@@ -194,6 +203,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       timelineScrollLeft: bundle.workspace.timelineScrollLeft ?? 0,
       timelineZoom: bundle.workspace.timelineZoom ?? 1,
       playback: 'idle',
+      paused: false,
       saved: true,
       recordingSegmentId: null,
       recordingTakeId: null
@@ -217,6 +227,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       timelineScrollLeft: 0,
       timelineZoom: 1,
       playback: 'idle',
+      paused: false,
       saved: true,
       recordingSegmentId: null,
       recordingTakeId: null
@@ -499,13 +510,13 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const take = seg?.takes.find((t) => t.id === seg.selectedTakeId)
     if (!take) return
 
-    set({ playback: 'segment' })
+    set({ playback: 'segment', paused: false })
     try {
       await player.playFile(take.filePath)
     } finally {
       // 只有当 playback 还是我们这一轮设置的 'segment' 时才回落；
       // 如果期间被 playProject 接管，不覆盖它的状态
-      if (get().playback === 'segment') set({ playback: 'idle' })
+      if (get().playback === 'segment') set({ playback: 'idle', paused: false })
     }
   },
 
@@ -523,11 +534,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     }
     if (files.length === 0) return
 
-    set({ playback: 'project' })
+    set({ playback: 'project', paused: false })
     try {
       await player.playSequence(files)
     } finally {
-      if (get().playback === 'project') set({ playback: 'idle' })
+      if (get().playback === 'project') set({ playback: 'idle', paused: false })
     }
   },
 
@@ -535,7 +546,23 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const state = get()
     if (state.playback === 'segment' || state.playback === 'project') {
       player.stop()
-      // finally 分支会把 playback 重置为 idle
+      // finally 分支会把 playback 重置为 idle；paused 也一并清掉
+    }
+  },
+
+  /**
+   * 暂停 ↔ 恢复。仅在播放中有意义；idle / recording 时 no-op。
+   * 实际的音频暂停 / 恢复交给 player service；本函数只同步状态位。
+   */
+  togglePausePlayback: () => {
+    const state = get()
+    if (state.playback !== 'segment' && state.playback !== 'project') return
+    if (state.paused) {
+      player.resume()
+      set({ paused: false })
+    } else {
+      player.pause()
+      set({ paused: true })
     }
   }
 }))

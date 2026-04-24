@@ -6,6 +6,7 @@ export function StatusBar(): React.JSX.Element {
   const project = useEditorStore((s) => s.project)
   const saved = useEditorStore((s) => s.saved)
   const playback = useEditorStore((s) => s.playback)
+  const paused = useEditorStore((s) => s.paused)
   const order = useEditorStore((s) => s.order)
   const selectedId = useEditorStore((s) => s.selectedSegmentId)
   const segment = useEditorStore((s) =>
@@ -30,9 +31,13 @@ export function StatusBar(): React.JSX.Element {
     playback === 'recording'
       ? '正在录音'
       : playback === 'segment'
-        ? '正在播放当前句'
+        ? paused
+          ? '当前句已暂停'
+          : '正在播放当前句'
         : playback === 'project'
-          ? '正在播放项目'
+          ? paused
+            ? '项目已暂停'
+            : '正在播放项目'
           : takeCount === 0
             ? '未录制'
             : '已录制'
