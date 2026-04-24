@@ -77,20 +77,6 @@ export async function playFile(relativePath: string): Promise<void> {
   })
 }
 
-/**
- * 按序播放一组文件。stop() 会从当前段开始中止；未播到的段被跳过。
- */
-export async function playSequence(relativePaths: string[]): Promise<void> {
-  stop()
-  sequenceAborted = false
-  for (const path of relativePaths) {
-    if (sequenceAborted) return
-    await playFile(path)
-    // playFile 内部会清掉 sequenceAborted=false？不会；只有 stop 会设 true。
-    // 这里用它做循环守卫继续下一段。
-  }
-}
-
 export function isPlaying(): boolean {
   return currentAudio !== null
 }

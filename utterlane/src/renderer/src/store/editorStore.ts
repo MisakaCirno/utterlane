@@ -522,31 +522,45 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   /**
    * 连续播放工程里所有「有 selectedTakeId」的 Take。未录制的段自动跳过。
+   *
+   * 和 Slice D1 的实现不同：这里不再走 player.playSequence，而是把顺序循环
+   * 放在 store 里，每段开始前同步 selectedSegmentId。这样 UI 可以跟随
+   * 当前播放段高亮 + 自动滚动，也避免 player 层需要理解 segment 语义。
    */
   playProject: async () => {
     const state = get()
     if (state.playback !== 'idle') return
-    const files: string[] = []
+    const items: Array<{ segmentId: string; filePath: string }> = []
     for (const id of state.order) {
       const seg = state.segmentsById[id]
       const take = seg?.takes.find((t) => t.id === seg.selectedTakeId)
-      if (take) files.push(take.filePath)
+      if (take) items.push({ segmentId: id, filePath: take.filePath })
     }
-    if (files.length === 0) return
+    if (items.length === 0) return
 
     set({ playback: 'project', paused: false })
     try {
-      await player.playSequence(files)
+      for (const item of items) {
+        // stopPlayback 会立刻把 playback 切到 idle，循环这里读一次就退出
+        if (get().playback !== 'project') break
+        set({ selectedSegmentId: item.segmentId })
+        pushWorkspace(get())
+        await player.playFile(item.filePath)
+      }
     } finally {
       if (get().playback === 'project') set({ playback: 'idle', paused: false })
     }
   },
 
+  /**
+   * 停止播放。直接把 playback 切回 idle（不等 playFile 的 finally），
+   * 这样 playProject 循环能立刻看到状态变化并退出，不会多播一段。
+   */
   stopPlayback: () => {
     const state = get()
     if (state.playback === 'segment' || state.playback === 'project') {
       player.stop()
-      // finally 分支会把 playback 重置为 idle；paused 也一并清掉
+      set({ playback: 'idle', paused: false })
     }
   },
 

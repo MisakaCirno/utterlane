@@ -25,6 +25,7 @@ import {
   useSortable
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
+import { useEffect, useRef } from 'react'
 import { cn } from '@renderer/lib/cn'
 import { useEditorStore } from '@renderer/store/editorStore'
 import { formatDuration } from '@renderer/lib/format'
@@ -267,6 +268,20 @@ function TimelineClip({
     id
   })
 
+  // 合并 dnd-kit ref 与自己的 ref：后者用于选中时横向滚到可见位置
+  const clipElementRef = useRef<HTMLDivElement | null>(null)
+  const combinedRef = (el: HTMLDivElement | null): void => {
+    clipElementRef.current = el
+    setNodeRef(el)
+  }
+
+  useEffect(() => {
+    if (isSelected && clipElementRef.current) {
+      // inline: 'nearest' 保证元素已经可见时不滚；timeline 是横向滚动，block 不重要
+      clipElementRef.current.scrollIntoView({ inline: 'nearest', block: 'nearest' })
+    }
+  }, [isSelected])
+
   if (!seg) return null
   const current = seg.takes.find((t) => t.id === seg.selectedTakeId)
   const hasAudio = !!current
@@ -282,7 +297,7 @@ function TimelineClip({
 
   return (
     <div
-      ref={setNodeRef}
+      ref={combinedRef}
       {...attributes}
       {...listeners}
       onClick={() => selectSegment(id)}

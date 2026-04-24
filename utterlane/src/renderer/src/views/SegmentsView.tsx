@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   DndContext,
   PointerSensor,
@@ -134,6 +134,22 @@ function SegmentRow({
     id
   })
 
+  // 合并 dnd-kit 的 ref 和自己的 ref：前者要求受控于 setNodeRef，
+  // 后者用于 scrollIntoView。callback ref 同时喂给两边。
+  const rowElementRef = useRef<HTMLDivElement | null>(null)
+  const combinedRef = (el: HTMLDivElement | null): void => {
+    rowElementRef.current = el
+    setNodeRef(el)
+  }
+
+  // 选中变化时把自己滚动到可见区域。block: 'nearest' 保证元素已经可见时不滚，
+  // 这样用户手动滚到某处然后点其他行不会被意外拉回。
+  useEffect(() => {
+    if (selected && rowElementRef.current) {
+      rowElementRef.current.scrollIntoView({ block: 'nearest' })
+    }
+  }, [selected])
+
   if (!seg) return null
   const current = seg.takes.find((t) => t.id === seg.selectedTakeId)
   const duration = current?.durationMs ?? 0
@@ -149,7 +165,7 @@ function SegmentRow({
 
   return (
     <div
-      ref={setNodeRef}
+      ref={combinedRef}
       onClick={() => selectSegment(id)}
       style={style}
       className={cn(
