@@ -172,4 +172,6 @@ async function teardown(session: RecordingSession): Promise<void> {
   // 关闭流与 AudioContext；不关会让麦克风指示灯一直亮
   for (const track of session.stream.getTracks()) track.stop()
   await session.context.close()
+  // UI 归零：录音结束后 LevelMeterView 这类常驻订阅者需要一次 0 把条清掉
+  for (const cb of levelListeners) cb(0)
 }

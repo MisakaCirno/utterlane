@@ -9,14 +9,29 @@
  *   - 当前 UI 只需要「播 / 停」两态，HTMLAudio 足够
  *   - 将来要可视化波形时再切 Web Audio，接口层面对上保持不变
  *
+ * 电平监测：每次 playFile 会在 HTMLAudioElement 外包一个 AudioContext + AnalyserNode，
+ * 用 RAF 循环采样 RMS，推给 subscribePlayerLevel 的订阅者。
+ * 播放结束 / 停止时发一次 0 值让 UI 平滑归零。
+ *
  * 同一时刻只允许一个播放会话；新的 play 请求会先停掉旧的。
  */
 
+type LevelListener = (level: number) => void
+
 let currentAudio: HTMLAudioElement | null = null
 let currentObjectUrl: string | null = null
+let currentAudioContext: AudioContext | null = null
+let currentAnalyser: AnalyserNode | null = null
+let levelRafId: number | null = null
 
 /** 连读播放时被 stop 打断的标记。下一次进 loop 循环体时用它跳出。 */
 let sequenceAborted = false
+
+/**
+ * 播放电平监听列表挂在模块作用域——和 recorder.ts 同样的原因：
+ * UI 组件常驻，需要跨多个 play 会话保持订阅。
+ */
+const levelListeners = new Set<LevelListener>()
 
 async function loadBlobUrl(relativePath: string): Promise<string> {
   const buffer = await window.api.project.readTakeFile(relativePath)
@@ -24,7 +39,54 @@ async function loadBlobUrl(relativePath: string): Promise<string> {
   return URL.createObjectURL(blob)
 }
 
+function emitLevel(level: number): void {
+  for (const cb of levelListeners) cb(level)
+}
+
+/**
+ * 给 audio 元素包上 Web Audio 分析链：
+ *   HTMLAudio → MediaElementSource → AnalyserNode → destination
+ * analyser 挂在 destination 上保证声音能听到；
+ * RAF 循环读取 time-domain 数据算 RMS。
+ */
+function startLevelAnalysis(audio: HTMLAudioElement): void {
+  const ctx = new AudioContext()
+  const source = ctx.createMediaElementSource(audio)
+  const analyser = ctx.createAnalyser()
+  analyser.fftSize = 512
+  source.connect(analyser)
+  analyser.connect(ctx.destination)
+  currentAudioContext = ctx
+  currentAnalyser = analyser
+
+  const buf = new Float32Array(analyser.fftSize)
+  const tick = (): void => {
+    if (!currentAnalyser) return
+    currentAnalyser.getFloatTimeDomainData(buf)
+    let sum = 0
+    for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i]
+    emitLevel(Math.sqrt(sum / buf.length))
+    levelRafId = requestAnimationFrame(tick)
+  }
+  levelRafId = requestAnimationFrame(tick)
+}
+
+function stopLevelAnalysis(): void {
+  if (levelRafId !== null) {
+    cancelAnimationFrame(levelRafId)
+    levelRafId = null
+  }
+  currentAnalyser = null
+  if (currentAudioContext) {
+    void currentAudioContext.close()
+    currentAudioContext = null
+  }
+  // UI 归零
+  emitLevel(0)
+}
+
 function teardown(): void {
+  stopLevelAnalysis()
   if (currentAudio) {
     currentAudio.pause()
     currentAudio.src = ''
@@ -64,6 +126,10 @@ export async function playFile(relativePath: string): Promise<void> {
   currentAudio = audio
   currentObjectUrl = url
 
+  // 起电平分析必须在调用 audio.play() 之前：某些浏览器要求 MediaElementSource
+  // 创建于首次 play 之前（不然会警告 CORS / already-connected 之类）
+  startLevelAnalysis(audio)
+
   return new Promise<void>((resolve) => {
     const done = (): void => {
       // 只有当前这个 audio 还是活跃会话时才清理——
@@ -97,4 +163,13 @@ export function resume(): void {
     // 极端情况下 HTMLAudio 可能拒绝 resume（切换设备 / Audio tab 休眠等）
     // 这里吞掉错误；上层 playback 状态会在 ended / error 事件触发时修正
   })
+}
+
+/**
+ * 订阅播放期间的实时电平（RMS）。返回 unsubscribe。
+ * 在 idle 期间没有事件；会话结束时会收到一次 level=0 用于 UI 归零。
+ */
+export function subscribeLevel(cb: LevelListener): () => void {
+  levelListeners.add(cb)
+  return () => levelListeners.delete(cb)
 }

@@ -4,6 +4,7 @@ import { InspectorView } from '@renderer/views/InspectorView'
 import { ProjectSettingsView } from '@renderer/views/ProjectSettingsView'
 import { SegmentTimelineView } from '@renderer/views/SegmentTimelineView'
 import { ProjectTimelineView } from '@renderer/views/ProjectTimelineView'
+import { LevelMeterView } from '@renderer/views/LevelMeterView'
 import { usePreferencesStore } from '@renderer/store/preferencesStore'
 import { DEFAULT_PREFERENCES } from '@shared/preferences'
 import { getThemeByKey } from './themes'
@@ -15,20 +16,35 @@ const components: Record<string, React.FunctionComponent<IDockviewPanelProps>> =
   inspector: () => <InspectorView />,
   projectSettings: () => <ProjectSettingsView />,
   segmentTimeline: () => <SegmentTimelineView />,
-  projectTimeline: () => <ProjectTimelineView />
+  projectTimeline: () => <ProjectTimelineView />,
+  levelMeter: () => <LevelMeterView />
 }
 
 /**
  * 检查 saved layout 是否仍然与当前 panel 集匹配。
- * 不匹配（比如老版本里的 `timeline` 面板被拆成 segmentTimeline / projectTimeline）
- * 直接返回 false，让上层丢弃 saved 回落到默认布局。
+ * 不匹配直接返回 false，让上层丢弃 saved 回落到默认布局。
+ *
+ * 判定规则：
+ *   - 出现历史遗留 ID（比如旧版的单一 `timeline` 面板）→ 不兼容
+ *   - 缺任何当前必须的面板（新加面板例如 levelMeter 时触发） → 不兼容
  */
+const REQUIRED_PANELS = [
+  'segments',
+  'inspector',
+  'projectSettings',
+  'segmentTimeline',
+  'projectTimeline',
+  'levelMeter'
+] as const
+
 function isLayoutCompatible(saved: unknown): boolean {
   if (!saved || typeof saved !== 'object') return false
   const panels = (saved as { panels?: Record<string, unknown> }).panels
   if (!panels) return false
-  // 只要出现历史遗留 id 就视为不兼容
   if ('timeline' in panels) return false
+  for (const id of REQUIRED_PANELS) {
+    if (!(id in panels)) return false
+  }
   return true
 }
 

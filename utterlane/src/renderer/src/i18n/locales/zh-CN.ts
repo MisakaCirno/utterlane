@@ -200,6 +200,10 @@ export const zhCN = {
     kind_srt: 'SRT 字幕'
   },
 
+  level_meter: {
+    title: '电平'
+  },
+
   tab_menu: {
     header_position: 'Tab 栏位置',
     position_top: '上方',

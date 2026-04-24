@@ -41,18 +41,18 @@ export function resetWorkspaceLayout(): void {
  *   │              │ [Inspector] [Settings] │
  *   │   Segments   │                        │
  *   │              │                        │
- *   ├──────────────┴────────────────────────┤
- *   │          Segment Timeline             │
- *   ├───────────────────────────────────────┤
- *   │          Project Timeline             │
- *   └───────────────────────────────────────┘
+ *   ├──────────────┴────────────────────────┼─────────────┐
+ *   │          Segment Timeline             │             │
+ *   ├───────────────────────────────────────┤ Level Meter │
+ *   │          Project Timeline             │             │
+ *   └───────────────────────────────────────┴─────────────┘
  *
- * 构建顺序：
+ * 构建顺序（含右侧电平条跨两个 Timeline 行的要点）：
  *   1. Segments 占满
  *   2. Segment Timeline below Segments → 上下分成两行
- *   3. Project Timeline below Segment Timeline → 下半再拆一行
- *   4. Inspector right of Segments → 只切最上面一行
- *   5. Project Settings 和 Inspector 并为同组 tab（inactive 确保 Inspector 是默认可见的）
+ *   3. Level Meter right of Segment Timeline → 此时下行水平分 [segmentTimeline | levelMeter]
+ *   4. Project Timeline below Segment Timeline → 只切下行左列，levelMeter 自动跨新产生的两个子行
+ *   5. Inspector right of Segments → 切最上行，projectSettings 并入 inspector group tab
  */
 export function applyDefaultLayout(api: DockviewApi): void {
   const segments = api.addPanel({
@@ -66,6 +66,15 @@ export function applyDefaultLayout(api: DockviewApi): void {
     component: 'segmentTimeline',
     title: 'Segment Timeline',
     position: { referencePanel: segments.id, direction: 'below' }
+  })
+
+  // 必须在 projectTimeline 之前加 levelMeter，这样右侧才会横跨两个 timeline 的总高度。
+  // 顺序反过来的话 levelMeter 只会贴 projectTimeline 的高度。
+  api.addPanel({
+    id: 'levelMeter',
+    component: 'levelMeter',
+    title: 'Level',
+    position: { referencePanel: segmentTimeline.id, direction: 'right' }
   })
 
   api.addPanel({
@@ -93,14 +102,15 @@ export function applyDefaultLayout(api: DockviewApi): void {
   // 初始尺寸：
   //   - 顶部行（Segments + Inspector）占总高 ~45%
   //   - Segment Timeline ~25%
-  //   - Project Timeline ~30%（剩余）
+  //   - Project Timeline ~30%（剩余高度）
   //   - Segments 组水平占 ~55%
+  //   - Level Meter 组宽度约 80px
   requestAnimationFrame(() => {
     const width = api.width
     const height = api.height
     const segmentsPanel = api.getPanel('segments')
     const segmentTimelinePanel = api.getPanel('segmentTimeline')
-    const projectTimelinePanel = api.getPanel('projectTimeline')
+    const levelMeterPanel = api.getPanel('levelMeter')
 
     if (width > 0 && segmentsPanel?.group) {
       segmentsPanel.group.api.setSize({ width: Math.round(width * 0.55) })
@@ -112,8 +122,9 @@ export function applyDefaultLayout(api: DockviewApi): void {
       if (segmentTimelinePanel?.group) {
         segmentTimelinePanel.group.api.setSize({ height: Math.round(height * 0.25) })
       }
-      // projectTimeline 吃剩下的高度，不必显式 set
-      void projectTimelinePanel
+    }
+    if (levelMeterPanel?.group) {
+      levelMeterPanel.group.api.setSize({ width: 100 })
     }
   })
 }

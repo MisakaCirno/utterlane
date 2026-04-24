@@ -200,6 +200,10 @@ export const enUS: TranslationSchema = {
     kind_srt: 'SRT subtitles'
   },
 
+  level_meter: {
+    title: 'Level'
+  },
+
   tab_menu: {
     header_position: 'Tab bar position',
     position_top: 'Top',
