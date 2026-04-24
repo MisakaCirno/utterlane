@@ -36,11 +36,14 @@ export default {
         sans: ['Segoe UI', '-apple-system', 'BlinkMacSystemFont', 'Inter', 'sans-serif'],
         mono: ['Consolas', 'Menlo', 'Monaco', 'monospace']
       },
+      // 字号全部走 CSS 变量，方便偏好里切换「字体缩放」时一次性把整 UI 拉伸。
+      // 变量定义在 main.css 的 :root；scale 值由 preferences.appearance.fontScale
+      // 驱动，计算在 root 的 --fs-scale。
       fontSize: {
-        '2xs': ['10px', '14px'],
-        xs: ['11px', '16px'],
-        sm: ['12px', '18px'],
-        base: ['13px', '20px']
+        '2xs': ['var(--fs-2xs)', { lineHeight: 'var(--fs-2xs-lh)' }],
+        xs: ['var(--fs-xs)', { lineHeight: 'var(--fs-xs-lh)' }],
+        sm: ['var(--fs-sm)', { lineHeight: 'var(--fs-sm-lh)' }],
+        base: ['var(--fs-base)', { lineHeight: 'var(--fs-base-lh)' }]
       }
     }
   },

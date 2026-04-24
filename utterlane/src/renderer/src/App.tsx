@@ -18,6 +18,7 @@ function App(): React.JSX.Element {
   const hasProject = useEditorStore((s) => s.project !== null)
   const hydrated = usePreferencesStore((s) => s.hydrated)
   const locale = usePreferencesStore((s) => s.prefs.appearance?.locale)
+  const fontScale = usePreferencesStore((s) => s.prefs.appearance?.fontScale)
   const importScriptOpen = useDialogStore((s) => s.importScriptOpen)
   const closeImportScript = useDialogStore((s) => s.closeImportScript)
 
@@ -27,6 +28,14 @@ function App(): React.JSX.Element {
       void i18nInstance.changeLanguage(locale)
     }
   }, [locale])
+
+  // 字体缩放：把 fontScale 写到 documentElement 的 --fs-scale 变量上，
+  // 所有 text-* Tailwind 类会通过 CSS 变量自动跟随。
+  // 范围收紧到 0.8~1.5，避免用户误操作造成 UI 崩溃。
+  useEffect(() => {
+    const clamped = Math.max(0.8, Math.min(1.5, fontScale ?? 1))
+    document.documentElement.style.setProperty('--fs-scale', String(clamped))
+  }, [fontScale])
 
   // 启动时：
   //   1. 拉取偏好并订阅变更
