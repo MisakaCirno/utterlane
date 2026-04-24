@@ -8,6 +8,7 @@ import { useEditorStore } from './store/editorStore'
 import { connectPreferencesStore, usePreferencesStore } from './store/preferencesStore'
 import { useDialogStore } from './store/dialogStore'
 import { openProjectPath } from './actions/project'
+import { installKeyboardShortcuts } from './shell/keyboardShortcuts'
 
 function App(): React.JSX.Element {
   const hasProject = useEditorStore((s) => s.project !== null)
@@ -34,23 +35,27 @@ function App(): React.JSX.Element {
     })
 
     // 关窗请求处理：
-    //   - 已保存：直接 confirmClose
-    //   - 未保存：弹原生 confirm 征询（没必要为这一步做 Radix Dialog，
-    //            用户注意力此刻完全集中在「要不要丢弃」上）
-    //
-    // TODO（Slice D/E）：录音中 / 导出中 的关窗拦截也在这里接入
+    //   - 录音中：拦截（用户会丢失正在录的内容）
+    //   - 未保存：弹原生 confirm 征询
+    //   - 其他情况：直接 confirmClose
     const closeCleanup = window.api.window.onCloseRequest(() => {
-      const saved = useEditorStore.getState().saved
-      if (!saved) {
+      const { saved, playback } = useEditorStore.getState()
+      if (playback === 'recording') {
+        const confirmed = window.confirm('正在录音，确定关闭吗？当前录音将被丢弃。')
+        if (!confirmed) return
+      } else if (!saved) {
         const confirmed = window.confirm('还有未保存的改动，确定关闭吗？')
         if (!confirmed) return
       }
       window.api.window.confirmClose()
     })
 
+    const shortcutsCleanup = installKeyboardShortcuts()
+
     return () => {
       cleanup?.()
       closeCleanup()
+      shortcutsCleanup()
     }
   }, [])
 

@@ -1,4 +1,5 @@
-import { basename } from 'path'
+import { promises as fs } from 'fs'
+import { basename, join } from 'path'
 import { randomUUID } from 'crypto'
 import {
   makeNewProjectFile,
@@ -17,6 +18,27 @@ import {
   writeProjectSkeleton
 } from './io'
 import { acquireLock, releaseLock } from './lock'
+import { projectPaths } from './paths'
+
+/**
+ * 启动工程时清理 temp/ 下所有文件。
+ *
+ * 见 docs/utterlane.md#录音中断：
+ *   录音 / JSON 写盘 / 重录的中间文件都落在 temp/，
+ *   正常流程会 rename 走，只有崩溃才会留下。
+ *   打开工程时统一清一次是最简单的「恢复策略」。
+ *
+ * 失败单条吞掉（有文件被别的程序占用等），不阻塞打开流程。
+ */
+async function cleanTempDir(dir: string): Promise<void> {
+  const tempDir = projectPaths(dir).tempDir
+  try {
+    const entries = await fs.readdir(tempDir)
+    await Promise.all(entries.map((name) => fs.unlink(join(tempDir, name)).catch(() => {})))
+  } catch {
+    // temp 不存在或不可读都不是错误——可能是新工程还没建这个目录
+  }
+}
 
 /**
  * 当前进程「正在打开」的工程状态。
@@ -66,6 +88,7 @@ class ProjectSession {
     }
 
     try {
+      await cleanTempDir(dir)
       const bundle = await this.buildBundle(dir)
       this.currentPath = dir
       this.touchRecentProjects(dir)

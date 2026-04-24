@@ -16,9 +16,10 @@ import {
 import { CSS } from '@dnd-kit/utilities'
 import { useEditorStore } from '@renderer/store/editorStore'
 import { usePreferencesStore } from '@renderer/store/preferencesStore'
+import { useDialogStore } from '@renderer/store/dialogStore'
 import { cn } from '@renderer/lib/cn'
 import { formatDuration } from '@renderer/lib/format'
-import { Circle, CircleCheck, Layers, GripVertical } from 'lucide-react'
+import { Circle, CircleCheck, FileText, Layers, GripVertical } from 'lucide-react'
 
 function StatusCell({ count }: { count: number }): React.JSX.Element {
   if (count === 0) {
@@ -69,6 +70,30 @@ const DEFAULT_WIDTHS: ColWidths = {
 
 function buildGridTemplate(w: ColWidths): string {
   return `28px ${w.order}px 1fr ${w.status}px ${w.takes}px ${w.duration}px`
+}
+
+/**
+ * 空列表时显示的引导。新建工程之后 Segments 为空，
+ * 让用户一眼知道下一步该做什么。
+ */
+function EmptySegmentsHint(): React.JSX.Element {
+  const openImportScript = useDialogStore((s) => s.openImportScript)
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-3 px-6 py-8 text-center">
+      <FileText size={24} className="text-fg-dim" />
+      <div className="text-xs text-fg">还没有任何 Segment</div>
+      <div className="text-2xs text-fg-muted">把文案粘贴进来，每一行会被拆成一个 Segment</div>
+      <button
+        onClick={openImportScript}
+        className={cn(
+          'mt-1 rounded-sm border border-accent bg-accent px-3 py-1 text-2xs text-white',
+          'hover:bg-accent/90'
+        )}
+      >
+        导入文案
+      </button>
+    </div>
+  )
 }
 
 function ResizeHandle({
@@ -305,6 +330,7 @@ export function SegmentsView(): React.JSX.Element {
       </div>
 
       <div className="flex-1 overflow-y-auto">
+        {order.length === 0 ? <EmptySegmentsHint /> : null}
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
           <SortableContext items={order} strategy={verticalListSortingStrategy}>
             {order.map((id, idx) => (
