@@ -2,6 +2,7 @@ import * as Dialog from '@radix-ui/react-dialog'
 import { useState } from 'react'
 import { X } from 'lucide-react'
 import { useEditorStore } from '@renderer/store/editorStore'
+import { confirm } from '@renderer/store/confirmStore'
 import { cn } from '@renderer/lib/cn'
 
 /**
@@ -28,13 +29,16 @@ export function ImportScriptDialog({
     .map((l) => l.trim())
     .filter((l) => l.length > 0).length
 
-  const onConfirm = (): void => {
+  const onConfirm = async (): Promise<void> => {
     if (lineCount === 0) return
     if (segmentsCount > 0) {
-      const confirmed = window.confirm(
-        `当前工程已有 ${segmentsCount} 条 Segment，导入会全部替换。继续吗？`
-      )
-      if (!confirmed) return
+      const ok = await confirm({
+        title: '替换已有 Segments？',
+        description: `当前工程已有 ${segmentsCount} 条 Segment，导入会全部替换。`,
+        confirmLabel: '替换',
+        tone: 'danger'
+      })
+      if (!ok) return
     }
     importScript(text)
     setText('')

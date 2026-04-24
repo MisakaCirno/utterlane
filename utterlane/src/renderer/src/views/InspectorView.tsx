@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Play, Square, Mic, RotateCcw, Trash2, Check, Circle } from 'lucide-react'
 import { cn } from '@renderer/lib/cn'
 import { useEditorStore } from '@renderer/store/editorStore'
+import { confirm } from '@renderer/store/confirmStore'
 import { formatDuration } from '@renderer/lib/format'
 import { Field } from '@renderer/components/Field'
 import { subscribeLevel } from '@renderer/services/recorder'
@@ -116,9 +117,14 @@ export function InspectorView(): React.JSX.Element {
   const isRecordingThis = playback === 'recording' && recordingSegmentId === selectedId
   const isRecordingOther = playback === 'recording' && !isRecordingThis
 
-  const onDeleteSegment = (): void => {
-    const confirmed = window.confirm(`确定删除这条 Segment 吗？\n"${segment.text}"`)
-    if (confirmed) deleteSegment(selectedId)
+  const onDeleteSegment = async (): Promise<void> => {
+    const ok = await confirm({
+      title: '删除这条 Segment？',
+      description: segment.text,
+      confirmLabel: '删除',
+      tone: 'danger'
+    })
+    if (ok) deleteSegment(selectedId)
   }
 
   return (

@@ -3,11 +3,13 @@ import { Titlebar } from './shell/Titlebar'
 import { StatusBar } from './shell/StatusBar'
 import { Workspace } from './shell/Workspace'
 import { ToastHost } from './shell/ToastHost'
+import { ConfirmHost } from './shell/ConfirmHost'
 import { WelcomeView } from './views/WelcomeView'
 import { ImportScriptDialog } from './dialogs/ImportScriptDialog'
 import { useEditorStore } from './store/editorStore'
 import { connectPreferencesStore, usePreferencesStore } from './store/preferencesStore'
 import { useDialogStore } from './store/dialogStore'
+import { confirm } from './store/confirmStore'
 import { openProjectPath } from './actions/project'
 import { installKeyboardShortcuts } from './shell/keyboardShortcuts'
 
@@ -37,16 +39,25 @@ function App(): React.JSX.Element {
 
     // 关窗请求处理：
     //   - 录音中：拦截（用户会丢失正在录的内容）
-    //   - 未保存：弹原生 confirm 征询
+    //   - 未保存：弹 AlertDialog 征询
     //   - 其他情况：直接 confirmClose
-    const closeCleanup = window.api.window.onCloseRequest(() => {
+    const closeCleanup = window.api.window.onCloseRequest(async () => {
       const { saved, playback } = useEditorStore.getState()
       if (playback === 'recording') {
-        const confirmed = window.confirm('正在录音，确定关闭吗？当前录音将被丢弃。')
-        if (!confirmed) return
+        const ok = await confirm({
+          title: '正在录音，确定关闭吗？',
+          description: '当前录音将被丢弃。',
+          confirmLabel: '关闭并丢弃',
+          tone: 'danger'
+        })
+        if (!ok) return
       } else if (!saved) {
-        const confirmed = window.confirm('还有未保存的改动，确定关闭吗？')
-        if (!confirmed) return
+        const ok = await confirm({
+          title: '还有未保存的改动，确定关闭吗？',
+          confirmLabel: '丢弃并关闭',
+          tone: 'danger'
+        })
+        if (!ok) return
       }
       window.api.window.confirmClose()
     })
@@ -71,6 +82,7 @@ function App(): React.JSX.Element {
         open={importScriptOpen}
         onOpenChange={(open) => !open && closeImportScript()}
       />
+      <ConfirmHost />
       <ToastHost />
     </div>
   )
