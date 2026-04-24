@@ -1187,5 +1187,11 @@ Electron `app.getPath('userData')` 下：
   * macOS notarization、`NSMicrophoneUsageDescription` 权限声明
   * Windows 代码签名证书
   * 首版功能闭环完成后再处理，不阻塞 MVP 开发
+* 设置对话框（Preferences Dialog）
+
+  * App 级偏好统一由设置对话框管理，不使用独立 BrowserWindow
+  * 实现方式：主窗口内的 Radix Dialog 模态，分组展示（Appearance / Project Defaults / Keyboard）
+  * 触发入口：Windows/Linux `Edit → Preferences…`（Ctrl+,）；macOS `Utterlane → Preferences…`（Cmd+,）
+  * 现阶段只有 Dock Theme 一项偏好，暂挂在 View 菜单；等偏好项 ≥ 2 时再建对话框一次性承接
 
 ---
