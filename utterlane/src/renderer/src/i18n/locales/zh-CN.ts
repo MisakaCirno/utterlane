@@ -117,7 +117,13 @@ export const zhCN = {
     btn_stop_project: '停止项目',
     btn_pause_project: '暂停项目',
     btn_resume_project: '继续项目',
-    clip_unrecorded: '未录制'
+    clip_unrecorded: '未录制',
+    section_segment: 'Segment 时间轴',
+    section_project: '项目时间轴',
+    segment_text_placeholder: '选中 Segment 后在此编辑文案',
+    waveform_unrecorded: '未录制',
+    waveform_loading: '加载波形中…',
+    waveform_error: '波形加载失败：{{message}}'
   },
 
   project_settings: {

@@ -115,7 +115,13 @@ export const enUS: TranslationSchema = {
     btn_stop_project: 'Stop project',
     btn_pause_project: 'Pause project',
     btn_resume_project: 'Resume project',
-    clip_unrecorded: 'Not recorded'
+    clip_unrecorded: 'Not recorded',
+    section_segment: 'Segment timeline',
+    section_project: 'Project timeline',
+    segment_text_placeholder: 'Select a segment to edit its text',
+    waveform_unrecorded: 'Not recorded',
+    waveform_loading: 'Loading waveform…',
+    waveform_error: 'Waveform load failed: {{message}}'
   },
 
   project_settings: {

@@ -1,3 +1,5 @@
+import { useEffect, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   ChevronLeft,
   ChevronRight,
@@ -25,11 +27,32 @@ import {
   useSortable
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { useEffect, useRef } from 'react'
-import { useTranslation } from 'react-i18next'
 import { cn } from '@renderer/lib/cn'
 import { useEditorStore } from '@renderer/store/editorStore'
 import { formatDuration } from '@renderer/lib/format'
+import { WaveformView } from '@renderer/components/WaveformView'
+
+/**
+ * Timeline 视图的组织（上下两块）：
+ *
+ *   ┌────────────────────────────────────────┐
+ *   │  SegmentDetailSection                  │
+ *   │  ├ SegmentControlRow（句 / Take 控制）  │
+ *   │  ├ SegmentTextEditor（可编辑文案）      │
+ *   │  └ WaveformView（当前 Take 波形）       │
+ *   ├────────────────────────────────────────┤
+ *   │  ProjectTimelineSection                │
+ *   │  ├ ProjectControlRow（整体播放控制）    │
+ *   │  └ TimelineContent（所有 Segment clips）│
+ *   └────────────────────────────────────────┘
+ *
+ * 文档约束：Timeline 与 Control Bar 不能拆成独立 dock 面板，
+ * 所以两块都在同一个 TimelineView 里，上下由一条 border-subtle 分割。
+ */
+
+// ---------------------------------------------------------------------------
+// 复用型按钮
+// ---------------------------------------------------------------------------
 
 function IconButton({
   children,
@@ -72,29 +95,32 @@ function RowLabel({ children }: { children: React.ReactNode }): React.JSX.Elemen
   )
 }
 
-function ControlBar(): React.JSX.Element {
+// ---------------------------------------------------------------------------
+// Segment 细节块（上半）
+// ---------------------------------------------------------------------------
+
+function SegmentControlRow(): React.JSX.Element {
   const { t } = useTranslation()
   const segment = useEditorStore((s) =>
     s.selectedSegmentId ? s.segmentsById[s.selectedSegmentId] : undefined
   )
   const selectedId = useEditorStore((s) => s.selectedSegmentId)
   const playback = useEditorStore((s) => s.playback)
+  const paused = useEditorStore((s) => s.paused)
   const recordingSegmentId = useEditorStore((s) => s.recordingSegmentId)
   const startRecording = useEditorStore((s) => s.startRecordingForSelected)
   const startRerecording = useEditorStore((s) => s.startRerecordingSelected)
   const stopRecording = useEditorStore((s) => s.stopRecordingAndSave)
   const playCurrentSegment = useEditorStore((s) => s.playCurrentSegment)
-  const playProject = useEditorStore((s) => s.playProject)
   const stopPlayback = useEditorStore((s) => s.stopPlayback)
   const togglePause = useEditorStore((s) => s.togglePausePlayback)
-  const paused = useEditorStore((s) => s.paused)
   const selectSegment = useEditorStore((s) => s.selectSegment)
+  const setSelectedTake = useEditorStore((s) => s.setSelectedTake)
   const order = useEditorStore((s) => s.order)
   const takeCount = segment?.takes.length ?? 0
 
   const isRecordingThis = playback === 'recording' && recordingSegmentId === selectedId
   const isRecordingOther = playback === 'recording' && !isRecordingThis
-  const isBusy = playback !== 'idle'
 
   const onRecordClick = (): void => {
     if (isRecordingThis) void stopRecording()
@@ -111,12 +137,6 @@ function ControlBar(): React.JSX.Element {
     const idx = order.indexOf(selectedId)
     if (idx >= 0 && idx < order.length - 1) selectSegment(order[idx + 1])
   }
-
-  /**
-   * Take 切换：在当前 Segment 的 takes 数组里上下移动 selectedTakeId。
-   * 没有 currentTake 时从头开始。
-   */
-  const setSelectedTake = useEditorStore((s) => s.setSelectedTake)
   const stepTake = (delta: -1 | 1): void => {
     if (!segment || !selectedId) return
     const idx = segment.takes.findIndex((t) => t.id === segment.selectedTakeId)
@@ -127,136 +147,201 @@ function ControlBar(): React.JSX.Element {
   }
 
   return (
-    <div className="shrink-0 border-b border-border bg-bg-panel">
-      <div className="relative flex h-8 items-center justify-center border-b border-border-subtle px-2">
-        <RowLabel>{t('timeline.row_segment')}</RowLabel>
-        <div className="flex items-center gap-0.5 rounded-sm border border-border bg-bg-deep p-0.5">
-          <IconButton
-            title={t('timeline.btn_prev_segment')}
-            onClick={onPrevSegment}
-            disabled={isBusy || !selectedId || order.indexOf(selectedId) <= 0}
-          >
-            <ChevronLeft size={13} />
-          </IconButton>
-          <IconButton
-            title={t('timeline.btn_next_segment')}
-            onClick={onNextSegment}
-            disabled={isBusy || !selectedId || order.indexOf(selectedId) >= order.length - 1}
-          >
-            <ChevronRight size={13} />
-          </IconButton>
-          <div className="mx-0.5 h-4 w-px bg-border" />
-          <IconButton
-            title={t('timeline.btn_prev_take')}
-            onClick={() => stepTake(-1)}
-            disabled={isBusy || takeCount < 2}
-          >
-            <SkipBack size={12} />
-          </IconButton>
-          <IconButton
-            title={t('timeline.btn_next_take')}
-            onClick={() => stepTake(1)}
-            disabled={isBusy || takeCount < 2}
-          >
-            <SkipForward size={12} />
-          </IconButton>
-          <div className="mx-0.5 h-4 w-px bg-border" />
-          <IconButton
-            title={
-              playback === 'segment'
-                ? t('timeline.btn_stop_segment')
-                : t('timeline.btn_play_segment')
-            }
-            active={playback === 'segment'}
-            disabled={
-              playback === 'project' || playback === 'recording' || !segment?.selectedTakeId
-            }
-            onClick={playback === 'segment' ? stopPlayback : () => void playCurrentSegment()}
-          >
-            {playback === 'segment' ? <Square size={11} /> : <Play size={12} />}
-          </IconButton>
-          <IconButton
-            title={paused ? t('timeline.btn_resume') : t('timeline.btn_pause')}
-            active={paused}
-            onClick={togglePause}
-            disabled={playback !== 'segment' && playback !== 'project'}
-          >
-            {paused ? <Play size={12} /> : <Pause size={12} />}
-          </IconButton>
-          <IconButton
-            title={t('timeline.btn_stop_segment')}
-            onClick={stopPlayback}
-            disabled={playback === 'idle' || playback === 'recording'}
-          >
-            <Square size={11} />
-          </IconButton>
-          <div className="mx-0.5 h-4 w-px bg-border" />
-          <IconButton
-            title={isRecordingThis ? t('timeline.btn_stop_recording') : t('timeline.btn_record')}
-            active={isRecordingThis}
-            danger
-            disabled={
-              isRecordingOther || !selectedId || playback === 'segment' || playback === 'project'
-            }
-            onClick={onRecordClick}
-          >
-            {isRecordingThis ? <Square size={11} /> : <Mic size={12} />}
-          </IconButton>
-          <IconButton
-            title={t('timeline.btn_rerecord')}
-            disabled={isBusy || !segment?.selectedTakeId}
-            onClick={() => void startRerecording()}
-          >
-            <RotateCcw size={12} />
-          </IconButton>
-        </div>
-      </div>
-
-      <div className="relative flex h-8 items-center justify-center px-2">
-        <RowLabel>{t('timeline.row_project')}</RowLabel>
-        <div className="flex items-center gap-0.5 rounded-sm border border-border bg-bg-deep p-0.5">
-          <IconButton
-            title={t('timeline.btn_play_project_from_start')}
-            onClick={() => {
-              if (order.length > 0) selectSegment(order[0])
-              void playProject()
-            }}
-            disabled={isBusy || order.length === 0}
-          >
-            <Rewind size={12} />
-          </IconButton>
-          <IconButton
-            title={
-              playback === 'project'
-                ? t('timeline.btn_stop_project')
-                : t('timeline.btn_play_project')
-            }
-            active={playback === 'project'}
-            disabled={playback === 'segment' || playback === 'recording' || order.length === 0}
-            onClick={playback === 'project' ? stopPlayback : () => void playProject()}
-          >
-            {playback === 'project' ? <Square size={11} /> : <Play size={12} />}
-          </IconButton>
-          <IconButton
-            title={paused ? t('timeline.btn_resume_project') : t('timeline.btn_pause_project')}
-            active={paused}
-            onClick={togglePause}
-            disabled={playback !== 'project'}
-          >
-            {paused ? <Play size={12} /> : <Pause size={12} />}
-          </IconButton>
-          <IconButton
-            title={t('timeline.btn_stop_project')}
-            onClick={stopPlayback}
-            disabled={playback !== 'project'}
-          >
-            <Square size={11} />
-          </IconButton>
-        </div>
+    <div className="relative flex h-8 shrink-0 items-center justify-center border-b border-border-subtle bg-bg-panel px-2">
+      <RowLabel>{t('timeline.row_segment')}</RowLabel>
+      <div className="flex items-center gap-0.5 rounded-sm border border-border bg-bg-deep p-0.5">
+        <IconButton
+          title={t('timeline.btn_prev_segment')}
+          onClick={onPrevSegment}
+          disabled={playback !== 'idle' || !selectedId || order.indexOf(selectedId) <= 0}
+        >
+          <ChevronLeft size={13} />
+        </IconButton>
+        <IconButton
+          title={t('timeline.btn_next_segment')}
+          onClick={onNextSegment}
+          disabled={
+            playback !== 'idle' || !selectedId || order.indexOf(selectedId) >= order.length - 1
+          }
+        >
+          <ChevronRight size={13} />
+        </IconButton>
+        <div className="mx-0.5 h-4 w-px bg-border" />
+        <IconButton
+          title={t('timeline.btn_prev_take')}
+          onClick={() => stepTake(-1)}
+          disabled={playback !== 'idle' || takeCount < 2}
+        >
+          <SkipBack size={12} />
+        </IconButton>
+        <IconButton
+          title={t('timeline.btn_next_take')}
+          onClick={() => stepTake(1)}
+          disabled={playback !== 'idle' || takeCount < 2}
+        >
+          <SkipForward size={12} />
+        </IconButton>
+        <div className="mx-0.5 h-4 w-px bg-border" />
+        <IconButton
+          title={
+            playback === 'segment' ? t('timeline.btn_stop_segment') : t('timeline.btn_play_segment')
+          }
+          active={playback === 'segment'}
+          disabled={playback === 'project' || playback === 'recording' || !segment?.selectedTakeId}
+          onClick={playback === 'segment' ? stopPlayback : () => void playCurrentSegment()}
+        >
+          {playback === 'segment' ? <Square size={11} /> : <Play size={12} />}
+        </IconButton>
+        <IconButton
+          title={paused ? t('timeline.btn_resume') : t('timeline.btn_pause')}
+          active={paused}
+          onClick={togglePause}
+          disabled={playback !== 'segment' && playback !== 'project'}
+        >
+          {paused ? <Play size={12} /> : <Pause size={12} />}
+        </IconButton>
+        <IconButton
+          title={t('timeline.btn_stop_segment')}
+          onClick={stopPlayback}
+          disabled={playback === 'idle' || playback === 'recording'}
+        >
+          <Square size={11} />
+        </IconButton>
+        <div className="mx-0.5 h-4 w-px bg-border" />
+        <IconButton
+          title={isRecordingThis ? t('timeline.btn_stop_recording') : t('timeline.btn_record')}
+          active={isRecordingThis}
+          danger
+          disabled={
+            isRecordingOther || !selectedId || playback === 'segment' || playback === 'project'
+          }
+          onClick={onRecordClick}
+        >
+          {isRecordingThis ? <Square size={11} /> : <Mic size={12} />}
+        </IconButton>
+        <IconButton
+          title={t('timeline.btn_rerecord')}
+          disabled={playback !== 'idle' || !segment?.selectedTakeId}
+          onClick={() => void startRerecording()}
+        >
+          <RotateCcw size={12} />
+        </IconButton>
       </div>
     </div>
   )
 }
+
+/**
+ * 文案编辑器。和 Inspector 里的 textarea 绑同一个 store action，
+ * 两处输入会通过 store 即时同步。
+ */
+function SegmentTextEditor(): React.JSX.Element {
+  const { t } = useTranslation()
+  const selectedId = useEditorStore((s) => s.selectedSegmentId)
+  const text = useEditorStore((s) =>
+    s.selectedSegmentId ? (s.segmentsById[s.selectedSegmentId]?.text ?? '') : ''
+  )
+  const editSegmentText = useEditorStore((s) => s.editSegmentText)
+
+  return (
+    <div className="shrink-0 border-b border-border-subtle bg-bg px-3 py-2">
+      <textarea
+        value={text}
+        disabled={!selectedId}
+        onChange={(e) => selectedId && editSegmentText(selectedId, e.target.value)}
+        placeholder={t('timeline.segment_text_placeholder')}
+        className={cn(
+          'w-full resize-none rounded-sm border border-border bg-bg-deep px-2 py-1',
+          'text-xs leading-5 outline-none focus:border-accent',
+          'disabled:cursor-not-allowed disabled:opacity-60'
+        )}
+        rows={2}
+      />
+    </div>
+  )
+}
+
+function SegmentDetailSection(): React.JSX.Element {
+  // 波形对应当前选中 Segment 的当前 Take 文件路径
+  const filePath = useEditorStore((s) => {
+    if (!s.selectedSegmentId) return null
+    const seg = s.segmentsById[s.selectedSegmentId]
+    const take = seg?.takes.find((t) => t.id === seg.selectedTakeId)
+    return take?.filePath ?? null
+  })
+
+  return (
+    <div className="flex shrink-0 flex-col">
+      <SegmentControlRow />
+      <SegmentTextEditor />
+      <WaveformView filePath={filePath} />
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// 项目时间轴（下半）
+// ---------------------------------------------------------------------------
+
+function ProjectControlRow(): React.JSX.Element {
+  const { t } = useTranslation()
+  const playback = useEditorStore((s) => s.playback)
+  const paused = useEditorStore((s) => s.paused)
+  const playProject = useEditorStore((s) => s.playProject)
+  const stopPlayback = useEditorStore((s) => s.stopPlayback)
+  const togglePause = useEditorStore((s) => s.togglePausePlayback)
+  const selectSegment = useEditorStore((s) => s.selectSegment)
+  const order = useEditorStore((s) => s.order)
+
+  const isBusy = playback !== 'idle'
+
+  return (
+    <div className="relative flex h-8 shrink-0 items-center justify-center border-b border-border-subtle bg-bg-panel px-2">
+      <RowLabel>{t('timeline.row_project')}</RowLabel>
+      <div className="flex items-center gap-0.5 rounded-sm border border-border bg-bg-deep p-0.5">
+        <IconButton
+          title={t('timeline.btn_play_project_from_start')}
+          onClick={() => {
+            if (order.length > 0) selectSegment(order[0])
+            void playProject()
+          }}
+          disabled={isBusy || order.length === 0}
+        >
+          <Rewind size={12} />
+        </IconButton>
+        <IconButton
+          title={
+            playback === 'project' ? t('timeline.btn_stop_project') : t('timeline.btn_play_project')
+          }
+          active={playback === 'project'}
+          disabled={playback === 'segment' || playback === 'recording' || order.length === 0}
+          onClick={playback === 'project' ? stopPlayback : () => void playProject()}
+        >
+          {playback === 'project' ? <Square size={11} /> : <Play size={12} />}
+        </IconButton>
+        <IconButton
+          title={paused ? t('timeline.btn_resume_project') : t('timeline.btn_pause_project')}
+          active={paused}
+          onClick={togglePause}
+          disabled={playback !== 'project'}
+        >
+          {paused ? <Play size={12} /> : <Pause size={12} />}
+        </IconButton>
+        <IconButton
+          title={t('timeline.btn_stop_project')}
+          onClick={stopPlayback}
+          disabled={playback !== 'project'}
+        >
+          <Square size={11} />
+        </IconButton>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Timeline clips（下半的内容）
+// ---------------------------------------------------------------------------
 
 const PX_PER_MS = 0.08
 const UNRECORDED_CLIP_WIDTH = 60
@@ -292,7 +377,6 @@ function TimelineClip({
 
   useEffect(() => {
     if (isSelected && clipElementRef.current) {
-      // inline: 'nearest' 保证元素已经可见时不滚；timeline 是横向滚动，block 不重要
       clipElementRef.current.scrollIntoView({ inline: 'nearest', block: 'nearest' })
     }
   }, [isSelected])
@@ -346,12 +430,12 @@ function TimelineClip({
   )
 }
 
-function TimelineContent(): React.JSX.Element {
+function ProjectTimelineContent(): React.JSX.Element {
   const order = useEditorStore((s) => s.order)
   const segmentsById = useEditorStore((s) => s.segmentsById)
   const reorderSegments = useEditorStore((s) => s.reorderSegments)
 
-  // 每个 clip 的起点时间戳，基于前序 clip 累积时长。先算好避免在 map 里 mutate。
+  // 每个 clip 的起点时间戳，基于前序 clip 累积时长
   const startMsById = new Map<string, number>()
   {
     let acc = 0
@@ -363,7 +447,6 @@ function TimelineContent(): React.JSX.Element {
     }
   }
 
-  // 同 SegmentsView：4px 激活阈值防止单击选中被当成拖拽
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }))
 
   const handleDragEnd = (e: DragEndEvent): void => {
@@ -412,11 +495,25 @@ function TimelineContent(): React.JSX.Element {
   )
 }
 
+function ProjectTimelineSection(): React.JSX.Element {
+  return (
+    <div className="flex flex-1 flex-col overflow-hidden">
+      <ProjectControlRow />
+      <ProjectTimelineContent />
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// 根
+// ---------------------------------------------------------------------------
+
 export function TimelineView(): React.JSX.Element {
   return (
     <div className="flex h-full flex-col bg-bg">
-      <ControlBar />
-      <TimelineContent />
+      <SegmentDetailSection />
+      <div className="h-[3px] shrink-0 bg-border" />
+      <ProjectTimelineSection />
     </div>
   )
 }
