@@ -36,7 +36,9 @@
     "@radix-ui/react-tooltip": "^1.2.8",
     "clsx": "^2.1.1",
     "dockview-react": "^5.2.0",
+    "i18next": "^26.0.7",
     "lucide-react": "^1.8.0",
+    "react-i18next": "^17.0.4",
     "zustand": "^5.0.12"
   },
   "devDependencies": {

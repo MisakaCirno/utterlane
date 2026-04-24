@@ -1,3 +1,4 @@
+import i18n from '@renderer/i18n'
 import { useEditorStore } from '@renderer/store/editorStore'
 import { showError } from '@renderer/store/toastStore'
 
@@ -42,13 +43,15 @@ function handleOpenResult(result: Awaited<ReturnType<typeof window.api.project.o
   }
   if (result.reason === 'busy') {
     reportError(
-      '工程已被占用',
-      `已在另一个窗口中打开（PID ${result.heldByPid}）。请先关闭那个窗口后再试。`
+      i18n.t('errors.project_busy_title'),
+      i18n.t('errors.project_busy_description', { pid: result.heldByPid })
     )
     return
   }
   // invalid / canceled 共用这个分支。取消没有用户可感知的 message，就静默。
-  if (result.message !== '已取消') {
-    reportError('无法打开工程', result.message)
+  // '已取消' / 'Cancelled' 都是 main 侧返回的字面量；canceled flag 的判断应该优先，
+  // 但为了兼容旧逻辑这里仍然做一次文本比较
+  if (result.message !== '已取消' && result.message !== 'Cancelled') {
+    reportError(i18n.t('errors.open_project_title'), result.message)
   }
 }

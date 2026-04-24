@@ -1,4 +1,5 @@
 import { FolderOpen, FileText, Mic, Clock, X } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import { usePreferencesStore } from '@renderer/store/preferencesStore'
 import { cn } from '@renderer/lib/cn'
 import { newProject, openProject, openProjectPath } from '@renderer/actions/project'
@@ -12,6 +13,7 @@ import { newProject, openProject, openProjectPath } from '@renderer/actions/proj
  *   - 用户主动关闭当前工程
  */
 export function WelcomeView(): React.JSX.Element {
+  const { t } = useTranslation()
   const recentProjects = usePreferencesStore((s) => s.prefs.recentProjects ?? [])
   const updatePrefs = usePreferencesStore((s) => s.update)
 
@@ -25,20 +27,20 @@ export function WelcomeView(): React.JSX.Element {
         <div className="flex flex-col gap-1">
           <div className="flex items-center gap-2 text-fg">
             <Mic size={22} className="text-accent" />
-            <span className="text-lg font-semibold tracking-wide">Utterlane</span>
+            <span className="text-lg font-semibold tracking-wide">{t('app.title')}</span>
           </div>
-          <div className="text-xs text-fg-muted">口播录音工作流</div>
+          <div className="text-xs text-fg-muted">{t('app.tagline')}</div>
           <div className="mt-6 flex flex-col gap-2">
             <WelcomeAction
               icon={<FileText size={14} />}
-              label="新建工程"
-              hint="从一段文案开始"
+              label={t('welcome.new_project')}
+              hint={t('welcome.new_project_hint')}
               onClick={newProject}
             />
             <WelcomeAction
               icon={<FolderOpen size={14} />}
-              label="打开工程"
-              hint="选择现有工程目录"
+              label={t('welcome.open_project')}
+              hint={t('welcome.open_project_hint')}
               onClick={openProject}
             />
           </div>
@@ -49,10 +51,10 @@ export function WelcomeView(): React.JSX.Element {
         <div className="flex-1">
           <div className="flex items-center gap-2 pb-2 text-2xs uppercase tracking-wider text-fg-dim">
             <Clock size={11} />
-            最近工程
+            {t('welcome.recent_projects')}
           </div>
           {recentProjects.length === 0 ? (
-            <div className="py-6 text-xs text-fg-dim">还没有最近工程</div>
+            <div className="py-6 text-xs text-fg-dim">{t('welcome.no_recent')}</div>
           ) : (
             <ul className="flex flex-col">
               {recentProjects.map((path) => (
@@ -103,6 +105,7 @@ function RecentProjectItem({
   path: string
   onRemove: () => void
 }): React.JSX.Element {
+  const { t } = useTranslation()
   // 从绝对路径中拆出目录名作为主标题，完整路径作为副标题
   const name = path.split(/[\\/]/).filter(Boolean).pop() ?? path
   return (
@@ -125,8 +128,8 @@ function RecentProjectItem({
           'ml-1 rounded-sm p-1 text-fg-dim opacity-0 transition-opacity',
           'hover:bg-bg-raised hover:text-rec group-hover:opacity-100'
         )}
-        title="从最近工程中移除"
-        aria-label="从最近工程中移除"
+        title={t('welcome.remove_recent')}
+        aria-label={t('welcome.remove_recent')}
       >
         <X size={11} />
       </button>

@@ -1,6 +1,8 @@
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { Check, ChevronRight, Minus, Square, Copy, X, Mic } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import type { TFunction } from 'i18next'
 import { cn } from '@renderer/lib/cn'
 import { useEditorStore } from '@renderer/store/editorStore'
 import { usePreferencesStore } from '@renderer/store/preferencesStore'
@@ -25,6 +27,7 @@ type MenuItem =
 type MenuDef = { label: string; items: MenuItem[] }
 
 function buildMenus(
+  t: TFunction,
   themeKey: DockThemeKey,
   setTheme: (key: DockThemeKey) => void,
   hasProject: boolean,
@@ -32,38 +35,38 @@ function buildMenus(
 ): MenuDef[] {
   return [
     {
-      label: 'File',
+      label: t('menu.file'),
       items: [
-        { kind: 'item', label: 'New Project…', shortcut: 'Ctrl+N', onSelect: newProject },
-        { kind: 'item', label: 'Open Project…', shortcut: 'Ctrl+O', onSelect: openProject },
+        { kind: 'item', label: t('menu.file_new'), shortcut: 'Ctrl+N', onSelect: newProject },
+        { kind: 'item', label: t('menu.file_open'), shortcut: 'Ctrl+O', onSelect: openProject },
         {
           kind: 'item',
-          label: 'Close Project',
+          label: t('menu.file_close'),
           disabled: !hasProject,
           onSelect: closeCurrentProject
         },
         { kind: 'separator' },
-        { kind: 'item', label: 'Save', shortcut: 'Ctrl+S', disabled: !hasProject },
+        { kind: 'item', label: t('menu.file_save'), shortcut: 'Ctrl+S', disabled: !hasProject },
         { kind: 'separator' },
         {
           kind: 'item',
-          label: 'Import Script…',
+          label: t('menu.file_import'),
           disabled: !hasProject,
           onSelect: openImportScript
         },
         {
           kind: 'submenu',
-          label: 'Export',
+          label: t('menu.file_export'),
           items: [
             {
               kind: 'item',
-              label: 'Export Audio (WAV)…',
+              label: t('menu.file_export_wav'),
               disabled: !hasProject,
               onSelect: exportAudioWav
             },
             {
               kind: 'item',
-              label: 'Export Subtitles (SRT)…',
+              label: t('menu.file_export_srt'),
               disabled: !hasProject,
               onSelect: exportSubtitlesSrt
             }
@@ -72,66 +75,66 @@ function buildMenus(
         { kind: 'separator' },
         {
           kind: 'item',
-          label: 'Exit',
+          label: t('menu.file_exit'),
           shortcut: 'Alt+F4',
           onSelect: () => window.api.window.close()
         }
       ]
     },
     {
-      label: 'Edit',
+      label: t('menu.edit'),
       items: [
-        { kind: 'item', label: 'Undo', shortcut: 'Ctrl+Z', disabled: true },
-        { kind: 'item', label: 'Redo', shortcut: 'Ctrl+Y', disabled: true },
+        { kind: 'item', label: t('menu.edit_undo'), shortcut: 'Ctrl+Z', disabled: true },
+        { kind: 'item', label: t('menu.edit_redo'), shortcut: 'Ctrl+Y', disabled: true },
         { kind: 'separator' },
-        { kind: 'item', label: 'Delete', shortcut: 'Delete' }
+        { kind: 'item', label: t('menu.edit_delete'), shortcut: 'Delete' }
       ]
     },
     {
-      label: 'View',
+      label: t('menu.view'),
       items: [
         {
           kind: 'item',
-          label: 'Reset Layout',
+          label: t('menu.view_reset_layout'),
           disabled: !hasProject,
           onSelect: resetWorkspaceLayout
         },
         { kind: 'separator' },
-        { kind: 'item', label: 'Toggle Segments Panel', disabled: true },
-        { kind: 'item', label: 'Toggle Inspector Panel', disabled: true },
-        { kind: 'item', label: 'Toggle Timeline Panel', disabled: true },
+        { kind: 'item', label: t('menu.view_toggle_segments'), disabled: true },
+        { kind: 'item', label: t('menu.view_toggle_inspector'), disabled: true },
+        { kind: 'item', label: t('menu.view_toggle_timeline'), disabled: true },
         { kind: 'separator' },
         {
           kind: 'submenu',
-          label: 'Dock Theme (预览)',
+          label: t('menu.view_dock_theme'),
           items: [
             {
               kind: 'radioGroup',
               value: themeKey,
               onValueChange: (v) => setTheme(v as DockThemeKey),
-              options: themeRegistry.map((t) => ({ value: t.key, label: t.label }))
+              options: themeRegistry.map((tm) => ({ value: tm.key, label: tm.label }))
             }
           ]
         }
       ]
     },
     {
-      label: 'Transport',
+      label: t('menu.transport'),
       items: [
-        { kind: 'item', label: 'Record', shortcut: 'R' },
-        { kind: 'item', label: 'Re-record', shortcut: 'Shift+R' },
+        { kind: 'item', label: t('menu.transport_record'), shortcut: 'R' },
+        { kind: 'item', label: t('menu.transport_rerecord'), shortcut: 'Shift+R' },
         { kind: 'separator' },
-        { kind: 'item', label: 'Play Current Segment', shortcut: 'Space' },
-        { kind: 'item', label: 'Play Project', shortcut: 'Shift+Space' },
-        { kind: 'item', label: 'Stop', shortcut: 'Esc' }
+        { kind: 'item', label: t('menu.transport_play_segment'), shortcut: 'Space' },
+        { kind: 'item', label: t('menu.transport_play_project'), shortcut: 'Shift+Space' },
+        { kind: 'item', label: t('menu.transport_stop'), shortcut: 'Esc' }
       ]
     },
     {
-      label: 'Help',
+      label: t('menu.help'),
       items: [
-        { kind: 'item', label: 'About Utterlane' },
-        { kind: 'item', label: 'License (MPL-2.0)' },
-        { kind: 'item', label: 'Project Homepage' }
+        { kind: 'item', label: t('menu.help_about') },
+        { kind: 'item', label: t('menu.help_license') },
+        { kind: 'item', label: t('menu.help_homepage') }
       ]
     }
   ]
@@ -238,6 +241,7 @@ function MenuButton({ menu }: { menu: MenuDef }): React.JSX.Element {
 }
 
 export function Titlebar(): React.JSX.Element {
+  const { t, i18n } = useTranslation()
   const project = useEditorStore((s) => s.project)
   const saved = useEditorStore((s) => s.saved)
   const themeKey = usePreferencesStore(
@@ -249,17 +253,20 @@ export function Titlebar(): React.JSX.Element {
 
   const hasProject = project !== null
 
-  // buildMenus 被 theme/prefs/project 改动驱动重建。setTheme 回调写回 preferences，
-  // 主进程广播后 store 自动刷新，从而驱动下次重建，形成闭环。
+  // buildMenus 被 theme/prefs/project/language 改动驱动重建。
+  // 依赖 i18n.language 而不是 t：t 的引用在语言切换时也会变，但用 language 做
+  // 显式依赖更明确
   const menus = useMemo(
     () =>
       buildMenus(
+        t,
         themeKey,
         (key) => updatePrefs({ appearance: { dockTheme: key } }),
         hasProject,
         openImportScript
       ),
-    [themeKey, updatePrefs, hasProject, openImportScript]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [t, i18n.language, themeKey, updatePrefs, hasProject, openImportScript]
   )
 
   useEffect(() => {
@@ -276,10 +283,10 @@ export function Titlebar(): React.JSX.Element {
             <>
               {project.title}
               {!saved && <span className="text-fg-dim"> ●</span>}
-              <span className="text-fg-dim"> — Utterlane</span>
+              <span className="text-fg-dim"> — {t('app.title')}</span>
             </>
           ) : (
-            'Utterlane'
+            t('app.title')
           )}
         </span>
       </div>

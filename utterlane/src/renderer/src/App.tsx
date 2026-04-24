@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import i18nInstance from './i18n'
 import { Titlebar } from './shell/Titlebar'
 import { StatusBar } from './shell/StatusBar'
 import { Workspace } from './shell/Workspace'
@@ -16,8 +17,16 @@ import { installKeyboardShortcuts } from './shell/keyboardShortcuts'
 function App(): React.JSX.Element {
   const hasProject = useEditorStore((s) => s.project !== null)
   const hydrated = usePreferencesStore((s) => s.hydrated)
+  const locale = usePreferencesStore((s) => s.prefs.appearance?.locale)
   const importScriptOpen = useDialogStore((s) => s.importScriptOpen)
   const closeImportScript = useDialogStore((s) => s.closeImportScript)
+
+  // 跟随 preferences 切换 UI 语言。hydrate 后至少触发一次确保和存储值一致。
+  useEffect(() => {
+    if (locale && i18nInstance.language !== locale) {
+      void i18nInstance.changeLanguage(locale)
+    }
+  }, [locale])
 
   // 启动时：
   //   1. 拉取偏好并订阅变更
@@ -45,16 +54,16 @@ function App(): React.JSX.Element {
       const { saved, playback } = useEditorStore.getState()
       if (playback === 'recording') {
         const ok = await confirm({
-          title: '正在录音，确定关闭吗？',
-          description: '当前录音将被丢弃。',
-          confirmLabel: '关闭并丢弃',
+          title: i18nInstance.t('confirm.close_recording_title'),
+          description: i18nInstance.t('confirm.close_recording_description'),
+          confirmLabel: i18nInstance.t('confirm.close_recording_btn'),
           tone: 'danger'
         })
         if (!ok) return
       } else if (!saved) {
         const ok = await confirm({
-          title: '还有未保存的改动，确定关闭吗？',
-          confirmLabel: '丢弃并关闭',
+          title: i18nInstance.t('confirm.close_unsaved_title'),
+          confirmLabel: i18nInstance.t('confirm.close_unsaved_btn'),
           tone: 'danger'
         })
         if (!ok) return

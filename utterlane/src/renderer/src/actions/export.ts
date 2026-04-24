@@ -1,3 +1,4 @@
+import i18n from '@renderer/i18n'
 import { showError, showSuccess } from '@renderer/store/toastStore'
 
 /**
@@ -7,12 +8,12 @@ import { showError, showSuccess } from '@renderer/store/toastStore'
 
 export async function exportAudioWav(): Promise<void> {
   const result = await window.api.export.audioWav()
-  handle(result, 'WAV 音频')
+  handle(result, i18n.t('export.kind_wav'))
 }
 
 export async function exportSubtitlesSrt(): Promise<void> {
   const result = await window.api.export.subtitlesSrt()
-  handle(result, 'SRT 字幕')
+  handle(result, i18n.t('export.kind_srt'))
 }
 
 function handle(
@@ -20,10 +21,14 @@ function handle(
   kind: string
 ): void {
   if (result.ok) {
-    const note = result.skipped > 0 ? `跳过 ${result.skipped} 条未录制段` : undefined
-    showSuccess(`${kind}导出成功`, note ? `${note}\n${result.filePath}` : result.filePath)
+    const note =
+      result.skipped > 0 ? i18n.t('export.skipped_count', { count: result.skipped }) : undefined
+    showSuccess(
+      i18n.t('export.success_title', { kind }),
+      note ? `${note}\n${result.filePath}` : result.filePath
+    )
     return
   }
   if (result.canceled) return // 用户主动取消不打扰
-  showError(`${kind}导出失败`, result.message)
+  showError(i18n.t('export.failure_title', { kind }), result.message)
 }

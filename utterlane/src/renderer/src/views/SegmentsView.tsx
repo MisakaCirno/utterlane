@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   DndContext,
   PointerSensor,
@@ -22,11 +23,12 @@ import { formatDuration } from '@renderer/lib/format'
 import { Circle, CircleCheck, FileText, Layers, GripVertical } from 'lucide-react'
 
 function StatusCell({ count }: { count: number }): React.JSX.Element {
+  const { t } = useTranslation()
   if (count === 0) {
     return (
       <span className="flex items-center gap-1 text-fg-dim">
         <Circle size={11} />
-        未录制
+        {t('segments.status_unrecorded')}
       </span>
     )
   }
@@ -34,13 +36,14 @@ function StatusCell({ count }: { count: number }): React.JSX.Element {
     return (
       <span className="flex items-center gap-1 text-ok">
         <CircleCheck size={11} />
-        已录制
+        {t('segments.status_recorded')}
       </span>
     )
   }
   return (
     <span className="flex items-center gap-1 text-ok">
-      <Layers size={11} />多 Take
+      <Layers size={11} />
+      {t('segments.status_multi_take')}
     </span>
   )
 }
@@ -77,12 +80,13 @@ function buildGridTemplate(w: ColWidths): string {
  * 让用户一眼知道下一步该做什么。
  */
 function EmptySegmentsHint(): React.JSX.Element {
+  const { t } = useTranslation()
   const openImportScript = useDialogStore((s) => s.openImportScript)
   return (
     <div className="flex h-full flex-col items-center justify-center gap-3 px-6 py-8 text-center">
       <FileText size={24} className="text-fg-dim" />
-      <div className="text-xs text-fg">还没有任何 Segment</div>
-      <div className="text-2xs text-fg-muted">把文案粘贴进来，每一行会被拆成一个 Segment</div>
+      <div className="text-xs text-fg">{t('segments.empty_title')}</div>
+      <div className="text-2xs text-fg-muted">{t('segments.empty_hint')}</div>
       <button
         onClick={openImportScript}
         className={cn(
@@ -90,7 +94,7 @@ function EmptySegmentsHint(): React.JSX.Element {
           'hover:bg-accent/90'
         )}
       >
-        导入文案
+        {t('segments.empty_action')}
       </button>
     </div>
   )
@@ -213,6 +217,7 @@ function SegmentRow({
 }
 
 export function SegmentsView(): React.JSX.Element {
+  const { t } = useTranslation()
   const order = useEditorStore((s) => s.order)
   const reorderSegments = useEditorStore((s) => s.reorderSegments)
 
@@ -327,22 +332,22 @@ export function SegmentsView(): React.JSX.Element {
       >
         <div className="h-full" />
         <div className="relative h-full px-2 text-right leading-7">
-          #
+          {t('segments.col_order')}
           <ResizeHandle onMouseDown={(e) => startDrag('orderText', e)} />
         </div>
         <div className="relative h-full px-2 leading-7">
-          文案
+          {t('segments.col_text')}
           <ResizeHandle onMouseDown={(e) => startDrag('textStatus', e)} />
         </div>
         <div className="relative h-full px-2 leading-7">
-          状态
+          {t('segments.col_status')}
           <ResizeHandle onMouseDown={(e) => startDrag('statusTakes', e)} />
         </div>
         <div className="relative h-full px-2 text-right leading-7">
-          Takes
+          {t('segments.col_takes')}
           <ResizeHandle onMouseDown={(e) => startDrag('takesDuration', e)} />
         </div>
-        <div className="px-2 text-right leading-7">时长</div>
+        <div className="px-2 text-right leading-7">{t('segments.col_duration')}</div>
       </div>
 
       <div className="flex-1 overflow-y-auto">

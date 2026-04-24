@@ -1,8 +1,10 @@
 import { Activity, Check, CircleDot, Layers, Mic2 } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import { useEditorStore } from '@renderer/store/editorStore'
 import { cn } from '@renderer/lib/cn'
 
 export function StatusBar(): React.JSX.Element {
+  const { t } = useTranslation()
   const project = useEditorStore((s) => s.project)
   const saved = useEditorStore((s) => s.saved)
   const playback = useEditorStore((s) => s.playback)
@@ -18,7 +20,7 @@ export function StatusBar(): React.JSX.Element {
   if (!project) {
     return (
       <div className="flex h-6 shrink-0 items-center border-t border-border bg-chrome px-3 text-2xs text-fg-dim">
-        无活动工程
+        {t('statusbar.no_project')}
       </div>
     )
   }
@@ -29,33 +31,39 @@ export function StatusBar(): React.JSX.Element {
 
   const statusText =
     playback === 'recording'
-      ? '正在录音'
+      ? t('statusbar.playback_recording')
       : playback === 'segment'
         ? paused
-          ? '当前句已暂停'
-          : '正在播放当前句'
+          ? t('statusbar.playback_segment_paused')
+          : t('statusbar.playback_segment')
         : playback === 'project'
           ? paused
-            ? '项目已暂停'
-            : '正在播放项目'
+            ? t('statusbar.playback_project_paused')
+            : t('statusbar.playback_project')
           : takeCount === 0
-            ? '未录制'
-            : '已录制'
+            ? t('statusbar.playback_idle_unrecorded')
+            : t('statusbar.playback_idle_recorded')
 
   return (
     <div className="flex h-6 shrink-0 items-center justify-between border-t border-border bg-chrome px-3 text-2xs text-fg-muted">
       <div className="flex items-center gap-4">
         <span className={cn('flex items-center gap-1', saved ? 'text-fg-muted' : 'text-accent')}>
           {saved ? <Check size={11} /> : <CircleDot size={11} />}
-          {saved ? '已保存' : '未保存'}
+          {saved ? t('statusbar.saved') : t('statusbar.unsaved')}
         </span>
         <span className="flex items-center gap-1">
           <Activity size={11} />
-          {project.audio.sampleRate / 1000} kHz · {project.audio.channels === 1 ? 'Mono' : 'Stereo'}
+          {t('statusbar.sample_rate', {
+            khz: project.audio.sampleRate / 1000,
+            channels:
+              project.audio.channels === 1
+                ? t('project_settings.channel_mono')
+                : t('project_settings.channel_stereo')
+          })}
         </span>
         <span className="flex items-center gap-1">
           <Mic2 size={11} />
-          默认输入设备
+          {t('statusbar.default_input')}
         </span>
       </div>
 
@@ -63,12 +71,12 @@ export function StatusBar(): React.JSX.Element {
         {segIndex >= 0 && (
           <span className="flex items-center gap-1 font-mono tabular-nums">
             <Layers size={11} />
-            Segment {segIndex + 1} / {order.length}
+            {t('statusbar.segment_index', { index: segIndex + 1, total: order.length })}
           </span>
         )}
         {takeCount > 0 && (
           <span className="font-mono tabular-nums">
-            Take {currentTakeIdx + 1} / {takeCount}
+            {t('statusbar.take_index', { index: currentTakeIdx + 1, total: takeCount })}
           </span>
         )}
         <span className={cn(playback === 'recording' && 'text-rec')}>
@@ -81,7 +89,7 @@ export function StatusBar(): React.JSX.Element {
             statusText
           )}
         </span>
-        <span>后台任务：无</span>
+        <span>{t('statusbar.background_none')}</span>
       </div>
     </div>
   )

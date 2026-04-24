@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Play, Square, Mic, RotateCcw, Trash2, Check, Circle } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import { cn } from '@renderer/lib/cn'
 import { useEditorStore } from '@renderer/store/editorStore'
 import { confirm } from '@renderer/store/confirmStore'
@@ -15,6 +16,7 @@ import { subscribeLevel } from '@renderer/services/recorder'
  * 避免 React 高频重渲染。
  */
 function LevelMeter(): React.JSX.Element {
+  const { t } = useTranslation()
   const [level, setLevel] = useState(0)
 
   useEffect(() => {
@@ -40,7 +42,7 @@ function LevelMeter(): React.JSX.Element {
 
   return (
     <div className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2">
-      <span className="text-2xs text-fg-muted">电平</span>
+      <span className="text-2xs text-fg-muted">{t('inspector.level_label')}</span>
       <div className="relative h-2 flex-1 overflow-hidden rounded-sm bg-bg-deep">
         <div
           className={cn('h-full origin-left transition-[width] duration-75', color)}
@@ -84,6 +86,7 @@ function ToolbarButton({
 }
 
 export function InspectorView(): React.JSX.Element {
+  const { t } = useTranslation()
   const order = useEditorStore((s) => s.order)
   const selectedId = useEditorStore((s) => s.selectedSegmentId)
   const segment = useEditorStore((s) =>
@@ -105,7 +108,7 @@ export function InspectorView(): React.JSX.Element {
   if (!segment || !selectedId) {
     return (
       <div className="flex h-full items-center justify-center bg-bg text-2xs text-fg-dim">
-        未选中 Segment
+        {t('inspector.unselected')}
       </div>
     )
   }
@@ -119,9 +122,9 @@ export function InspectorView(): React.JSX.Element {
 
   const onDeleteSegment = async (): Promise<void> => {
     const ok = await confirm({
-      title: '删除这条 Segment？',
+      title: t('confirm.delete_segment_title'),
       description: segment.text,
-      confirmLabel: '删除',
+      confirmLabel: t('common.delete'),
       tone: 'danger'
     })
     if (ok) deleteSegment(selectedId)
@@ -130,12 +133,12 @@ export function InspectorView(): React.JSX.Element {
   return (
     <div className="flex h-full flex-col bg-bg">
       <div className="border-b border-border px-3 py-2">
-        <Field label="顺序">
+        <Field label={t('inspector.field_order')}>
           <span className="font-mono tabular-nums">
             {index + 1} / {order.length}
           </span>
         </Field>
-        <Field label="文案">
+        <Field label={t('inspector.field_text')}>
           <textarea
             value={segment.text}
             onChange={(e) => editSegmentText(selectedId, e.target.value)}
@@ -157,57 +160,59 @@ export function InspectorView(): React.JSX.Element {
           }
         >
           {playback === 'segment' ? <Square size={11} /> : <Play size={11} />}
-          {playback === 'segment' ? '停止' : '播放'}
+          {playback === 'segment' ? t('inspector.btn_stop') : t('inspector.btn_play')}
         </ToolbarButton>
         <ToolbarButton
           onClick={stopPlayback}
           disabled={isRecordingOther || isRecordingThis || playback === 'idle'}
         >
           <Square size={11} />
-          停止
+          {t('inspector.btn_stop')}
         </ToolbarButton>
         <div className="mx-1 h-4 w-px bg-border" />
         {isRecordingThis ? (
           <>
             <ToolbarButton active danger onClick={stopRecording}>
               <Square size={11} />
-              停止录音
+              {t('inspector.btn_stop_recording')}
             </ToolbarButton>
-            <ToolbarButton onClick={cancelRecording}>取消</ToolbarButton>
+            <ToolbarButton onClick={cancelRecording}>{t('inspector.btn_cancel')}</ToolbarButton>
           </>
         ) : (
           <>
             <ToolbarButton onClick={startRecording} disabled={isRecordingOther}>
               <Mic size={11} />
-              录音
+              {t('inspector.btn_record')}
             </ToolbarButton>
             <ToolbarButton
               onClick={startRerecording}
               disabled={isRecordingOther || !segment.selectedTakeId}
             >
               <RotateCcw size={11} />
-              重录
+              {t('inspector.btn_rerecord')}
             </ToolbarButton>
           </>
         )}
         <div className="ml-auto" />
         <ToolbarButton danger onClick={onDeleteSegment} disabled={isRecordingThis}>
           <Trash2 size={11} />
-          删除 Segment
+          {t('inspector.btn_delete_segment')}
         </ToolbarButton>
       </div>
 
       {isRecordingThis && <LevelMeter />}
 
       <div className="flex shrink-0 items-center justify-between border-b border-border px-3 py-1.5">
-        <span className="text-2xs text-fg-muted">Takes</span>
-        <span className="text-2xs text-fg-dim">{segment.takes.length} 个</span>
+        <span className="text-2xs text-fg-muted">{t('inspector.takes_label')}</span>
+        <span className="text-2xs text-fg-dim">
+          {t('inspector.takes_count', { count: segment.takes.length })}
+        </span>
       </div>
 
       <div className="flex-1 overflow-y-auto">
         {segment.takes.length === 0 ? (
           <div className="flex h-full items-center justify-center text-2xs text-fg-dim">
-            还没有录音
+            {t('inspector.takes_empty')}
           </div>
         ) : (
           segment.takes.map((take, i) => {
@@ -227,7 +232,7 @@ export function InspectorView(): React.JSX.Element {
                     <Circle size={8} className="text-fg-dim" />
                   )}
                 </div>
-                <div className="flex-1 truncate">Take {i + 1}</div>
+                <div className="flex-1 truncate">{t('inspector.take_item', { index: i + 1 })}</div>
                 <div className="w-16 text-right font-mono text-2xs tabular-nums text-fg-muted">
                   {formatDuration(take.durationMs)}
                 </div>
@@ -242,12 +247,12 @@ export function InspectorView(): React.JSX.Element {
                   )}
                   disabled={isCurrent}
                 >
-                  {isCurrent ? '当前' : '设为当前'}
+                  {isCurrent ? t('inspector.take_current') : t('inspector.take_set_current')}
                 </button>
                 <button
                   onClick={() => deleteTake(selectedId, take.id)}
                   className="rounded-sm p-1 text-fg-muted hover:bg-bg-raised hover:text-rec"
-                  aria-label="删除 Take"
+                  aria-label={t('inspector.take_delete_aria')}
                 >
                   <Trash2 size={11} />
                 </button>

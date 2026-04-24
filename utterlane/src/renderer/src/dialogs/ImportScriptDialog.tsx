@@ -1,6 +1,7 @@
 import * as Dialog from '@radix-ui/react-dialog'
 import { useState } from 'react'
 import { X } from 'lucide-react'
+import { Trans, useTranslation } from 'react-i18next'
 import { useEditorStore } from '@renderer/store/editorStore'
 import { confirm } from '@renderer/store/confirmStore'
 import { cn } from '@renderer/lib/cn'
@@ -20,6 +21,7 @@ export function ImportScriptDialog({
   open: boolean
   onOpenChange: (open: boolean) => void
 }): React.JSX.Element {
+  const { t } = useTranslation()
   const segmentsCount = useEditorStore((s) => s.order.length)
   const importScript = useEditorStore((s) => s.importScript)
   const [text, setText] = useState('')
@@ -33,9 +35,9 @@ export function ImportScriptDialog({
     if (lineCount === 0) return
     if (segmentsCount > 0) {
       const ok = await confirm({
-        title: '替换已有 Segments？',
-        description: `当前工程已有 ${segmentsCount} 条 Segment，导入会全部替换。`,
-        confirmLabel: '替换',
+        title: t('import_dialog.confirm_replace_title'),
+        description: t('import_dialog.confirm_replace_description', { count: segmentsCount }),
+        confirmLabel: t('import_dialog.confirm_replace_btn'),
         tone: 'danger'
       })
       if (!ok) return
@@ -57,10 +59,10 @@ export function ImportScriptDialog({
           )}
         >
           <div className="flex h-9 shrink-0 items-center justify-between border-b border-border px-3">
-            <Dialog.Title className="text-xs text-fg">导入文案</Dialog.Title>
+            <Dialog.Title className="text-xs text-fg">{t('import_dialog.title')}</Dialog.Title>
             <Dialog.Close
               className="rounded-sm p-1 text-fg-muted hover:bg-chrome-hover hover:text-fg"
-              aria-label="关闭"
+              aria-label={t('common.close')}
             >
               <X size={12} />
             </Dialog.Close>
@@ -68,13 +70,13 @@ export function ImportScriptDialog({
 
           <div className="flex flex-col gap-2 px-3 py-3">
             <Dialog.Description className="text-2xs text-fg-muted">
-              粘贴文案，每行会被拆分为一个 Segment（空行会被忽略）。
+              {t('import_dialog.description')}
             </Dialog.Description>
 
             <textarea
               value={text}
               onChange={(e) => setText(e.target.value)}
-              placeholder="在这里粘贴你的文案…"
+              placeholder={t('import_dialog.placeholder')}
               rows={12}
               className={cn(
                 'w-full resize-none rounded-sm border border-border bg-bg-deep px-2 py-1.5',
@@ -84,9 +86,15 @@ export function ImportScriptDialog({
             />
 
             <div className="text-2xs text-fg-dim">
-              将生成 <span className="text-fg">{lineCount}</span> 条 Segment
+              <Trans
+                i18nKey="import_dialog.will_generate"
+                values={{ count: lineCount }}
+                components={{ strong: <span className="text-fg" /> }}
+              />
               {segmentsCount > 0 && (
-                <span className="ml-2 text-rec">· 当前已有 {segmentsCount} 条，导入会替换</span>
+                <span className="ml-2 text-rec">
+                  · {t('import_dialog.overwrite_warning', { count: segmentsCount })}
+                </span>
               )}
             </div>
           </div>
@@ -98,7 +106,7 @@ export function ImportScriptDialog({
                 'hover:border-border-strong hover:bg-chrome-hover'
               )}
             >
-              取消
+              {t('common.cancel')}
             </Dialog.Close>
             <button
               onClick={onConfirm}
@@ -109,7 +117,9 @@ export function ImportScriptDialog({
                 'disabled:cursor-not-allowed disabled:opacity-40'
               )}
             >
-              导入 {lineCount > 0 && `(${lineCount})`}
+              {lineCount > 0
+                ? t('import_dialog.btn_import_count', { count: lineCount })
+                : t('import_dialog.btn_import')}
             </button>
           </div>
         </Dialog.Content>

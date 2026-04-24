@@ -26,6 +26,7 @@ import {
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { useEffect, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
 import { cn } from '@renderer/lib/cn'
 import { useEditorStore } from '@renderer/store/editorStore'
 import { formatDuration } from '@renderer/lib/format'
@@ -72,6 +73,7 @@ function RowLabel({ children }: { children: React.ReactNode }): React.JSX.Elemen
 }
 
 function ControlBar(): React.JSX.Element {
+  const { t } = useTranslation()
   const segment = useEditorStore((s) =>
     s.selectedSegmentId ? s.segmentsById[s.selectedSegmentId] : undefined
   )
@@ -127,17 +129,17 @@ function ControlBar(): React.JSX.Element {
   return (
     <div className="shrink-0 border-b border-border bg-bg-panel">
       <div className="relative flex h-8 items-center justify-center border-b border-border-subtle px-2">
-        <RowLabel>Segment</RowLabel>
+        <RowLabel>{t('timeline.row_segment')}</RowLabel>
         <div className="flex items-center gap-0.5 rounded-sm border border-border bg-bg-deep p-0.5">
           <IconButton
-            title="上一句"
+            title={t('timeline.btn_prev_segment')}
             onClick={onPrevSegment}
             disabled={isBusy || !selectedId || order.indexOf(selectedId) <= 0}
           >
             <ChevronLeft size={13} />
           </IconButton>
           <IconButton
-            title="下一句"
+            title={t('timeline.btn_next_segment')}
             onClick={onNextSegment}
             disabled={isBusy || !selectedId || order.indexOf(selectedId) >= order.length - 1}
           >
@@ -145,14 +147,14 @@ function ControlBar(): React.JSX.Element {
           </IconButton>
           <div className="mx-0.5 h-4 w-px bg-border" />
           <IconButton
-            title="上一个 Take"
+            title={t('timeline.btn_prev_take')}
             onClick={() => stepTake(-1)}
             disabled={isBusy || takeCount < 2}
           >
             <SkipBack size={12} />
           </IconButton>
           <IconButton
-            title="下一个 Take"
+            title={t('timeline.btn_next_take')}
             onClick={() => stepTake(1)}
             disabled={isBusy || takeCount < 2}
           >
@@ -160,7 +162,11 @@ function ControlBar(): React.JSX.Element {
           </IconButton>
           <div className="mx-0.5 h-4 w-px bg-border" />
           <IconButton
-            title={playback === 'segment' ? '停止' : '播放当前句'}
+            title={
+              playback === 'segment'
+                ? t('timeline.btn_stop_segment')
+                : t('timeline.btn_play_segment')
+            }
             active={playback === 'segment'}
             disabled={
               playback === 'project' || playback === 'recording' || !segment?.selectedTakeId
@@ -170,7 +176,7 @@ function ControlBar(): React.JSX.Element {
             {playback === 'segment' ? <Square size={11} /> : <Play size={12} />}
           </IconButton>
           <IconButton
-            title={paused ? '继续' : '暂停'}
+            title={paused ? t('timeline.btn_resume') : t('timeline.btn_pause')}
             active={paused}
             onClick={togglePause}
             disabled={playback !== 'segment' && playback !== 'project'}
@@ -178,7 +184,7 @@ function ControlBar(): React.JSX.Element {
             {paused ? <Play size={12} /> : <Pause size={12} />}
           </IconButton>
           <IconButton
-            title="停止"
+            title={t('timeline.btn_stop_segment')}
             onClick={stopPlayback}
             disabled={playback === 'idle' || playback === 'recording'}
           >
@@ -186,7 +192,7 @@ function ControlBar(): React.JSX.Element {
           </IconButton>
           <div className="mx-0.5 h-4 w-px bg-border" />
           <IconButton
-            title={isRecordingThis ? '停止录音' : '录音'}
+            title={isRecordingThis ? t('timeline.btn_stop_recording') : t('timeline.btn_record')}
             active={isRecordingThis}
             danger
             disabled={
@@ -197,7 +203,7 @@ function ControlBar(): React.JSX.Element {
             {isRecordingThis ? <Square size={11} /> : <Mic size={12} />}
           </IconButton>
           <IconButton
-            title="重录（覆盖当前 Take）"
+            title={t('timeline.btn_rerecord')}
             disabled={isBusy || !segment?.selectedTakeId}
             onClick={() => void startRerecording()}
           >
@@ -207,10 +213,10 @@ function ControlBar(): React.JSX.Element {
       </div>
 
       <div className="relative flex h-8 items-center justify-center px-2">
-        <RowLabel>Project</RowLabel>
+        <RowLabel>{t('timeline.row_project')}</RowLabel>
         <div className="flex items-center gap-0.5 rounded-sm border border-border bg-bg-deep p-0.5">
           <IconButton
-            title="从头播放项目"
+            title={t('timeline.btn_play_project_from_start')}
             onClick={() => {
               if (order.length > 0) selectSegment(order[0])
               void playProject()
@@ -220,7 +226,11 @@ function ControlBar(): React.JSX.Element {
             <Rewind size={12} />
           </IconButton>
           <IconButton
-            title={playback === 'project' ? '停止' : '播放项目'}
+            title={
+              playback === 'project'
+                ? t('timeline.btn_stop_project')
+                : t('timeline.btn_play_project')
+            }
             active={playback === 'project'}
             disabled={playback === 'segment' || playback === 'recording' || order.length === 0}
             onClick={playback === 'project' ? stopPlayback : () => void playProject()}
@@ -228,14 +238,18 @@ function ControlBar(): React.JSX.Element {
             {playback === 'project' ? <Square size={11} /> : <Play size={12} />}
           </IconButton>
           <IconButton
-            title={paused ? '继续项目' : '暂停项目'}
+            title={paused ? t('timeline.btn_resume_project') : t('timeline.btn_pause_project')}
             active={paused}
             onClick={togglePause}
             disabled={playback !== 'project'}
           >
             {paused ? <Play size={12} /> : <Pause size={12} />}
           </IconButton>
-          <IconButton title="停止项目" onClick={stopPlayback} disabled={playback !== 'project'}>
+          <IconButton
+            title={t('timeline.btn_stop_project')}
+            onClick={stopPlayback}
+            disabled={playback !== 'project'}
+          >
             <Square size={11} />
           </IconButton>
         </div>
@@ -260,6 +274,7 @@ function TimelineClip({
   idx: number
   startMs: number
 }): React.JSX.Element | null {
+  const { t } = useTranslation()
   const seg = useEditorStore((s) => s.segmentsById[id])
   const isSelected = useEditorStore((s) => s.selectedSegmentId === id)
   const selectSegment = useEditorStore((s) => s.selectSegment)
@@ -321,7 +336,11 @@ function TimelineClip({
       </div>
       <div className="flex items-center justify-between font-mono tabular-nums opacity-70">
         <span>{formatDuration(startMs)}</span>
-        {hasAudio ? <span>{formatDuration(current.durationMs)}</span> : <span>未录制</span>}
+        {hasAudio ? (
+          <span>{formatDuration(current.durationMs)}</span>
+        ) : (
+          <span>{t('timeline.clip_unrecorded')}</span>
+        )}
       </div>
     </div>
   )

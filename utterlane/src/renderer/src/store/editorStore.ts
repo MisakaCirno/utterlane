@@ -9,6 +9,7 @@ import type { PlaybackMode, Project, Segment } from '@renderer/types/project'
 import * as recorder from '@renderer/services/recorder'
 import * as player from '@renderer/services/player'
 import { showError } from '@renderer/store/toastStore'
+import i18n from '@renderer/i18n'
 
 /**
  * 编辑器 store 承载「当前打开的工程」的全部内存状态。
@@ -142,7 +143,10 @@ function scheduleSegmentsSave(): void {
       } else {
         // 工程内容写入失败是严重问题，弹出提示让用户知道
         console.error('[editorStore] saveSegments failed:', result.message)
-        showError('保存失败', `segments.json 写入出错：${result.message}`)
+        showError(
+          i18n.t('errors.save_segments_title'),
+          i18n.t('errors.save_segments_description', { message: result.message })
+        )
       }
     })
   }, SEGMENTS_SAVE_DEBOUNCE_MS)
@@ -394,7 +398,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       await recorder.startRecording({ channels: state.project.audio.channels })
     } catch (err) {
       set({ playback: 'idle', recordingSegmentId: null, recordingTakeId: null })
-      showError('无法开始录音', (err as Error).message)
+      showError(i18n.t('errors.recording_start_title'), (err as Error).message)
     }
   },
 
@@ -418,7 +422,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       await recorder.startRecording({ channels: state.project.audio.channels })
     } catch (err) {
       set({ playback: 'idle', recordingSegmentId: null, recordingTakeId: null })
-      showError('无法开始录音', (err as Error).message)
+      showError(i18n.t('errors.recording_start_title'), (err as Error).message)
     }
   },
 
@@ -434,14 +438,14 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       result = await recorder.stopRecording()
     } catch (err) {
       set({ playback: 'idle', recordingSegmentId: null, recordingTakeId: null })
-      showError('停止录音失败', (err as Error).message)
+      showError(i18n.t('errors.recording_stop_title'), (err as Error).message)
       return
     }
 
     const writeRes = await window.api.recording.writeTake(segmentId, takeId, result.buffer)
     if (!writeRes.ok) {
       set({ playback: 'idle', recordingSegmentId: null, recordingTakeId: null })
-      showError('录音落盘失败', writeRes.message)
+      showError(i18n.t('errors.recording_persist_title'), writeRes.message)
       return
     }
 
