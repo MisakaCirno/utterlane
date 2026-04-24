@@ -5,6 +5,7 @@ import { cn } from '@renderer/lib/cn'
 import { useEditorStore } from '@renderer/store/editorStore'
 import { usePreferencesStore } from '@renderer/store/preferencesStore'
 import { DEFAULT_PREFERENCES, type DockThemeKey } from '@shared/preferences'
+import { closeCurrentProject, newProject, openProject } from '@renderer/actions/project'
 import { themeRegistry } from './themes'
 
 type MenuItem =
@@ -20,27 +21,42 @@ type MenuItem =
 
 type MenuDef = { label: string; items: MenuItem[] }
 
-function buildMenus(themeKey: DockThemeKey, setTheme: (key: DockThemeKey) => void): MenuDef[] {
+function buildMenus(
+  themeKey: DockThemeKey,
+  setTheme: (key: DockThemeKey) => void,
+  hasProject: boolean
+): MenuDef[] {
   return [
     {
       label: 'File',
       items: [
-        { kind: 'item', label: 'New Project…', shortcut: 'Ctrl+N' },
-        { kind: 'item', label: 'Open Project…', shortcut: 'Ctrl+O' },
+        { kind: 'item', label: 'New Project…', shortcut: 'Ctrl+N', onSelect: newProject },
+        { kind: 'item', label: 'Open Project…', shortcut: 'Ctrl+O', onSelect: openProject },
+        {
+          kind: 'item',
+          label: 'Close Project',
+          disabled: !hasProject,
+          onSelect: closeCurrentProject
+        },
         { kind: 'separator' },
-        { kind: 'item', label: 'Save', shortcut: 'Ctrl+S' },
+        { kind: 'item', label: 'Save', shortcut: 'Ctrl+S', disabled: !hasProject },
         { kind: 'separator' },
-        { kind: 'item', label: 'Import Script…' },
+        { kind: 'item', label: 'Import Script…', disabled: !hasProject },
         {
           kind: 'submenu',
           label: 'Export',
           items: [
-            { kind: 'item', label: 'Export Audio (WAV)…' },
-            { kind: 'item', label: 'Export Subtitles (SRT)…' }
+            { kind: 'item', label: 'Export Audio (WAV)…', disabled: !hasProject },
+            { kind: 'item', label: 'Export Subtitles (SRT)…', disabled: !hasProject }
           ]
         },
         { kind: 'separator' },
-        { kind: 'item', label: 'Exit', shortcut: 'Alt+F4' }
+        {
+          kind: 'item',
+          label: 'Exit',
+          shortcut: 'Alt+F4',
+          onSelect: () => window.api.window.close()
+        }
       ]
     },
     {
@@ -206,11 +222,14 @@ export function Titlebar(): React.JSX.Element {
   const updatePrefs = usePreferencesStore((s) => s.update)
   const [maximized, setMaximized] = useState(false)
 
-  // buildMenus 被 theme/prefs 改动驱动重建。setTheme 回调写回 preferences，
+  const hasProject = project !== null
+
+  // buildMenus 被 theme/prefs/project 改动驱动重建。setTheme 回调写回 preferences，
   // 主进程广播后 store 自动刷新，从而驱动下次重建，形成闭环。
   const menus = useMemo(
-    () => buildMenus(themeKey, (key) => updatePrefs({ appearance: { dockTheme: key } })),
-    [themeKey, updatePrefs]
+    () =>
+      buildMenus(themeKey, (key) => updatePrefs({ appearance: { dockTheme: key } }), hasProject),
+    [themeKey, updatePrefs, hasProject]
   )
 
   useEffect(() => {

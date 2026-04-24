@@ -1,33 +1,5 @@
-export type Take = {
-  id: string
-  filePath: string
-  durationMs: number
-}
+// 工程数据模型统一从 @shared 导出，renderer 端只保留 UI 级状态类型。
+export type { Project, Segment, Take } from '@shared/project'
 
-export type Segment = {
-  id: string
-  text: string
-  takes: Take[]
-  selectedTakeId?: string
-}
-
-export type Project = {
-  id: string
-  title: string
-  createdAt: string
-  updatedAt: string
-  audio: {
-    sampleRate: number
-    channels: 1 | 2
-  }
-  paths: {
-    segmentsFile: string
-    audiosDir: string
-  }
-  exportDefaults: {
-    audioFormat: 'wav'
-    subtitleFormat: 'srt'
-  }
-}
-
+/** 播放 / 录音的互斥状态机，仅 renderer 本地使用 */
 export type PlaybackMode = 'idle' | 'segment' | 'project' | 'recording'

@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 import type { AppPreferences } from '@shared/preferences'
+import type { ProjectBundle, WorkspaceFile } from '@shared/project'
 
 // IPC 通道名需要和 main 侧保持一致。
 // 这里复制字面量而不是 import 主进程的常量，是因为 preload 打包时
@@ -8,6 +9,19 @@ import type { AppPreferences } from '@shared/preferences'
 const PREFERENCES_GET = 'preferences:get'
 const PREFERENCES_UPDATE = 'preferences:update'
 const PREFERENCES_CHANGED = 'preferences:changed'
+
+const PROJECT_NEW = 'project:new'
+const PROJECT_OPEN = 'project:open'
+const PROJECT_OPEN_PATH = 'project:open-path'
+const PROJECT_CLOSE = 'project:close'
+const PROJECT_CURRENT = 'project:current'
+const PROJECT_SAVE_WORKSPACE = 'project:save-workspace'
+
+/** 与 main 的 OpenResult 保持同步；preload 不 import main 代码，所以在这里复述结构 */
+export type OpenResult =
+  | { ok: true; bundle: ProjectBundle }
+  | { ok: false; reason: 'busy'; heldByPid: number }
+  | { ok: false; reason: 'invalid'; message: string }
 
 const api = {
   window: {
@@ -42,6 +56,25 @@ const api = {
       ipcRenderer.on(PREFERENCES_CHANGED, listener)
       return () => ipcRenderer.removeListener(PREFERENCES_CHANGED, listener)
     }
+  },
+
+  project: {
+    /** 弹目录选择对话框创建新工程；返回的 bundle 即「打开」后的完整状态 */
+    new: (): Promise<OpenResult> => ipcRenderer.invoke(PROJECT_NEW),
+
+    /** 弹目录选择对话框打开现有工程 */
+    open: (): Promise<OpenResult> => ipcRenderer.invoke(PROJECT_OPEN),
+
+    /** 按给定路径打开（最近工程条目点击时使用） */
+    openPath: (path: string): Promise<OpenResult> => ipcRenderer.invoke(PROJECT_OPEN_PATH, path),
+
+    close: (): Promise<void> => ipcRenderer.invoke(PROJECT_CLOSE),
+
+    /** 查询当前正在打开的工程路径，null 表示无活动工程 */
+    getCurrent: (): Promise<string | null> => ipcRenderer.invoke(PROJECT_CURRENT),
+
+    /** 上报整份 workspace 状态给 main 做 debounce 保存 */
+    saveWorkspace: (next: WorkspaceFile): void => ipcRenderer.send(PROJECT_SAVE_WORKSPACE, next)
   }
 }
 

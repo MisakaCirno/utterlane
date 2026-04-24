@@ -1,7 +1,7 @@
-import { FolderOpen, FileText, Mic, Clock } from 'lucide-react'
-import { useEditorStore } from '@renderer/store/editorStore'
+import { FolderOpen, FileText, Mic, Clock, X } from 'lucide-react'
 import { usePreferencesStore } from '@renderer/store/preferencesStore'
 import { cn } from '@renderer/lib/cn'
+import { newProject, openProject, openProjectPath } from '@renderer/actions/project'
 
 /**
  * 无活动工程时显示的欢迎页。
@@ -10,13 +10,14 @@ import { cn } from '@renderer/lib/cn'
  *   - 首次启动
  *   - 最近工程路径失效
  *   - 用户主动关闭当前工程
- *
- * 本页只承担「进入工程」的入口职责，不做编辑。
- * 打开 / 新建工程按钮当前是 stub —— Slice B 接入真实的文件对话框与加载流程后替换。
  */
 export function WelcomeView(): React.JSX.Element {
-  const openMockProject = useEditorStore((s) => s.openMockProject)
   const recentProjects = usePreferencesStore((s) => s.prefs.recentProjects ?? [])
+  const updatePrefs = usePreferencesStore((s) => s.update)
+
+  const removeRecent = (path: string): void => {
+    updatePrefs({ recentProjects: recentProjects.filter((p) => p !== path) })
+  }
 
   return (
     <div className="flex flex-1 items-center justify-center overflow-auto bg-bg">
@@ -32,19 +33,13 @@ export function WelcomeView(): React.JSX.Element {
               icon={<FileText size={14} />}
               label="新建工程"
               hint="从一段文案开始"
-              onClick={() => {
-                // TODO (Slice B): 弹出新建工程对话框并创建 project.json
-                openMockProject()
-              }}
+              onClick={newProject}
             />
             <WelcomeAction
               icon={<FolderOpen size={14} />}
               label="打开工程"
               hint="选择现有工程目录"
-              onClick={() => {
-                // TODO (Slice B): 走系统目录选择 + 校验 project.json
-                openMockProject()
-              }}
+              onClick={openProject}
             />
           </div>
         </div>
@@ -61,7 +56,7 @@ export function WelcomeView(): React.JSX.Element {
           ) : (
             <ul className="flex flex-col">
               {recentProjects.map((path) => (
-                <RecentProjectItem key={path} path={path} />
+                <RecentProjectItem key={path} path={path} onRemove={() => removeRecent(path)} />
               ))}
             </ul>
           )}
@@ -101,24 +96,39 @@ function WelcomeAction({
   )
 }
 
-function RecentProjectItem({ path }: { path: string }): React.JSX.Element {
+function RecentProjectItem({
+  path,
+  onRemove
+}: {
+  path: string
+  onRemove: () => void
+}): React.JSX.Element {
   // 从绝对路径中拆出目录名作为主标题，完整路径作为副标题
   const name = path.split(/[\\/]/).filter(Boolean).pop() ?? path
   return (
-    <li>
+    <li className="group flex items-center">
       <button
-        onClick={() => {
-          // TODO (Slice B): 校验路径是否仍然有效，有效则加载，失效则提示并允许移除
-        }}
+        onClick={() => openProjectPath(path)}
         className={cn(
-          'flex w-full flex-col items-start gap-0.5 rounded-sm px-2 py-1.5',
+          'flex flex-1 flex-col items-start gap-0.5 rounded-sm px-2 py-1.5',
           'hover:bg-bg-raised'
         )}
       >
         <span className="text-xs text-fg">{name}</span>
-        <span className="truncate text-2xs text-fg-dim" title={path}>
+        <span className="max-w-full truncate text-2xs text-fg-dim" title={path}>
           {path}
         </span>
+      </button>
+      <button
+        onClick={onRemove}
+        className={cn(
+          'ml-1 rounded-sm p-1 text-fg-dim opacity-0 transition-opacity',
+          'hover:bg-bg-raised hover:text-rec group-hover:opacity-100'
+        )}
+        title="从最近工程中移除"
+        aria-label="从最近工程中移除"
+      >
+        <X size={11} />
       </button>
     </li>
   )

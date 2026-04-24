@@ -3,6 +3,7 @@ import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { preferencesStore, registerPreferencesIpc } from './preferences'
+import { projectSession, registerProjectIpc } from './project-storage'
 import type { WindowBounds } from '@shared/preferences'
 
 /** 窗口尺寸下限：低于此值 UI 会严重挤压，拒绝接受更小的持久化值 */
@@ -98,6 +99,7 @@ app.whenReady().then(async () => {
   // 在创建窗口前加载偏好：窗口大小、位置、最大化状态都依赖它
   await preferencesStore.init()
   registerPreferencesIpc()
+  registerProjectIpc()
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
@@ -126,13 +128,15 @@ app.whenReady().then(async () => {
   })
 })
 
-// 退出前把 pending 的偏好变更刷盘，避免用户刚改了设置就关窗导致丢失。
+// 退出前把 pending 的偏好 + workspace 变更刷盘，
+// 并按规范释放工程锁（避免下次启动被自己的僵尸锁挡住）。
 // before-quit 可能多次触发（每个窗口关闭一次），用一个 flag 防止重入。
 let isFlushingOnQuit = false
 app.on('before-quit', async (event) => {
   if (isFlushingOnQuit) return
   event.preventDefault()
   isFlushingOnQuit = true
+  await projectSession.close()
   await preferencesStore.flush()
   // app.exit() 是硬退出，不会再触发 before-quit，所以不会循环
   app.exit()

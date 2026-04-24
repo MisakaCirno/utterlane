@@ -7,7 +7,7 @@ import {
   PREFERENCES_SCHEMA_VERSION,
   type AppPreferences
 } from '@shared/preferences'
-import { writeJsonAtomic } from './atomic-write'
+import { writeJsonAtomic } from '../lib/atomic-write'
 
 /**
  * 写盘节流时长：UI 上大多数偏好变更都是用户连续操作（拖拽窗口、调列宽、
