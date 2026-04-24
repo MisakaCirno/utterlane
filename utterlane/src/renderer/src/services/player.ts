@@ -18,6 +18,12 @@
 
 type LevelListener = (level: number) => void
 
+/**
+ * 位置事件：告诉订阅者当前正在播哪个文件 + 播到了多少毫秒。
+ * playingPath === null 表示当前无活跃播放（刚被 stop / 天然结束）。
+ */
+type PositionListener = (playingPath: string | null, positionMs: number) => void
+
 let currentAudio: HTMLAudioElement | null = null
 let currentObjectUrl: string | null = null
 let currentAudioContext: AudioContext | null = null
@@ -28,10 +34,10 @@ let levelRafId: number | null = null
 let sequenceAborted = false
 
 /**
- * 播放电平监听列表挂在模块作用域——和 recorder.ts 同样的原因：
- * UI 组件常驻，需要跨多个 play 会话保持订阅。
+ * 订阅列表挂在模块作用域——UI 组件常驻，需要跨多个 play 会话保持订阅。
  */
 const levelListeners = new Set<LevelListener>()
+const positionListeners = new Set<PositionListener>()
 
 async function loadBlobUrl(relativePath: string): Promise<string> {
   const buffer = await window.api.project.readTakeFile(relativePath)
@@ -43,13 +49,19 @@ function emitLevel(level: number): void {
   for (const cb of levelListeners) cb(level)
 }
 
+function emitPosition(path: string | null, positionMs: number): void {
+  for (const cb of positionListeners) cb(path, positionMs)
+}
+
 /**
  * 给 audio 元素包上 Web Audio 分析链：
  *   HTMLAudio → MediaElementSource → AnalyserNode → destination
  * analyser 挂在 destination 上保证声音能听到；
- * RAF 循环读取 time-domain 数据算 RMS。
+ * RAF 循环同时广播 level (RMS) 和 position (currentTime)。
+ *
+ * 合成到一个 RAF 循环里，避免开两个 rAF 互相竞争 + 浪费唤醒。
  */
-function startLevelAnalysis(audio: HTMLAudioElement): void {
+function startAnalysis(audio: HTMLAudioElement, relativePath: string): void {
   const ctx = new AudioContext()
   const source = ctx.createMediaElementSource(audio)
   const analyser = ctx.createAnalyser()
@@ -66,12 +78,13 @@ function startLevelAnalysis(audio: HTMLAudioElement): void {
     let sum = 0
     for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i]
     emitLevel(Math.sqrt(sum / buf.length))
+    emitPosition(relativePath, audio.currentTime * 1000)
     levelRafId = requestAnimationFrame(tick)
   }
   levelRafId = requestAnimationFrame(tick)
 }
 
-function stopLevelAnalysis(): void {
+function stopAnalysis(): void {
   if (levelRafId !== null) {
     cancelAnimationFrame(levelRafId)
     levelRafId = null
@@ -81,12 +94,13 @@ function stopLevelAnalysis(): void {
     void currentAudioContext.close()
     currentAudioContext = null
   }
-  // UI 归零
+  // UI 归零 + 通知「没有活跃播放」
   emitLevel(0)
+  emitPosition(null, 0)
 }
 
 function teardown(): void {
-  stopLevelAnalysis()
+  stopAnalysis()
   if (currentAudio) {
     currentAudio.pause()
     currentAudio.src = ''
@@ -126,9 +140,9 @@ export async function playFile(relativePath: string): Promise<void> {
   currentAudio = audio
   currentObjectUrl = url
 
-  // 起电平分析必须在调用 audio.play() 之前：某些浏览器要求 MediaElementSource
+  // 起分析必须在调用 audio.play() 之前：某些浏览器要求 MediaElementSource
   // 创建于首次 play 之前（不然会警告 CORS / already-connected 之类）
-  startLevelAnalysis(audio)
+  startAnalysis(audio, relativePath)
 
   return new Promise<void>((resolve) => {
     const done = (): void => {
@@ -172,4 +186,16 @@ export function resume(): void {
 export function subscribeLevel(cb: LevelListener): () => void {
   levelListeners.add(cb)
   return () => levelListeners.delete(cb)
+}
+
+/**
+ * 订阅播放位置。回调参数 (playingPath, positionMs)：
+ *   - playingPath !== null：正在播这个文件，positionMs 是当前播放毫秒数
+ *   - playingPath === null：当前没有活跃播放（停止 / 结束）
+ *
+ * 订阅者通常把 playingPath 和自己关心的文件比对，只在匹配时显示游标。
+ */
+export function subscribePosition(cb: PositionListener): () => void {
+  positionListeners.add(cb)
+  return () => positionListeners.delete(cb)
 }

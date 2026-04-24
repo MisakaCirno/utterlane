@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { cn } from '@renderer/lib/cn'
 import { computePeaks, loadSamples } from '@renderer/services/waveform'
+import { subscribePosition } from '@renderer/services/player'
 
 /**
  * 当前选中 Take 的波形显示。
@@ -12,30 +13,34 @@ import { computePeaks, loadSamples } from '@renderer/services/waveform'
  * DPR-aware：按 devicePixelRatio 放大 canvas 的 bitmap 尺寸，避免高分屏下模糊。
  * ResizeObserver 监听容器宽度变化重绘——dockview 拖动改面板大小时跟着走。
  *
- * 波形绘制依赖：
- *   - samples（异步解码）：filePath 变化时重新拉
- *   - 容器尺寸：ResizeObserver
- *   - 颜色：来自 CSS 变量读取一次（避免硬编码）
+ * 播放游标：订阅 player.subscribePosition，当事件里的 playingPath 正好是自己
+ * 显示的 filePath 时，在 canvas 上叠一条垂直线代表播放头位置。
  */
+
 type LoadResult = { path: string; samples: Float32Array } | { path: string; errorMessage: string }
+
+type CacheEntry = { samples: Float32Array; sampleRate: number }
 
 export function WaveformView({ filePath }: { filePath: string | null }): React.JSX.Element {
   const { t } = useTranslation()
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
-  /**
-   * 保存「最后一次成功 / 失败加载」的结果和所属 path。
-   * 渲染态（loading / samples / error）全部从 filePath 和 result.path 推导，
-   * 避免在 effect 里做同步 setState（被 react-hooks/set-state-in-effect 规则禁止）。
-   */
   const [result, setResult] = useState<LoadResult | null>(null)
+  // 缓存 sampleRate 用于把 playheadMs 换算到 canvas x 坐标。
+  // 独立于 result.samples 的状态——只在加载成功时一起设置。
+  const [entry, setEntry] = useState<CacheEntry | null>(null)
+  // playheadMs === null：当前不在播本文件；数值：播到了多少毫秒
+  const [playheadMs, setPlayheadMs] = useState<number | null>(null)
 
   useEffect(() => {
     if (!filePath) return
     let cancelled = false
     loadSamples(filePath)
-      .then((entry) => {
-        if (!cancelled) setResult({ path: filePath, samples: entry.samples })
+      .then((cacheEntry) => {
+        if (!cancelled) {
+          setResult({ path: filePath, samples: cacheEntry.samples })
+          setEntry(cacheEntry)
+        }
       })
       .catch((err: Error) => {
         if (!cancelled) setResult({ path: filePath, errorMessage: err.message })
@@ -45,14 +50,27 @@ export function WaveformView({ filePath }: { filePath: string | null }): React.J
     }
   }, [filePath])
 
-  // 把结果与当前 filePath 匹配后再派生视图状态——
-  // 避免「刚切段时 result 还指向旧段」把旧波形短暂地显示出来
+  // 订阅播放位置。只有当 playingPath 等于本组件显示的 filePath 时才记录 playhead。
+  useEffect(() => {
+    const off = subscribePosition((playingPath, positionMs) => {
+      if (playingPath && playingPath === filePath) {
+        setPlayheadMs(positionMs)
+      } else {
+        setPlayheadMs(null)
+      }
+    })
+    return off
+  }, [filePath])
+
   const matches = result && result.path === filePath
   const samples = matches && 'samples' in result ? result.samples : null
   const errorMessage = matches && 'errorMessage' in result ? result.errorMessage : null
   const loading = filePath !== null && !matches
 
-  // samples 或容器尺寸变化 → 重绘
+  // 总时长（毫秒），用于把 playheadMs 映射到 x 坐标
+  const totalMs = samples && entry ? (samples.length / entry.sampleRate) * 1000 : 0
+
+  // 每次 samples / playheadMs / 尺寸变化都重绘
   useEffect(() => {
     const canvas = canvasRef.current
     const container = containerRef.current
@@ -74,11 +92,9 @@ export function WaveformView({ filePath }: { filePath: string | null }): React.J
 
       if (!samples) return
 
-      // 一个像素一个桶，足够细致又避免采样不足的锯齿
       const buckets = Math.max(1, Math.floor(rect.width))
       const peaks = computePeaks(samples, buckets)
       const midY = rect.height / 2
-      // 给上下各留 4px 余量，避免削波时波形顶到边
       const maxHalfHeight = midY - 4
 
       // 用产品品牌色（Tailwind 里 accent.DEFAULT）硬编码——
@@ -89,27 +105,39 @@ export function WaveformView({ filePath }: { filePath: string | null }): React.J
       for (let x = 0; x < buckets; x++) {
         const peak = peaks[x]
         const h = peak * maxHalfHeight
-        // +0.5 对齐像素网格，避免 1px 线糊成 2px
         const px = x + 0.5
         ctx.moveTo(px, midY - h)
         ctx.lineTo(px, midY + h)
       }
       ctx.stroke()
 
-      // 中轴细线作为零电平参考
+      // 零电平参考线
       ctx.strokeStyle = 'rgba(204,204,204,0.15)'
       ctx.lineWidth = 1
       ctx.beginPath()
       ctx.moveTo(0, midY)
       ctx.lineTo(rect.width, midY)
       ctx.stroke()
+
+      // 播放游标：playheadMs 有值且 totalMs 可算时，画一条竖线
+      if (playheadMs !== null && totalMs > 0) {
+        const ratio = Math.min(1, Math.max(0, playheadMs / totalMs))
+        const cx = Math.floor(ratio * rect.width) + 0.5
+        // 用红色让游标在蓝色波形里视觉上分得清；不透明度给弱一点避免过度打扰
+        ctx.strokeStyle = 'rgba(209, 69, 69, 0.85)'
+        ctx.lineWidth = 1
+        ctx.beginPath()
+        ctx.moveTo(cx, 0)
+        ctx.lineTo(cx, rect.height)
+        ctx.stroke()
+      }
     }
 
     draw()
     const ro = new ResizeObserver(draw)
     ro.observe(container)
     return () => ro.disconnect()
-  }, [samples])
+  }, [samples, playheadMs, totalMs])
 
   return (
     <div
