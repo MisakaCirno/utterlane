@@ -1,8 +1,8 @@
+import { showError, showSuccess } from '@renderer/store/toastStore'
+
 /**
  * 导出动作的 renderer 侧编排。封装 IPC + 结果反馈，
  * 让菜单 / 按钮只关心「用户意图」而不用拼错误提示文案。
- *
- * 反馈目前用原生 alert；后续接入 toast 时只改这里即可。
  */
 
 export async function exportAudioWav(): Promise<void> {
@@ -20,10 +20,10 @@ function handle(
   kind: string
 ): void {
   if (result.ok) {
-    const note = result.skipped > 0 ? `（跳过 ${result.skipped} 条未录制段）` : ''
-    window.alert(`${kind}导出成功：${result.filePath}${note}`)
+    const note = result.skipped > 0 ? `跳过 ${result.skipped} 条未录制段` : undefined
+    showSuccess(`${kind}导出成功`, note ? `${note}\n${result.filePath}` : result.filePath)
     return
   }
   if (result.canceled) return // 用户主动取消不打扰
-  window.alert(`${kind}导出失败：${result.message}`)
+  showError(`${kind}导出失败`, result.message)
 }

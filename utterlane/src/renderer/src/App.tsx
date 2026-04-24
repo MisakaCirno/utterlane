@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { Titlebar } from './shell/Titlebar'
 import { StatusBar } from './shell/StatusBar'
 import { Workspace } from './shell/Workspace'
+import { ToastHost } from './shell/ToastHost'
 import { WelcomeView } from './views/WelcomeView'
 import { ImportScriptDialog } from './dialogs/ImportScriptDialog'
 import { useEditorStore } from './store/editorStore'
@@ -70,6 +71,7 @@ function App(): React.JSX.Element {
         open={importScriptOpen}
         onOpenChange={(open) => !open && closeImportScript()}
       />
+      <ToastHost />
     </div>
   )
 }
