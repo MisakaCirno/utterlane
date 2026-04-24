@@ -18,6 +18,7 @@ function App(): React.JSX.Element {
   // 启动时：
   //   1. 拉取偏好并订阅变更
   //   2. 询问 main 是否已有正在打开的工程（进程内热重载 / 窗口重建时会命中）
+  //   3. 订阅主进程的关窗请求，按 saved 状态决定是否二次确认
   //
   // 常规冷启动 main 侧 projectSession 还是空，会回落到欢迎页。
   // 未来如果实现「启动时自动打开上次工程」，把那个逻辑放到 main 侧 session.init()，
@@ -32,7 +33,25 @@ function App(): React.JSX.Element {
       if (path) void openProjectPath(path)
     })
 
-    return () => cleanup?.()
+    // 关窗请求处理：
+    //   - 已保存：直接 confirmClose
+    //   - 未保存：弹原生 confirm 征询（没必要为这一步做 Radix Dialog，
+    //            用户注意力此刻完全集中在「要不要丢弃」上）
+    //
+    // TODO（Slice D/E）：录音中 / 导出中 的关窗拦截也在这里接入
+    const closeCleanup = window.api.window.onCloseRequest(() => {
+      const saved = useEditorStore.getState().saved
+      if (!saved) {
+        const confirmed = window.confirm('还有未保存的改动，确定关闭吗？')
+        if (!confirmed) return
+      }
+      window.api.window.confirmClose()
+    })
+
+    return () => {
+      cleanup?.()
+      closeCleanup()
+    }
   }, [])
 
   // 首帧若 preferences 尚未 hydrate，整个 body 空白留给默认背景色（避免主题闪烁）。

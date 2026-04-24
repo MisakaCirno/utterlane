@@ -30,6 +30,19 @@ function resolveInitialBounds(saved: WindowBounds | undefined): {
   return hasPosition ? { width, height, x: saved.x, y: saved.y } : { width, height }
 }
 
+/**
+ * 关窗流程：
+ *   1. 用户触发关窗（标题栏 X / Alt+F4 / OS 关闭）
+ *   2. 首次 close 事件：main 拦截 + preventDefault，向 renderer 发 `window:close-request`
+ *   3. renderer 查看保存状态：已保存直接同意；未保存弹确认框
+ *   4. renderer 回 `window:close-confirmed` → main 置位 allowClose 后再次调 close()
+ *   5. 第二次 close 事件看到 allowClose=true，放行
+ *
+ * allowClose 由 BrowserWindow 实例的 Symbol 属性挂载；这样多窗口场景各自独立。
+ */
+const ALLOW_CLOSE_KEY = Symbol('utterlane.allowClose')
+type WindowWithAllowClose = BrowserWindow & { [ALLOW_CLOSE_KEY]?: boolean }
+
 function createWindow(): void {
   const prefs = preferencesStore.snapshot
   const bounds = resolveInitialBounds(prefs.window)
@@ -48,6 +61,12 @@ function createWindow(): void {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false
     }
+  }) as WindowWithAllowClose
+
+  mainWindow.on('close', (event) => {
+    if (mainWindow[ALLOW_CLOSE_KEY]) return
+    event.preventDefault()
+    mainWindow.webContents.send('window:close-request')
   })
 
   // 上次退出时若是最大化状态，新窗口打开后恢复最大化
@@ -116,6 +135,13 @@ app.whenReady().then(async () => {
   })
   ipcMain.on('window:close', (event) => {
     BrowserWindow.fromWebContents(event.sender)?.close()
+  })
+  // renderer 确认后主动调这个 IPC：置 allowClose 后第二次 close 就会放行
+  ipcMain.on('window:close-confirmed', (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender) as WindowWithAllowClose | null
+    if (!win) return
+    win[ALLOW_CLOSE_KEY] = true
+    win.close()
   })
   ipcMain.handle('window:is-maximized', (event) => {
     return BrowserWindow.fromWebContents(event.sender)?.isMaximized() ?? false

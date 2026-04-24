@@ -37,7 +37,19 @@ const api = {
       const listener = (_: unknown, maximized: boolean): void => cb(maximized)
       ipcRenderer.on('window:maximize-state', listener)
       return () => ipcRenderer.removeListener('window:maximize-state', listener)
-    }
+    },
+    /**
+     * 订阅 main 发出的关窗请求。renderer 检查 saved 状态，
+     * 必要时弹确认框，最终调 confirmClose 才真正关闭。
+     * 返回 unsubscribe 函数。
+     */
+    onCloseRequest: (cb: () => void): (() => void) => {
+      const listener = (): void => cb()
+      ipcRenderer.on('window:close-request', listener)
+      return () => ipcRenderer.removeListener('window:close-request', listener)
+    },
+    /** 同意关闭 —— main 会跳过第二次 close 的拦截 */
+    confirmClose: (): void => ipcRenderer.send('window:close-confirmed')
   },
 
   preferences: {
