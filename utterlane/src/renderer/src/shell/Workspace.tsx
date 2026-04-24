@@ -6,6 +6,7 @@ import { TimelineView } from '@renderer/views/TimelineView'
 import { usePreferencesStore } from '@renderer/store/preferencesStore'
 import { DEFAULT_PREFERENCES } from '@shared/preferences'
 import { getThemeByKey } from './themes'
+import { applyDefaultLayout, setWorkspaceApi } from './workspaceHandle'
 
 const components: Record<string, React.FunctionComponent<IDockviewPanelProps>> = {
   segments: () => <SegmentsView />,
@@ -14,57 +15,35 @@ const components: Record<string, React.FunctionComponent<IDockviewPanelProps>> =
   timeline: () => <TimelineView />
 }
 
-function applyDefaultLayout(event: DockviewReadyEvent): void {
+/**
+ * onReady 流程：
+ *   1. 登记 api 到模块句柄，菜单等命令式入口可以通过它触发 Reset Layout
+ *   2. 有持久化布局就 fromJSON，否则应用默认布局
+ *   3. 订阅 onDidLayoutChange → 把最新 toJSON 快照写回 preferences.layout.dockLayout
+ *
+ * 持久化由 preferencesStore 主侧 debounce，renderer 侧无需再限流。
+ */
+function onWorkspaceReady(event: DockviewReadyEvent): void {
   const api = event.api
+  setWorkspaceApi(api)
 
-  // 目标布局：
-  //   ┌──────────────┬────────────────────────┐
-  //   │   Segments   │  Inspector / Settings  │
-  //   ├──────────────┴────────────────────────┤
-  //   │              Timeline                 │
-  //   └───────────────────────────────────────┘
-  //
-  // 先拆上下两行（timeline below segments），再在上行右侧插入 inspector，
-  // 最后把 projectSettings tab 并入 inspector 所在 group。
-  const segments = api.addPanel({
-    id: 'segments',
-    component: 'segments',
-    title: 'Segments'
-  })
-
-  api.addPanel({
-    id: 'timeline',
-    component: 'timeline',
-    title: 'Timeline',
-    position: { referencePanel: segments.id, direction: 'below' }
-  })
-
-  const inspector = api.addPanel({
-    id: 'inspector',
-    component: 'inspector',
-    title: 'Inspector',
-    position: { referencePanel: segments.id, direction: 'right' }
-  })
-
-  api.addPanel({
-    id: 'projectSettings',
-    component: 'projectSettings',
-    title: 'Project Settings',
-    position: { referencePanel: inspector.id },
-    inactive: true
-  })
-
-  requestAnimationFrame(() => {
-    const width = api.width
-    const height = api.height
-    const segmentsPanel = api.getPanel('segments')
-    const timelinePanel = api.getPanel('timeline')
-    if (width > 0 && segmentsPanel?.group) {
-      segmentsPanel.group.api.setSize({ width: Math.round(width * 0.62) })
+  const saved = usePreferencesStore.getState().prefs.layout?.dockLayout
+  if (saved) {
+    try {
+      api.fromJSON(saved as never)
+    } catch (err) {
+      // 持久化布局和当前版本不兼容（比如组件 id 变了 / 结构 schema 变了）时，
+      // 不让整个 workspace 卡住——静默回落到默认布局。
+      console.warn('[workspace] fromJSON failed, falling back to default layout:', err)
+      api.clear()
+      applyDefaultLayout(api)
     }
-    if (height > 0 && timelinePanel?.group) {
-      timelinePanel.group.api.setSize({ height: Math.round(height * 0.38) })
-    }
+  } else {
+    applyDefaultLayout(api)
+  }
+
+  api.onDidLayoutChange(() => {
+    usePreferencesStore.getState().update({ layout: { dockLayout: api.toJSON() } })
   })
 }
 
@@ -81,7 +60,7 @@ export function Workspace(): React.JSX.Element {
         className="h-full"
         theme={theme}
         components={components}
-        onReady={applyDefaultLayout}
+        onReady={onWorkspaceReady}
         disableFloatingGroups
         disableDnd={false}
       />

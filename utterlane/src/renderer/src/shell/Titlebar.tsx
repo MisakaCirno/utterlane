@@ -8,6 +8,7 @@ import { DEFAULT_PREFERENCES, type DockThemeKey } from '@shared/preferences'
 import { closeCurrentProject, newProject, openProject } from '@renderer/actions/project'
 import { useDialogStore } from '@renderer/store/dialogStore'
 import { themeRegistry } from './themes'
+import { resetWorkspaceLayout } from './workspaceHandle'
 
 type MenuItem =
   | { kind: 'item'; label: string; shortcut?: string; disabled?: boolean; onSelect?: () => void }
@@ -78,11 +79,16 @@ function buildMenus(
     {
       label: 'View',
       items: [
-        { kind: 'item', label: 'Reset Layout' },
+        {
+          kind: 'item',
+          label: 'Reset Layout',
+          disabled: !hasProject,
+          onSelect: resetWorkspaceLayout
+        },
         { kind: 'separator' },
-        { kind: 'item', label: 'Toggle Segments Panel' },
-        { kind: 'item', label: 'Toggle Inspector Panel' },
-        { kind: 'item', label: 'Toggle Timeline Panel' },
+        { kind: 'item', label: 'Toggle Segments Panel', disabled: true },
+        { kind: 'item', label: 'Toggle Inspector Panel', disabled: true },
+        { kind: 'item', label: 'Toggle Timeline Panel', disabled: true },
         { kind: 'separator' },
         {
           kind: 'submenu',
