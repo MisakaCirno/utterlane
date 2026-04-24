@@ -38,13 +38,21 @@ export function resetWorkspaceLayout(): void {
 /**
  * 默认布局：
  *   ┌──────────────┬────────────────────────┐
- *   │   Segments   │ [Inspector] [Settings] │
+ *   │              │ [Inspector] [Settings] │
+ *   │   Segments   │                        │
+ *   │              │                        │
  *   ├──────────────┴────────────────────────┤
- *   │              Timeline                 │
+ *   │          Segment Timeline             │
+ *   ├───────────────────────────────────────┤
+ *   │          Project Timeline             │
  *   └───────────────────────────────────────┘
  *
- * 实现顺序：先建 Segments → timeline below 它（此时 timeline 就占满下沿）
- * → inspector right of segments（只切上行）→ projectSettings 并入 inspector group 做 tab
+ * 构建顺序：
+ *   1. Segments 占满
+ *   2. Segment Timeline below Segments → 上下分成两行
+ *   3. Project Timeline below Segment Timeline → 下半再拆一行
+ *   4. Inspector right of Segments → 只切最上面一行
+ *   5. Project Settings 和 Inspector 并为同组 tab（inactive 确保 Inspector 是默认可见的）
  */
 export function applyDefaultLayout(api: DockviewApi): void {
   const segments = api.addPanel({
@@ -53,11 +61,18 @@ export function applyDefaultLayout(api: DockviewApi): void {
     title: 'Segments'
   })
 
-  api.addPanel({
-    id: 'timeline',
-    component: 'timeline',
-    title: 'Timeline',
+  const segmentTimeline = api.addPanel({
+    id: 'segmentTimeline',
+    component: 'segmentTimeline',
+    title: 'Segment Timeline',
     position: { referencePanel: segments.id, direction: 'below' }
+  })
+
+  api.addPanel({
+    id: 'projectTimeline',
+    component: 'projectTimeline',
+    title: 'Project Timeline',
+    position: { referencePanel: segmentTimeline.id, direction: 'below' }
   })
 
   const inspector = api.addPanel({
@@ -75,17 +90,30 @@ export function applyDefaultLayout(api: DockviewApi): void {
     inactive: true
   })
 
-  // 初始尺寸：左 62% / 上 62%。等下一帧确定 api.width/height 后再设。
+  // 初始尺寸：
+  //   - 顶部行（Segments + Inspector）占总高 ~45%
+  //   - Segment Timeline ~25%
+  //   - Project Timeline ~30%（剩余）
+  //   - Segments 组水平占 ~55%
   requestAnimationFrame(() => {
     const width = api.width
     const height = api.height
     const segmentsPanel = api.getPanel('segments')
-    const timelinePanel = api.getPanel('timeline')
+    const segmentTimelinePanel = api.getPanel('segmentTimeline')
+    const projectTimelinePanel = api.getPanel('projectTimeline')
+
     if (width > 0 && segmentsPanel?.group) {
-      segmentsPanel.group.api.setSize({ width: Math.round(width * 0.62) })
+      segmentsPanel.group.api.setSize({ width: Math.round(width * 0.55) })
     }
-    if (height > 0 && timelinePanel?.group) {
-      timelinePanel.group.api.setSize({ height: Math.round(height * 0.38) })
+    if (height > 0) {
+      if (segmentsPanel?.group) {
+        segmentsPanel.group.api.setSize({ height: Math.round(height * 0.45) })
+      }
+      if (segmentTimelinePanel?.group) {
+        segmentTimelinePanel.group.api.setSize({ height: Math.round(height * 0.25) })
+      }
+      // projectTimeline 吃剩下的高度，不必显式 set
+      void projectTimelinePanel
     }
   })
 }

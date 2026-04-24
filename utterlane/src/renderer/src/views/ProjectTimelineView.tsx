@@ -1,0 +1,278 @@
+import { useEffect, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
+import { Pause, Play, Rewind, Square } from 'lucide-react'
+import {
+  DndContext,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent
+} from '@dnd-kit/core'
+import {
+  SortableContext,
+  arrayMove,
+  horizontalListSortingStrategy,
+  useSortable
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
+import { cn } from '@renderer/lib/cn'
+import { useEditorStore } from '@renderer/store/editorStore'
+import { formatDuration } from '@renderer/lib/format'
+
+/**
+ * ProjectTimelineView — 整个项目的横向时间轴。
+ *
+ * 内容：
+ *   1. 项目播放控制条（从头播放 / 播放项目 / 暂停 / 停止）
+ *   2. 时间刻度 + 所有 Segment clip 的横向列表（可拖拽重排）
+ *
+ * 这个面板提供项目级全景：看到所有段的顺序、时长分布、哪些段还没录。
+ * 和 SegmentTimelineView 互补——前者 zoom in 到一句，后者 zoom out 看全局。
+ */
+
+const PX_PER_MS = 0.08
+const UNRECORDED_CLIP_WIDTH = 60
+
+function IconButton({
+  children,
+  onClick,
+  active,
+  disabled,
+  title
+}: {
+  children: React.ReactNode
+  onClick?: () => void
+  active?: boolean
+  disabled?: boolean
+  title?: string
+}): React.JSX.Element {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      className={cn(
+        'flex h-6 w-6 items-center justify-center rounded-sm text-fg-muted',
+        'disabled:cursor-not-allowed disabled:opacity-40',
+        !disabled && !active && 'hover:bg-chrome-hover hover:text-fg',
+        active && 'bg-accent text-white'
+      )}
+    >
+      {children}
+    </button>
+  )
+}
+
+function ProjectControlRow(): React.JSX.Element {
+  const { t } = useTranslation()
+  const playback = useEditorStore((s) => s.playback)
+  const paused = useEditorStore((s) => s.paused)
+  const playProject = useEditorStore((s) => s.playProject)
+  const stopPlayback = useEditorStore((s) => s.stopPlayback)
+  const togglePause = useEditorStore((s) => s.togglePausePlayback)
+  const selectSegment = useEditorStore((s) => s.selectSegment)
+  const order = useEditorStore((s) => s.order)
+
+  const isBusy = playback !== 'idle'
+
+  return (
+    <div className="flex h-8 shrink-0 items-center justify-center border-b border-border-subtle bg-bg-panel px-2">
+      <div className="flex items-center gap-0.5 rounded-sm border border-border bg-bg-deep p-0.5">
+        <IconButton
+          title={t('timeline.btn_play_project_from_start')}
+          onClick={() => {
+            if (order.length > 0) selectSegment(order[0])
+            void playProject()
+          }}
+          disabled={isBusy || order.length === 0}
+        >
+          <Rewind size={12} />
+        </IconButton>
+        <IconButton
+          title={
+            playback === 'project' ? t('timeline.btn_stop_project') : t('timeline.btn_play_project')
+          }
+          active={playback === 'project'}
+          disabled={playback === 'segment' || playback === 'recording' || order.length === 0}
+          onClick={playback === 'project' ? stopPlayback : () => void playProject()}
+        >
+          {playback === 'project' ? <Square size={11} /> : <Play size={12} />}
+        </IconButton>
+        <IconButton
+          title={paused ? t('timeline.btn_resume_project') : t('timeline.btn_pause_project')}
+          active={paused}
+          onClick={togglePause}
+          disabled={playback !== 'project'}
+        >
+          {paused ? <Play size={12} /> : <Pause size={12} />}
+        </IconButton>
+        <IconButton
+          title={t('timeline.btn_stop_project')}
+          onClick={stopPlayback}
+          disabled={playback !== 'project'}
+        >
+          <Square size={11} />
+        </IconButton>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * 单个 Timeline clip。整块 clip 是 drag handle（DAW / 视频剪辑里这是惯例）。
+ * 用 PointerSensor.distance 防止单击选中被误判为拖拽。
+ */
+function TimelineClip({
+  id,
+  idx,
+  startMs
+}: {
+  id: string
+  idx: number
+  startMs: number
+}): React.JSX.Element | null {
+  const { t } = useTranslation()
+  const seg = useEditorStore((s) => s.segmentsById[id])
+  const isSelected = useEditorStore((s) => s.selectedSegmentId === id)
+  const selectSegment = useEditorStore((s) => s.selectSegment)
+
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id
+  })
+
+  // 合并 dnd-kit ref 与自己的 ref：后者用于选中时横向滚到可见位置
+  const clipElementRef = useRef<HTMLDivElement | null>(null)
+  const combinedRef = (el: HTMLDivElement | null): void => {
+    clipElementRef.current = el
+    setNodeRef(el)
+  }
+
+  useEffect(() => {
+    if (isSelected && clipElementRef.current) {
+      clipElementRef.current.scrollIntoView({ inline: 'nearest', block: 'nearest' })
+    }
+  }, [isSelected])
+
+  if (!seg) return null
+  const current = seg.takes.find((t) => t.id === seg.selectedTakeId)
+  const hasAudio = !!current
+  const width = hasAudio ? current.durationMs * PX_PER_MS : UNRECORDED_CLIP_WIDTH
+
+  const style: React.CSSProperties = {
+    width,
+    minWidth: UNRECORDED_CLIP_WIDTH,
+    transform: CSS.Transform.toString(transform),
+    transition,
+    zIndex: isDragging ? 10 : undefined
+  }
+
+  return (
+    <div
+      ref={combinedRef}
+      {...attributes}
+      {...listeners}
+      onClick={() => selectSegment(id)}
+      title={seg.text}
+      className={cn(
+        'relative flex shrink-0 cursor-pointer flex-col justify-between rounded-sm border px-1.5 py-1 text-[10px]',
+        hasAudio
+          ? isSelected
+            ? 'border-accent bg-accent-soft text-white'
+            : 'border-border bg-bg-raised text-fg hover:border-border-strong'
+          : isSelected
+            ? 'border-accent bg-bg-deep text-fg-muted'
+            : 'border-dashed border-border bg-bg-deep text-fg-dim hover:border-border-strong',
+        isDragging && 'shadow-lg ring-1 ring-accent'
+      )}
+      style={style}
+    >
+      <div className="flex items-center gap-1">
+        <span className="font-mono tabular-nums opacity-70">{idx + 1}</span>
+        <span className="truncate">{seg.text}</span>
+      </div>
+      <div className="flex items-center justify-between font-mono tabular-nums opacity-70">
+        <span>{formatDuration(startMs)}</span>
+        {hasAudio ? (
+          <span>{formatDuration(current.durationMs)}</span>
+        ) : (
+          <span>{t('timeline.clip_unrecorded')}</span>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function TimelineContent(): React.JSX.Element {
+  const order = useEditorStore((s) => s.order)
+  const segmentsById = useEditorStore((s) => s.segmentsById)
+  const reorderSegments = useEditorStore((s) => s.reorderSegments)
+
+  // 每个 clip 的起点时间戳，基于前序 clip 累积时长
+  const startMsById = new Map<string, number>()
+  {
+    let acc = 0
+    for (const id of order) {
+      startMsById.set(id, acc)
+      const seg = segmentsById[id]
+      const take = seg?.takes.find((t) => t.id === seg.selectedTakeId)
+      acc += take?.durationMs ?? 0
+    }
+  }
+
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }))
+
+  const handleDragEnd = (e: DragEndEvent): void => {
+    const { active, over } = e
+    if (!over || active.id === over.id) return
+    const from = order.indexOf(String(active.id))
+    const to = order.indexOf(String(over.id))
+    if (from < 0 || to < 0) return
+    reorderSegments(arrayMove(order, from, to))
+  }
+
+  return (
+    <div className="flex flex-1 flex-col overflow-hidden">
+      <div className="relative h-6 shrink-0 overflow-hidden border-b border-border bg-bg-deep">
+        <div className="absolute inset-0 flex">
+          {Array.from({ length: 30 }, (_, i) => (
+            <div
+              key={i}
+              className="flex shrink-0 items-end border-r border-border-subtle pb-0.5 pl-1 font-mono text-[9px] text-fg-dim"
+              style={{ width: 120 }}
+            >
+              {String(Math.floor(i / 60)).padStart(2, '0')}:{String(i % 60).padStart(2, '0')}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-auto">
+        <div className="relative h-24 min-w-max p-2">
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={handleDragEnd}
+          >
+            <SortableContext items={order} strategy={horizontalListSortingStrategy}>
+              <div className="flex h-full items-stretch gap-0.5">
+                {order.map((id, idx) => (
+                  <TimelineClip key={id} id={id} idx={idx} startMs={startMsById.get(id) ?? 0} />
+                ))}
+              </div>
+            </SortableContext>
+          </DndContext>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+export function ProjectTimelineView(): React.JSX.Element {
+  return (
+    <div className="flex h-full flex-col bg-bg">
+      <ProjectControlRow />
+      <TimelineContent />
+    </div>
+  )
+}

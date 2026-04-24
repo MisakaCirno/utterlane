@@ -381,11 +381,13 @@ Take 是 Segment 下的一次录音尝试。
 * 自定义标题栏固定（内含菜单栏）
 * 状态栏固定
 * 中部工作区支持有限 dock
-* 仅 3 个核心视图参与 dock：
+* 5 个核心视图参与 dock：
 
   * Segments 视图
   * Inspector 视图
-  * Timeline 视图（含 Control Bar）
+  * Project Settings 视图
+  * Segment Timeline 视图（当前选中句的细节 + 波形）
+  * Project Timeline 视图（整个项目的横向时间轴）
 * 不支持视图悬浮为独立窗口
 * 不支持多窗口弹出
 * 必须支持重置默认布局
@@ -399,7 +401,9 @@ Take 是 Segment 下的一次录音尝试。
 
 * Segments 视图
 * Inspector 视图
-* Timeline 视图（Control Bar 固定附着在 Timeline 视图内部）
+* Project Settings 视图（默认与 Inspector 同组，tab 切换）
+* Segment Timeline 视图（含当前句的控制条 + 可编辑文案 + 波形）
+* Project Timeline 视图（含项目控制条 + 所有 Segment clip 列表）
 
 #### 底部
 
@@ -407,11 +411,12 @@ Take 是 Segment 下的一次录音尝试。
 
 ### Dock 范围与约束
 
-* 仅中部 3 个核心视图允许调整位置和大小
+* 仅中部核心视图允许调整位置和大小
 * 自定义标题栏与状态栏不参与 dock
-* Timeline 视图与 Control Bar 不拆分为两个独立 dock 面板
-* 默认布局仍应提供“上左 Segments / 上右 Inspector / 下方 Timeline”的标准工作区
-* 用户可在窗口内调整三个核心视图的排布关系，但不能把它们拖出主窗口
+* 每个视图自带对应的控制条（Segment Timeline 带句级控制、Project Timeline 带项目控制），
+  控制条不作为独立 dock 面板存在
+* 默认布局：「上左 Segments / 上右 Inspector+Settings」+「中部 Segment Timeline」+「下方 Project Timeline」
+* 用户可在窗口内自由调整核心视图的排布关系，但不能把它们拖出主窗口
 * dockview 仅用于工作区内部的布局、分组和尺寸调整，不启用浮动组与弹出窗口能力
 
 ### 自定义标题栏
@@ -619,7 +624,7 @@ Inspector 分为两个页面：
 
 * 录音、局部播放、全局播放三种状态互斥
 * 没有 `selectedTakeId` 的 Segment 不能局部播放，也不能重录，但可以录音
-* Control Bar 始终跟随 Timeline 视图，不单独参与 dock
+* 每个 Timeline 视图自带控制条；控制条不作为独立 dock 面板存在
 
 ---
 
@@ -1051,8 +1056,9 @@ Electron `app.getPath('userData')` 下：
 
 * 明确 UI 风格基准与禁区
 * 明确自定义标题栏（内含菜单）与状态栏固定
-* 明确中部 3 个核心视图的有限 dock 规则
-* 明确 Timeline 与 Control Bar 必须绑定为同一视图
+* 明确中部 5 个核心视图的有限 dock 规则
+* Segment Timeline 与 Project Timeline 作为独立视图分开 dock；
+  各自的控制条固定挂在对应视图内部，不单独参与 dock
 * 使用 dockview 完成静态编辑器壳与假数据原型
 * 完成默认布局、重置布局、布局保存 / 恢复原型验证
 
@@ -1069,7 +1075,7 @@ Electron `app.getPath('userData')` 下：
 
 * 完成自定义标题栏（内含菜单）、状态栏的正式布局
 * 完成基于 dockview 的有限 dock 工作区骨架
-* 完成 Segments 视图、Inspector 视图、Timeline 视图的静态骨架
+* 完成 Segments / Inspector / Project Settings / Segment Timeline / Project Timeline 的静态骨架
 * 接入基础全局状态管理
 
 ### 第三阶段：录音闭环
@@ -1109,7 +1115,6 @@ Electron `app.getPath('userData')` 下：
 * 录音写入 `temp/` 后再转正的流程是否可靠
 * 多个 Take 切换后，Timeline 长度与导出结果是否一致
 * 基于 dockview 的有限 dock 布局状态是否能可靠保存与恢复
-* Timeline 视图在 dock 重排后，Control Bar 是否仍保持正确绑定
 * Canvas 渲染 Timeline 的性能是否足够支撑拖拽与滚动
 * FFmpeg 在目标平台上的打包与调用是否稳定
 

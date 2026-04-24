@@ -2,7 +2,8 @@ import { DockviewReact, type DockviewReadyEvent, type IDockviewPanelProps } from
 import { SegmentsView } from '@renderer/views/SegmentsView'
 import { InspectorView } from '@renderer/views/InspectorView'
 import { ProjectSettingsView } from '@renderer/views/ProjectSettingsView'
-import { TimelineView } from '@renderer/views/TimelineView'
+import { SegmentTimelineView } from '@renderer/views/SegmentTimelineView'
+import { ProjectTimelineView } from '@renderer/views/ProjectTimelineView'
 import { usePreferencesStore } from '@renderer/store/preferencesStore'
 import { DEFAULT_PREFERENCES } from '@shared/preferences'
 import { getThemeByKey } from './themes'
@@ -12,13 +13,28 @@ const components: Record<string, React.FunctionComponent<IDockviewPanelProps>> =
   segments: () => <SegmentsView />,
   inspector: () => <InspectorView />,
   projectSettings: () => <ProjectSettingsView />,
-  timeline: () => <TimelineView />
+  segmentTimeline: () => <SegmentTimelineView />,
+  projectTimeline: () => <ProjectTimelineView />
+}
+
+/**
+ * 检查 saved layout 是否仍然与当前 panel 集匹配。
+ * 不匹配（比如老版本里的 `timeline` 面板被拆成 segmentTimeline / projectTimeline）
+ * 直接返回 false，让上层丢弃 saved 回落到默认布局。
+ */
+function isLayoutCompatible(saved: unknown): boolean {
+  if (!saved || typeof saved !== 'object') return false
+  const panels = (saved as { panels?: Record<string, unknown> }).panels
+  if (!panels) return false
+  // 只要出现历史遗留 id 就视为不兼容
+  if ('timeline' in panels) return false
+  return true
 }
 
 /**
  * onReady 流程：
  *   1. 登记 api 到模块句柄，菜单等命令式入口可以通过它触发 Reset Layout
- *   2. 有持久化布局就 fromJSON，否则应用默认布局
+ *   2. 有持久化布局且兼容当前版本 → fromJSON；否则应用默认布局
  *   3. 订阅 onDidLayoutChange → 把最新 toJSON 快照写回 preferences.layout.dockLayout
  *
  * 持久化由 preferencesStore 主侧 debounce，renderer 侧无需再限流。
@@ -28,12 +44,10 @@ function onWorkspaceReady(event: DockviewReadyEvent): void {
   setWorkspaceApi(api)
 
   const saved = usePreferencesStore.getState().prefs.layout?.dockLayout
-  if (saved) {
+  if (saved && isLayoutCompatible(saved)) {
     try {
       api.fromJSON(saved as never)
     } catch (err) {
-      // 持久化布局和当前版本不兼容（比如组件 id 变了 / 结构 schema 变了）时，
-      // 不让整个 workspace 卡住——静默回落到默认布局。
       console.warn('[workspace] fromJSON failed, falling back to default layout:', err)
       api.clear()
       applyDefaultLayout(api)
