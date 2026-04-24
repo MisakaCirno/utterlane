@@ -1,4 +1,5 @@
 import { useEditorStore } from '@renderer/store/editorStore'
+import { useDialogStore } from '@renderer/store/dialogStore'
 import { newProject, openProject } from '@renderer/actions/project'
 
 /**
@@ -29,6 +30,13 @@ export function installKeyboardShortcuts(): () => void {
     if (mod && e.key.toLowerCase() === 'o') {
       e.preventDefault()
       void openProject()
+      return
+    }
+
+    // Ctrl/Cmd + , 打开偏好设置。遵循 macOS / VSCode 传统键位
+    if (mod && e.key === ',') {
+      e.preventDefault()
+      useDialogStore.getState().openPreferences()
       return
     }
 

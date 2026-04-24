@@ -7,6 +7,7 @@ import { ToastHost } from './shell/ToastHost'
 import { ConfirmHost } from './shell/ConfirmHost'
 import { WelcomeView } from './views/WelcomeView'
 import { ImportScriptDialog } from './dialogs/ImportScriptDialog'
+import { PreferencesDialog } from './dialogs/PreferencesDialog'
 import { useEditorStore } from './store/editorStore'
 import { connectPreferencesStore, usePreferencesStore } from './store/preferencesStore'
 import { useDialogStore } from './store/dialogStore'
@@ -21,6 +22,8 @@ function App(): React.JSX.Element {
   const fontScale = usePreferencesStore((s) => s.prefs.appearance?.fontScale)
   const importScriptOpen = useDialogStore((s) => s.importScriptOpen)
   const closeImportScript = useDialogStore((s) => s.closeImportScript)
+  const preferencesOpen = useDialogStore((s) => s.preferencesOpen)
+  const closePreferences = useDialogStore((s) => s.closePreferences)
 
   // 跟随 preferences 切换 UI 语言。hydrate 后至少触发一次确保和存储值一致。
   useEffect(() => {
@@ -99,6 +102,10 @@ function App(): React.JSX.Element {
       <ImportScriptDialog
         open={importScriptOpen}
         onOpenChange={(open) => !open && closeImportScript()}
+      />
+      <PreferencesDialog
+        open={preferencesOpen}
+        onOpenChange={(open) => !open && closePreferences()}
       />
       <ConfirmHost />
       <ToastHost />

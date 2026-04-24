@@ -192,6 +192,24 @@ export const zhCN = {
     skipped_count: '跳过 {{count}} 条未录制段',
     kind_wav: 'WAV 音频',
     kind_srt: 'SRT 字幕'
+  },
+
+  preferences: {
+    menu_entry: '偏好设置…',
+    title: '偏好设置',
+    section_appearance: '外观',
+    section_project_defaults: '新工程默认',
+    label_dock_theme: 'Dock 主题',
+    label_font_scale: '字体缩放',
+    label_language: '界面语言',
+    label_sample_rate: '默认采样率',
+    label_channels: '默认声道',
+    font_scale_small: '紧凑',
+    font_scale_default: '默认',
+    font_scale_large: '舒适',
+    font_scale_xlarge: '宽松',
+    language_zh_cn: '简体中文',
+    language_en_us: 'English'
   }
 }
 

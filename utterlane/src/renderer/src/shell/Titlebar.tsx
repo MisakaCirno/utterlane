@@ -5,12 +5,9 @@ import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
 import { cn } from '@renderer/lib/cn'
 import { useEditorStore } from '@renderer/store/editorStore'
-import { usePreferencesStore } from '@renderer/store/preferencesStore'
-import { DEFAULT_PREFERENCES, type DockThemeKey } from '@shared/preferences'
 import { closeCurrentProject, newProject, openProject } from '@renderer/actions/project'
 import { exportAudioWav, exportSubtitlesSrt } from '@renderer/actions/export'
 import { useDialogStore } from '@renderer/store/dialogStore'
-import { themeRegistry } from './themes'
 import { resetWorkspaceLayout } from './workspaceHandle'
 
 type MenuItem =
@@ -28,10 +25,9 @@ type MenuDef = { label: string; items: MenuItem[] }
 
 function buildMenus(
   t: TFunction,
-  themeKey: DockThemeKey,
-  setTheme: (key: DockThemeKey) => void,
   hasProject: boolean,
-  openImportScript: () => void
+  openImportScript: () => void,
+  openPreferences: () => void
 ): MenuDef[] {
   return [
     {
@@ -87,7 +83,14 @@ function buildMenus(
         { kind: 'item', label: t('menu.edit_undo'), shortcut: 'Ctrl+Z', disabled: true },
         { kind: 'item', label: t('menu.edit_redo'), shortcut: 'Ctrl+Y', disabled: true },
         { kind: 'separator' },
-        { kind: 'item', label: t('menu.edit_delete'), shortcut: 'Delete' }
+        { kind: 'item', label: t('menu.edit_delete'), shortcut: 'Delete' },
+        { kind: 'separator' },
+        {
+          kind: 'item',
+          label: t('preferences.menu_entry'),
+          shortcut: 'Ctrl+,',
+          onSelect: openPreferences
+        }
       ]
     },
     {
@@ -102,20 +105,9 @@ function buildMenus(
         { kind: 'separator' },
         { kind: 'item', label: t('menu.view_toggle_segments'), disabled: true },
         { kind: 'item', label: t('menu.view_toggle_inspector'), disabled: true },
-        { kind: 'item', label: t('menu.view_toggle_timeline'), disabled: true },
-        { kind: 'separator' },
-        {
-          kind: 'submenu',
-          label: t('menu.view_dock_theme'),
-          items: [
-            {
-              kind: 'radioGroup',
-              value: themeKey,
-              onValueChange: (v) => setTheme(v as DockThemeKey),
-              options: themeRegistry.map((tm) => ({ value: tm.key, label: tm.label }))
-            }
-          ]
-        }
+        { kind: 'item', label: t('menu.view_toggle_timeline'), disabled: true }
+        // Dock 主题已经整合到 Edit → Preferences 里；
+        // 保留 View 菜单的「布局」概念，主题由统一偏好管理
       ]
     },
     {
@@ -244,29 +236,17 @@ export function Titlebar(): React.JSX.Element {
   const { t, i18n } = useTranslation()
   const project = useEditorStore((s) => s.project)
   const saved = useEditorStore((s) => s.saved)
-  const themeKey = usePreferencesStore(
-    (s) => s.prefs.appearance?.dockTheme ?? DEFAULT_PREFERENCES.appearance!.dockTheme!
-  )
-  const updatePrefs = usePreferencesStore((s) => s.update)
   const openImportScript = useDialogStore((s) => s.openImportScript)
+  const openPreferences = useDialogStore((s) => s.openPreferences)
   const [maximized, setMaximized] = useState(false)
 
   const hasProject = project !== null
 
-  // buildMenus 被 theme/prefs/project/language 改动驱动重建。
-  // 依赖 i18n.language 而不是 t：t 的引用在语言切换时也会变，但用 language 做
-  // 显式依赖更明确
+  // 依赖 i18n.language 而不是 t：t 引用在语言切换时也会变，但 language 更明确
   const menus = useMemo(
-    () =>
-      buildMenus(
-        t,
-        themeKey,
-        (key) => updatePrefs({ appearance: { dockTheme: key } }),
-        hasProject,
-        openImportScript
-      ),
+    () => buildMenus(t, hasProject, openImportScript, openPreferences),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [t, i18n.language, themeKey, updatePrefs, hasProject, openImportScript]
+    [t, i18n.language, hasProject, openImportScript, openPreferences]
   )
 
   useEffect(() => {

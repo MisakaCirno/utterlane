@@ -14,10 +14,18 @@ type DialogState = {
   importScriptOpen: boolean
   openImportScript: () => void
   closeImportScript: () => void
+
+  preferencesOpen: boolean
+  openPreferences: () => void
+  closePreferences: () => void
 }
 
 export const useDialogStore = create<DialogState>((set) => ({
   importScriptOpen: false,
   openImportScript: () => set({ importScriptOpen: true }),
-  closeImportScript: () => set({ importScriptOpen: false })
+  closeImportScript: () => set({ importScriptOpen: false }),
+
+  preferencesOpen: false,
+  openPreferences: () => set({ preferencesOpen: true }),
+  closePreferences: () => set({ preferencesOpen: false })
 }))

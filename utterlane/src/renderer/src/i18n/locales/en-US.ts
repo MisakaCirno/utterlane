@@ -192,5 +192,23 @@ export const enUS: TranslationSchema = {
     skipped_count: 'Skipped {{count}} unrecorded segments',
     kind_wav: 'WAV audio',
     kind_srt: 'SRT subtitles'
+  },
+
+  preferences: {
+    menu_entry: 'Preferences…',
+    title: 'Preferences',
+    section_appearance: 'Appearance',
+    section_project_defaults: 'New project defaults',
+    label_dock_theme: 'Dock theme',
+    label_font_scale: 'Font scale',
+    label_language: 'Language',
+    label_sample_rate: 'Default sample rate',
+    label_channels: 'Default channels',
+    font_scale_small: 'Compact',
+    font_scale_default: 'Default',
+    font_scale_large: 'Comfortable',
+    font_scale_xlarge: 'Roomy',
+    language_zh_cn: '简体中文',
+    language_en_us: 'English'
   }
 }
