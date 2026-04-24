@@ -18,6 +18,7 @@ const PROJECT_CLOSE = 'project:close'
 const PROJECT_CURRENT = 'project:current'
 const PROJECT_SAVE_WORKSPACE = 'project:save-workspace'
 const PROJECT_SAVE_SEGMENTS = 'project:save-segments'
+const PROJECT_READ_TAKE_FILE = 'project:read-take-file'
 
 const RECORDING_WRITE_TAKE = 'recording:write-take'
 
@@ -108,7 +109,11 @@ const api = {
      * renderer 据此切换 saved 标记、在失败时提示用户。
      */
     saveSegments: (next: SegmentsFile): Promise<SaveSegmentsResult> =>
-      ipcRenderer.invoke(PROJECT_SAVE_SEGMENTS, next)
+      ipcRenderer.invoke(PROJECT_SAVE_SEGMENTS, next),
+
+    /** 读取工程内某个 Take 文件（relativePath 来自 Take.filePath），用于播放 */
+    readTakeFile: (relativePath: string): Promise<ArrayBuffer> =>
+      ipcRenderer.invoke(PROJECT_READ_TAKE_FILE, relativePath)
   },
 
   recording: {

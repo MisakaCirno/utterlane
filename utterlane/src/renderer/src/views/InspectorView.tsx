@@ -98,6 +98,8 @@ export function InspectorView(): React.JSX.Element {
   const startRerecording = useEditorStore((s) => s.startRerecordingSelected)
   const stopRecording = useEditorStore((s) => s.stopRecordingAndSave)
   const cancelRecording = useEditorStore((s) => s.cancelRecording)
+  const playCurrentSegment = useEditorStore((s) => s.playCurrentSegment)
+  const stopPlayback = useEditorStore((s) => s.stopPlayback)
 
   if (!segment || !selectedId) {
     return (
@@ -141,11 +143,20 @@ export function InspectorView(): React.JSX.Element {
       </div>
 
       <div className="flex shrink-0 items-center gap-1 border-b border-border px-3 py-2">
-        <ToolbarButton disabled={isRecordingOther || isRecordingThis || !segment.selectedTakeId}>
-          <Play size={11} />
-          播放
+        <ToolbarButton
+          active={playback === 'segment'}
+          onClick={playback === 'segment' ? stopPlayback : () => void playCurrentSegment()}
+          disabled={
+            isRecordingOther || isRecordingThis || playback === 'project' || !segment.selectedTakeId
+          }
+        >
+          {playback === 'segment' ? <Square size={11} /> : <Play size={11} />}
+          {playback === 'segment' ? '停止' : '播放'}
         </ToolbarButton>
-        <ToolbarButton disabled={isRecordingOther || isRecordingThis}>
+        <ToolbarButton
+          onClick={stopPlayback}
+          disabled={isRecordingOther || isRecordingThis || playback === 'idle'}
+        >
           <Square size={11} />
           停止
         </ToolbarButton>

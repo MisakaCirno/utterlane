@@ -7,6 +7,7 @@ import {
 } from '@shared/project'
 import type { PlaybackMode, Project, Segment } from '@renderer/types/project'
 import * as recorder from '@renderer/services/recorder'
+import * as player from '@renderer/services/player'
 
 /**
  * 编辑器 store 承载「当前打开的工程」的全部内存状态。
@@ -73,6 +74,11 @@ type EditorState = {
   startRerecordingSelected: () => Promise<void>
   stopRecordingAndSave: () => Promise<void>
   cancelRecording: () => Promise<void>
+
+  // 播放
+  playCurrentSegment: () => Promise<void>
+  playProject: () => Promise<void>
+  stopPlayback: () => void
 }
 
 // ---------------------------------------------------------------------------
@@ -475,5 +481,60 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     if (state.playback !== 'recording') return
     await recorder.cancelRecording().catch(() => {})
     set({ playback: 'idle', recordingSegmentId: null, recordingTakeId: null })
+  },
+
+  // -------- 播放 --------
+
+  /**
+   * 播放当前选中 Segment 的当前 Take。
+   * 要求：idle + 有 selectedTakeId。
+   * 播完 / 被中断后 playback 回 idle（不留 ghost 状态）。
+   */
+  playCurrentSegment: async () => {
+    const state = get()
+    if (state.playback !== 'idle') return
+    if (!state.selectedSegmentId) return
+    const seg = state.segmentsById[state.selectedSegmentId]
+    const take = seg?.takes.find((t) => t.id === seg.selectedTakeId)
+    if (!take) return
+
+    set({ playback: 'segment' })
+    try {
+      await player.playFile(take.filePath)
+    } finally {
+      // 只有当 playback 还是我们这一轮设置的 'segment' 时才回落；
+      // 如果期间被 playProject 接管，不覆盖它的状态
+      if (get().playback === 'segment') set({ playback: 'idle' })
+    }
+  },
+
+  /**
+   * 连续播放工程里所有「有 selectedTakeId」的 Take。未录制的段自动跳过。
+   */
+  playProject: async () => {
+    const state = get()
+    if (state.playback !== 'idle') return
+    const files: string[] = []
+    for (const id of state.order) {
+      const seg = state.segmentsById[id]
+      const take = seg?.takes.find((t) => t.id === seg.selectedTakeId)
+      if (take) files.push(take.filePath)
+    }
+    if (files.length === 0) return
+
+    set({ playback: 'project' })
+    try {
+      await player.playSequence(files)
+    } finally {
+      if (get().playback === 'project') set({ playback: 'idle' })
+    }
+  },
+
+  stopPlayback: () => {
+    const state = get()
+    if (state.playback === 'segment' || state.playback === 'project') {
+      player.stop()
+      // finally 分支会把 playback 重置为 idle
+    }
   }
 }))

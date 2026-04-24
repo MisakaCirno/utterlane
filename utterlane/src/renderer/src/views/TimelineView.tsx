@@ -80,14 +80,45 @@ function ControlBar(): React.JSX.Element {
   const startRecording = useEditorStore((s) => s.startRecordingForSelected)
   const startRerecording = useEditorStore((s) => s.startRerecordingSelected)
   const stopRecording = useEditorStore((s) => s.stopRecordingAndSave)
+  const playCurrentSegment = useEditorStore((s) => s.playCurrentSegment)
+  const playProject = useEditorStore((s) => s.playProject)
+  const stopPlayback = useEditorStore((s) => s.stopPlayback)
+  const selectSegment = useEditorStore((s) => s.selectSegment)
+  const order = useEditorStore((s) => s.order)
   const takeCount = segment?.takes.length ?? 0
 
   const isRecordingThis = playback === 'recording' && recordingSegmentId === selectedId
   const isRecordingOther = playback === 'recording' && !isRecordingThis
+  const isBusy = playback !== 'idle'
 
   const onRecordClick = (): void => {
     if (isRecordingThis) void stopRecording()
     else if (playback === 'idle') void startRecording()
+  }
+
+  const onPrevSegment = (): void => {
+    if (!selectedId) return
+    const idx = order.indexOf(selectedId)
+    if (idx > 0) selectSegment(order[idx - 1])
+  }
+  const onNextSegment = (): void => {
+    if (!selectedId) return
+    const idx = order.indexOf(selectedId)
+    if (idx >= 0 && idx < order.length - 1) selectSegment(order[idx + 1])
+  }
+
+  /**
+   * Take 切换：在当前 Segment 的 takes 数组里上下移动 selectedTakeId。
+   * 没有 currentTake 时从头开始。
+   */
+  const setSelectedTake = useEditorStore((s) => s.setSelectedTake)
+  const stepTake = (delta: -1 | 1): void => {
+    if (!segment || !selectedId) return
+    const idx = segment.takes.findIndex((t) => t.id === segment.selectedTakeId)
+    const next = Math.max(0, Math.min(segment.takes.length - 1, (idx < 0 ? 0 : idx) + delta))
+    if (next !== idx && segment.takes[next]) {
+      setSelectedTake(selectedId, segment.takes[next].id)
+    }
   }
 
   return (
@@ -95,31 +126,56 @@ function ControlBar(): React.JSX.Element {
       <div className="relative flex h-8 items-center justify-center border-b border-border-subtle px-2">
         <RowLabel>Segment</RowLabel>
         <div className="flex items-center gap-0.5 rounded-sm border border-border bg-bg-deep p-0.5">
-          <IconButton title="上一句">
+          <IconButton
+            title="上一句"
+            onClick={onPrevSegment}
+            disabled={isBusy || !selectedId || order.indexOf(selectedId) <= 0}
+          >
             <ChevronLeft size={13} />
           </IconButton>
-          <IconButton title="下一句">
+          <IconButton
+            title="下一句"
+            onClick={onNextSegment}
+            disabled={isBusy || !selectedId || order.indexOf(selectedId) >= order.length - 1}
+          >
             <ChevronRight size={13} />
           </IconButton>
           <div className="mx-0.5 h-4 w-px bg-border" />
-          <IconButton title="上一个 Take" disabled={takeCount < 2}>
+          <IconButton
+            title="上一个 Take"
+            onClick={() => stepTake(-1)}
+            disabled={isBusy || takeCount < 2}
+          >
             <SkipBack size={12} />
           </IconButton>
-          <IconButton title="下一个 Take" disabled={takeCount < 2}>
+          <IconButton
+            title="下一个 Take"
+            onClick={() => stepTake(1)}
+            disabled={isBusy || takeCount < 2}
+          >
             <SkipForward size={12} />
           </IconButton>
           <div className="mx-0.5 h-4 w-px bg-border" />
           <IconButton
-            title="播放当前句"
+            title={playback === 'segment' ? '停止' : '播放当前句'}
             active={playback === 'segment'}
-            disabled={!segment?.selectedTakeId}
+            disabled={
+              playback === 'project' || playback === 'recording' || !segment?.selectedTakeId
+            }
+            onClick={playback === 'segment' ? stopPlayback : () => void playCurrentSegment()}
           >
-            <Play size={12} />
+            {playback === 'segment' ? <Square size={11} /> : <Play size={12} />}
           </IconButton>
-          <IconButton title="暂停">
+          {/* 暂停：HTMLAudioElement 支持 pause，但我们的状态机目前只有 idle/segment/project
+              三态；pause 会引入「已暂停但未停止」的第四态，先占位禁用 */}
+          <IconButton title="暂停" disabled>
             <Pause size={12} />
           </IconButton>
-          <IconButton title="停止">
+          <IconButton
+            title="停止"
+            onClick={stopPlayback}
+            disabled={playback === 'idle' || playback === 'recording'}
+          >
             <Square size={11} />
           </IconButton>
           <div className="mx-0.5 h-4 w-px bg-border" />
@@ -127,14 +183,16 @@ function ControlBar(): React.JSX.Element {
             title={isRecordingThis ? '停止录音' : '录音'}
             active={isRecordingThis}
             danger
-            disabled={isRecordingOther || !selectedId}
+            disabled={
+              isRecordingOther || !selectedId || playback === 'segment' || playback === 'project'
+            }
             onClick={onRecordClick}
           >
             {isRecordingThis ? <Square size={11} /> : <Mic size={12} />}
           </IconButton>
           <IconButton
             title="重录（覆盖当前 Take）"
-            disabled={isRecordingOther || isRecordingThis || !segment?.selectedTakeId}
+            disabled={isBusy || !segment?.selectedTakeId}
             onClick={() => void startRerecording()}
           >
             <RotateCcw size={12} />
@@ -145,16 +203,28 @@ function ControlBar(): React.JSX.Element {
       <div className="relative flex h-8 items-center justify-center px-2">
         <RowLabel>Project</RowLabel>
         <div className="flex items-center gap-0.5 rounded-sm border border-border bg-bg-deep p-0.5">
-          <IconButton title="从头播放项目">
+          <IconButton
+            title="从头播放项目"
+            onClick={() => {
+              if (order.length > 0) selectSegment(order[0])
+              void playProject()
+            }}
+            disabled={isBusy || order.length === 0}
+          >
             <Rewind size={12} />
           </IconButton>
-          <IconButton title="播放项目" active={playback === 'project'}>
-            <Play size={12} />
+          <IconButton
+            title={playback === 'project' ? '停止' : '播放项目'}
+            active={playback === 'project'}
+            disabled={playback === 'segment' || playback === 'recording' || order.length === 0}
+            onClick={playback === 'project' ? stopPlayback : () => void playProject()}
+          >
+            {playback === 'project' ? <Square size={11} /> : <Play size={12} />}
           </IconButton>
-          <IconButton title="暂停项目">
+          <IconButton title="暂停项目" disabled>
             <Pause size={12} />
           </IconButton>
-          <IconButton title="停止项目">
+          <IconButton title="停止项目" onClick={stopPlayback} disabled={playback !== 'project'}>
             <Square size={11} />
           </IconButton>
         </div>

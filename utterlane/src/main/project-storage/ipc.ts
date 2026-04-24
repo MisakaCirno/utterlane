@@ -1,5 +1,6 @@
 import { BrowserWindow, dialog, ipcMain } from 'electron'
 import { promises as fs } from 'fs'
+import { isAbsolute, join, normalize, relative } from 'path'
 import type { SegmentsFile, WorkspaceFile } from '@shared/project'
 import { projectSession, type OpenResult } from './session'
 import { projectPaths } from './paths'
@@ -14,7 +15,8 @@ export const PROJECT_IPC = {
   close: 'project:close',
   current: 'project:current',
   saveWorkspace: 'project:save-workspace',
-  saveSegments: 'project:save-segments'
+  saveSegments: 'project:save-segments',
+  readTakeFile: 'project:read-take-file'
 } as const
 
 /** saveSegments 的 IPC 返回值；renderer 侧据此切换 saved 标记。 */
@@ -123,6 +125,35 @@ export function registerProjectIpc(): void {
       } catch (err) {
         return { ok: false, message: (err as Error).message }
       }
+    }
+  )
+
+  /**
+   * 读取工程内的 Take 文件给 renderer 播放。
+   *
+   * 安全性：renderer 传来的 relativePath 必须是工程目录下的相对路径，
+   * 不能通过 ../../ 越界读别的磁盘位置。用 path.relative 做正规化 + 边界校验。
+   *
+   * 大文件：当前返回整份 ArrayBuffer。对于几秒的人声片段 100KB~几 MB，
+   * IPC 完全 OK。若将来要播放几十分钟的连读，应改成流式 / 注册自定义协议。
+   */
+  ipcMain.handle(
+    PROJECT_IPC.readTakeFile,
+    async (_e, relativePath: string): Promise<ArrayBuffer> => {
+      const projectDir = projectSession.path
+      if (!projectDir) throw new Error('没有活动工程')
+      if (isAbsolute(relativePath)) {
+        throw new Error('readTakeFile 只接受工程相对路径')
+      }
+      const absolute = normalize(join(projectDir, relativePath))
+      // path.relative 如果目标在 base 上层，结果会以 '..' 开头
+      const rel = relative(projectDir, absolute)
+      if (rel.startsWith('..') || isAbsolute(rel)) {
+        throw new Error('路径越界，拒绝读取')
+      }
+      const buf = await fs.readFile(absolute)
+      // Node 的 Buffer 底层是 ArrayBuffer 共享池；拷贝一份纯净 ArrayBuffer 避免 IPC 上的生命周期问题
+      return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength)
     }
   )
 }

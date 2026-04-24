@@ -34,11 +34,39 @@ export function installKeyboardShortcuts(): () => void {
 
     if (!hasProject) return
 
-    // Esc：录音中 → 取消录音；否则无操作（未来可加「取消播放」）
+    // Esc：录音中 → 取消；播放中 → 停止；idle 时无操作
     if (e.key === 'Escape') {
       if (state.playback === 'recording') {
         e.preventDefault()
         void state.cancelRecording()
+      } else if (state.playback === 'segment' || state.playback === 'project') {
+        e.preventDefault()
+        state.stopPlayback()
+      }
+      return
+    }
+
+    // Space：播当前句 / 停止（常见 DAW 习惯）。Shift+Space：播项目
+    if (e.key === ' ' && !mod && !e.altKey) {
+      e.preventDefault()
+      if (state.playback === 'segment' || state.playback === 'project') {
+        state.stopPlayback()
+      } else if (state.playback === 'idle') {
+        if (e.shiftKey) void state.playProject()
+        else void state.playCurrentSegment()
+      }
+      return
+    }
+
+    // Arrow Up / Down：在 Segments 列表里上下导航（录音 / 播放期间禁用）
+    if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !mod && !e.altKey && !e.shiftKey) {
+      if (state.playback !== 'idle') return
+      const idx = state.selectedSegmentId ? state.order.indexOf(state.selectedSegmentId) : -1
+      const next =
+        e.key === 'ArrowUp' ? Math.max(0, idx - 1) : Math.min(state.order.length - 1, idx + 1)
+      if (next !== idx && state.order[next]) {
+        e.preventDefault()
+        state.selectSegment(state.order[next])
       }
       return
     }
