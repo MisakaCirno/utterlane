@@ -3,7 +3,8 @@ import { SegmentsView } from '@renderer/views/SegmentsView'
 import { InspectorView } from '@renderer/views/InspectorView'
 import { ProjectSettingsView } from '@renderer/views/ProjectSettingsView'
 import { TimelineView } from '@renderer/views/TimelineView'
-import { useEditorStore } from '@renderer/store/editorStore'
+import { usePreferencesStore } from '@renderer/store/preferencesStore'
+import { DEFAULT_PREFERENCES } from '@shared/preferences'
 import { getThemeByKey } from './themes'
 
 const components: Record<string, React.FunctionComponent<IDockviewPanelProps>> = {
@@ -68,7 +69,10 @@ function applyDefaultLayout(event: DockviewReadyEvent): void {
 }
 
 export function Workspace(): React.JSX.Element {
-  const themeKey = useEditorStore((s) => s.dockTheme)
+  // 未 hydrate 前用默认主题，避免首帧闪烁；hydrate 之后切换到用户选择的主题
+  const themeKey = usePreferencesStore(
+    (s) => s.prefs.appearance?.dockTheme ?? DEFAULT_PREFERENCES.appearance!.dockTheme!
+  )
   const theme = getThemeByKey(themeKey)
 
   return (

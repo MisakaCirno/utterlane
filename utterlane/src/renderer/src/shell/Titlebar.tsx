@@ -3,7 +3,9 @@ import { Check, ChevronRight, Minus, Square, Copy, X, Mic } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { cn } from '@renderer/lib/cn'
 import { useEditorStore } from '@renderer/store/editorStore'
-import { themeRegistry, type ThemeKey } from './themes'
+import { usePreferencesStore } from '@renderer/store/preferencesStore'
+import { DEFAULT_PREFERENCES, type DockThemeKey } from '@shared/preferences'
+import { themeRegistry } from './themes'
 
 type MenuItem =
   | { kind: 'item'; label: string; shortcut?: string; disabled?: boolean; onSelect?: () => void }
@@ -18,7 +20,7 @@ type MenuItem =
 
 type MenuDef = { label: string; items: MenuItem[] }
 
-function buildMenus(themeKey: ThemeKey, setTheme: (key: ThemeKey) => void): MenuDef[] {
+function buildMenus(themeKey: DockThemeKey, setTheme: (key: DockThemeKey) => void): MenuDef[] {
   return [
     {
       label: 'File',
@@ -66,7 +68,7 @@ function buildMenus(themeKey: ThemeKey, setTheme: (key: ThemeKey) => void): Menu
             {
               kind: 'radioGroup',
               value: themeKey,
-              onValueChange: (v) => setTheme(v as ThemeKey),
+              onValueChange: (v) => setTheme(v as DockThemeKey),
               options: themeRegistry.map((t) => ({ value: t.key, label: t.label }))
             }
           ]
@@ -198,11 +200,18 @@ function MenuButton({ menu }: { menu: MenuDef }): React.JSX.Element {
 export function Titlebar(): React.JSX.Element {
   const project = useEditorStore((s) => s.project)
   const saved = useEditorStore((s) => s.saved)
-  const themeKey = useEditorStore((s) => s.dockTheme)
-  const setDockTheme = useEditorStore((s) => s.setDockTheme)
+  const themeKey = usePreferencesStore(
+    (s) => s.prefs.appearance?.dockTheme ?? DEFAULT_PREFERENCES.appearance!.dockTheme!
+  )
+  const updatePrefs = usePreferencesStore((s) => s.update)
   const [maximized, setMaximized] = useState(false)
 
-  const menus = useMemo(() => buildMenus(themeKey, setDockTheme), [themeKey, setDockTheme])
+  // buildMenus 被 theme/prefs 改动驱动重建。setTheme 回调写回 preferences，
+  // 主进程广播后 store 自动刷新，从而驱动下次重建，形成闭环。
+  const menus = useMemo(
+    () => buildMenus(themeKey, (key) => updatePrefs({ appearance: { dockTheme: key } })),
+    [themeKey, updatePrefs]
+  )
 
   useEffect(() => {
     window.api.window.isMaximized().then(setMaximized)
@@ -214,9 +223,15 @@ export function Titlebar(): React.JSX.Element {
     <div className="drag-region relative flex h-8 shrink-0 items-center border-b border-border bg-chrome text-fg">
       <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-4 text-2xs text-fg-muted">
         <span className="truncate">
-          {project.title}
-          {!saved && <span className="text-fg-dim"> ●</span>}
-          <span className="text-fg-dim"> — Utterlane</span>
+          {project ? (
+            <>
+              {project.title}
+              {!saved && <span className="text-fg-dim"> ●</span>}
+              <span className="text-fg-dim"> — Utterlane</span>
+            </>
+          ) : (
+            'Utterlane'
+          )}
         </span>
       </div>
 

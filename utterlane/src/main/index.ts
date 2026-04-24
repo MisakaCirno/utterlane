@@ -2,13 +2,41 @@ import { app, shell, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
+import { preferencesStore, registerPreferencesIpc } from './preferences'
+import type { WindowBounds } from '@shared/preferences'
+
+/** 窗口尺寸下限：低于此值 UI 会严重挤压，拒绝接受更小的持久化值 */
+const MIN_WINDOW_WIDTH = 900
+const MIN_WINDOW_HEIGHT = 600
+
+/** 默认窗口尺寸（首次启动或偏好文件中没有 window bounds 时使用） */
+const DEFAULT_WINDOW_WIDTH = 1280
+const DEFAULT_WINDOW_HEIGHT = 800
+
+/**
+ * 把持久化的 window bounds 合并到 BrowserWindow 构造参数。
+ * 位置信息（x/y）只有两个值都存在时才应用，避免单独一个字段导致窗口跳到奇怪位置。
+ */
+function resolveInitialBounds(saved: WindowBounds | undefined): {
+  width: number
+  height: number
+  x?: number
+  y?: number
+} {
+  const width = Math.max(MIN_WINDOW_WIDTH, saved?.width ?? DEFAULT_WINDOW_WIDTH)
+  const height = Math.max(MIN_WINDOW_HEIGHT, saved?.height ?? DEFAULT_WINDOW_HEIGHT)
+  const hasPosition = saved?.x !== undefined && saved?.y !== undefined
+  return hasPosition ? { width, height, x: saved.x, y: saved.y } : { width, height }
+}
 
 function createWindow(): void {
+  const prefs = preferencesStore.snapshot
+  const bounds = resolveInitialBounds(prefs.window)
+
   const mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 800,
-    minWidth: 900,
-    minHeight: 600,
+    ...bounds,
+    minWidth: MIN_WINDOW_WIDTH,
+    minHeight: MIN_WINDOW_HEIGHT,
     show: false,
     frame: false,
     titleBarStyle: 'hidden',
@@ -21,6 +49,11 @@ function createWindow(): void {
     }
   })
 
+  // 上次退出时若是最大化状态，新窗口打开后恢复最大化
+  if (prefs.window?.maximized) {
+    mainWindow.maximize()
+  }
+
   mainWindow.on('ready-to-show', () => {
     mainWindow.show()
   })
@@ -28,8 +61,24 @@ function createWindow(): void {
   const emitMaximizeState = (): void => {
     mainWindow.webContents.send('window:maximize-state', mainWindow.isMaximized())
   }
-  mainWindow.on('maximize', emitMaximizeState)
-  mainWindow.on('unmaximize', emitMaximizeState)
+  mainWindow.on('maximize', () => {
+    emitMaximizeState()
+    preferencesStore.update({ window: { ...mainWindow.getBounds(), maximized: true } })
+  })
+  mainWindow.on('unmaximize', () => {
+    emitMaximizeState()
+    preferencesStore.update({ window: { ...mainWindow.getBounds(), maximized: false } })
+  })
+
+  // resize / move 会高频触发，preferencesStore 自带 debounce 不用再限流。
+  // 最大化时的 bounds 是屏幕全尺寸，把它落盘会污染下次非最大化时的默认大小，
+  // 所以这里只在非最大化状态下保存 bounds。
+  const persistBounds = (): void => {
+    if (mainWindow.isMaximized()) return
+    preferencesStore.update({ window: { ...mainWindow.getBounds(), maximized: false } })
+  }
+  mainWindow.on('resize', persistBounds)
+  mainWindow.on('move', persistBounds)
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
     shell.openExternal(details.url)
@@ -43,8 +92,12 @@ function createWindow(): void {
   }
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.utterlane')
+
+  // 在创建窗口前加载偏好：窗口大小、位置、最大化状态都依赖它
+  await preferencesStore.init()
+  registerPreferencesIpc()
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
@@ -71,6 +124,18 @@ app.whenReady().then(() => {
   app.on('activate', function () {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
+})
+
+// 退出前把 pending 的偏好变更刷盘，避免用户刚改了设置就关窗导致丢失。
+// before-quit 可能多次触发（每个窗口关闭一次），用一个 flag 防止重入。
+let isFlushingOnQuit = false
+app.on('before-quit', async (event) => {
+  if (isFlushingOnQuit) return
+  event.preventDefault()
+  isFlushingOnQuit = true
+  await preferencesStore.flush()
+  // app.exit() 是硬退出，不会再触发 before-quit，所以不会循环
+  app.exit()
 })
 
 app.on('window-all-closed', () => {

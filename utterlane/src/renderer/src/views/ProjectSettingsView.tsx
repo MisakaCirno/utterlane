@@ -12,6 +12,10 @@ function SectionTitle({ children }: { children: React.ReactNode }): React.JSX.El
 export function ProjectSettingsView(): React.JSX.Element {
   const project = useEditorStore((s) => s.project)
 
+  // Workspace 只在有工程时挂载，这里正常不会命中 null；
+  // 但保留守卫让类型检查通过，同时覆盖 React 18 挂载时序的边界情况。
+  if (!project) return <div className="h-full bg-bg" />
+
   return (
     <div className="h-full overflow-y-auto bg-bg px-3 py-2">
       <SectionTitle>工程信息</SectionTitle>

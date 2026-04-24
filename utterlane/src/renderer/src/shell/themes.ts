@@ -9,18 +9,15 @@ import {
   themeVisualStudio,
   type DockviewTheme
 } from 'dockview-react'
+import type { DockThemeKey } from '@shared/preferences'
 
-export type ThemeKey =
-  | 'dark'
-  | 'light'
-  | 'visualStudio'
-  | 'abyss'
-  | 'abyssSpaced'
-  | 'dracula'
-  | 'replit'
-  | 'lightSpaced'
-
-export const themeRegistry: Array<{ key: ThemeKey; label: string; theme: DockviewTheme }> = [
+/**
+ * 全部可选的 dock 主题。key 是持久化到 preferences.json 的字符串，
+ * theme 是 dockview 实际使用的 DockviewTheme 对象。
+ *
+ * 新增主题时同时维护 DockThemeKey union（@shared/preferences）。
+ */
+export const themeRegistry: Array<{ key: DockThemeKey; label: string; theme: DockviewTheme }> = [
   { key: 'dark', label: 'Dark (默认)', theme: themeDark },
   { key: 'light', label: 'Light', theme: themeLight },
   { key: 'visualStudio', label: 'Visual Studio', theme: themeVisualStudio },
@@ -31,6 +28,6 @@ export const themeRegistry: Array<{ key: ThemeKey; label: string; theme: Dockvie
   { key: 'lightSpaced', label: 'Light Spaced', theme: themeLightSpaced }
 ]
 
-export function getThemeByKey(key: ThemeKey): DockviewTheme {
+export function getThemeByKey(key: DockThemeKey): DockviewTheme {
   return themeRegistry.find((t) => t.key === key)?.theme ?? themeDark
 }

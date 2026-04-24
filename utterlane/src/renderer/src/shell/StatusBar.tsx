@@ -12,6 +12,16 @@ export function StatusBar(): React.JSX.Element {
     s.selectedSegmentId ? s.segmentsById[s.selectedSegmentId] : undefined
   )
 
+  // 无工程时状态栏退化成极简模式，只提示「无活动工程」。
+  // 不隐藏整条是为了保持整体布局一致，避免窗口内容区随之抖动。
+  if (!project) {
+    return (
+      <div className="flex h-6 shrink-0 items-center border-t border-border bg-chrome px-3 text-2xs text-fg-dim">
+        无活动工程
+      </div>
+    )
+  }
+
   const segIndex = selectedId ? order.indexOf(selectedId) : -1
   const takeCount = segment?.takes.length ?? 0
   const currentTakeIdx = segment?.takes.findIndex((t) => t.id === segment.selectedTakeId) ?? -1
