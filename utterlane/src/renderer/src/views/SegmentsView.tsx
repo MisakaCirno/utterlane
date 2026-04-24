@@ -1,4 +1,19 @@
 import { useCallback, useRef, useState } from 'react'
+import {
+  DndContext,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent
+} from '@dnd-kit/core'
+import {
+  SortableContext,
+  arrayMove,
+  useSortable,
+  verticalListSortingStrategy
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import { useEditorStore } from '@renderer/store/editorStore'
 import { cn } from '@renderer/lib/cn'
 import { formatDuration } from '@renderer/lib/format'
@@ -64,11 +79,93 @@ function ResizeHandle({
   )
 }
 
+/**
+ * 单行 Segment。用 @dnd-kit 的 useSortable 得到 transform + listeners，
+ * 只把 listeners 绑在左侧 GripVertical 上（而不是整行），
+ * 这样行的其他区域仍然响应 click 选中 / 双击编辑。
+ */
+function SegmentRow({
+  id,
+  idx,
+  gridStyle
+}: {
+  id: string
+  idx: number
+  gridStyle: React.CSSProperties
+}): React.JSX.Element | null {
+  const seg = useEditorStore((s) => s.segmentsById[id])
+  const selected = useEditorStore((s) => s.selectedSegmentId === id)
+  const selectSegment = useEditorStore((s) => s.selectSegment)
+
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id
+  })
+
+  if (!seg) return null
+  const current = seg.takes.find((t) => t.id === seg.selectedTakeId)
+  const duration = current?.durationMs ?? 0
+
+  // dnd-kit 在拖拽中通过 transform 以 translate3d 视觉偏移；
+  // transition 让松手归位有动画；isDragging 时提权层级 + 高亮
+  const style: React.CSSProperties = {
+    ...gridStyle,
+    transform: CSS.Transform.toString(transform),
+    transition,
+    zIndex: isDragging ? 10 : undefined
+  }
+
+  return (
+    <div
+      ref={setNodeRef}
+      onClick={() => selectSegment(id)}
+      style={style}
+      className={cn(
+        'group grid h-8 cursor-default items-center border-b border-border-subtle text-xs',
+        selected ? 'bg-accent-soft text-white' : 'hover:bg-bg-raised',
+        isDragging && 'bg-bg-raised shadow-lg ring-1 ring-accent'
+      )}
+    >
+      <div
+        {...attributes}
+        {...listeners}
+        className={cn(
+          'flex h-full cursor-grab items-center justify-center text-fg-dim',
+          'opacity-0 group-hover:opacity-100 active:cursor-grabbing'
+        )}
+        // 把 drag handle 的点击 / 双击事件拦下来，避免触发行的选中逻辑
+        onClick={(e) => e.stopPropagation()}
+      >
+        <GripVertical size={12} />
+      </div>
+      <div
+        className={cn('px-2 text-right tabular-nums', selected ? 'text-white/80' : 'text-fg-dim')}
+      >
+        {idx + 1}
+      </div>
+      <div className="min-w-0 truncate px-2">{seg.text}</div>
+      <div className="px-2">
+        <StatusCell count={seg.takes.length} />
+      </div>
+      <div
+        className={cn('px-2 text-right tabular-nums', selected ? 'text-white/80' : 'text-fg-muted')}
+      >
+        {seg.takes.length}
+      </div>
+      <div
+        className={cn(
+          'px-2 text-right font-mono text-2xs tabular-nums',
+          selected ? 'text-white/80' : 'text-fg-muted'
+        )}
+      >
+        {duration > 0 ? formatDuration(duration) : '—'}
+      </div>
+    </div>
+  )
+}
+
 export function SegmentsView(): React.JSX.Element {
   const order = useEditorStore((s) => s.order)
-  const segmentsById = useEditorStore((s) => s.segmentsById)
-  const selectedId = useEditorStore((s) => s.selectedSegmentId)
-  const selectSegment = useEditorStore((s) => s.selectSegment)
+  const reorderSegments = useEditorStore((s) => s.reorderSegments)
 
   const [widths, setWidths] = useState<ColWidths>({
     order: 44,
@@ -147,6 +244,19 @@ export function SegmentsView(): React.JSX.Element {
     [widths]
   )
 
+  // 拖拽传感器：要求指针移动 4px 后才判定为拖拽，
+  // 避免 GripVertical 的单击误触发 drag（用户可能只想点一下）
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }))
+
+  const handleDragEnd = (e: DragEndEvent): void => {
+    const { active, over } = e
+    if (!over || active.id === over.id) return
+    const from = order.indexOf(String(active.id))
+    const to = order.indexOf(String(over.id))
+    if (from < 0 || to < 0) return
+    reorderSegments(arrayMove(order, from, to))
+  }
+
   return (
     <div className="flex h-full flex-col bg-bg">
       <div
@@ -174,57 +284,13 @@ export function SegmentsView(): React.JSX.Element {
       </div>
 
       <div className="flex-1 overflow-y-auto">
-        {order.map((id, idx) => {
-          const seg = segmentsById[id]
-          if (!seg) return null
-          const current = seg.takes.find((t) => t.id === seg.selectedTakeId)
-          const duration = current?.durationMs ?? 0
-          const selected = selectedId === id
-
-          return (
-            <div
-              key={id}
-              onClick={() => selectSegment(id)}
-              style={gridStyle}
-              className={cn(
-                'group grid h-8 cursor-default items-center border-b border-border-subtle text-xs',
-                selected ? 'bg-accent-soft text-white' : 'hover:bg-bg-raised'
-              )}
-            >
-              <div className="flex h-full items-center justify-center text-fg-dim opacity-0 group-hover:opacity-100">
-                <GripVertical size={12} />
-              </div>
-              <div
-                className={cn(
-                  'px-2 text-right tabular-nums',
-                  selected ? 'text-white/80' : 'text-fg-dim'
-                )}
-              >
-                {idx + 1}
-              </div>
-              <div className="min-w-0 truncate px-2">{seg.text}</div>
-              <div className="px-2">
-                <StatusCell count={seg.takes.length} />
-              </div>
-              <div
-                className={cn(
-                  'px-2 text-right tabular-nums',
-                  selected ? 'text-white/80' : 'text-fg-muted'
-                )}
-              >
-                {seg.takes.length}
-              </div>
-              <div
-                className={cn(
-                  'px-2 text-right font-mono text-2xs tabular-nums',
-                  selected ? 'text-white/80' : 'text-fg-muted'
-                )}
-              >
-                {duration > 0 ? formatDuration(duration) : '—'}
-              </div>
-            </div>
-          )
-        })}
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          <SortableContext items={order} strategy={verticalListSortingStrategy}>
+            {order.map((id, idx) => (
+              <SegmentRow key={id} id={id} idx={idx} gridStyle={gridStyle} />
+            ))}
+          </SortableContext>
+        </DndContext>
       </div>
     </div>
   )

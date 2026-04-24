@@ -54,6 +54,7 @@ type EditorState = {
   importScript: (rawText: string) => void
   editSegmentText: (id: string, text: string) => void
   deleteSegment: (id: string) => void
+  reorderSegments: (nextOrder: string[]) => void
   setSelectedTake: (segmentId: string, takeId: string) => void
   deleteTake: (segmentId: string, takeId: string) => void
 }
@@ -235,6 +236,27 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         },
         ...markDirty()
       }
+    })
+    scheduleSegmentsSave()
+  },
+
+  /**
+   * 替换式重排：调用方传入整份新的 order 数组。
+   * 既服务拖拽（UI 算好新顺序后一次性传入），也方便后续加「批量排序」等功能。
+   * 我们只做长度和成员校验，防御 UI bug 把 order 污染掉。
+   */
+  reorderSegments: (nextOrder) => {
+    set((state) => {
+      if (nextOrder.length !== state.order.length) return state
+      // 成员必须和旧 order 完全一致，仅顺序不同
+      const currentSet = new Set(state.order)
+      for (const id of nextOrder) {
+        if (!currentSet.has(id)) return state
+      }
+      // 顺序未变则不写盘
+      const same = nextOrder.every((id, i) => id === state.order[i])
+      if (same) return state
+      return { order: nextOrder, ...markDirty() }
     })
     scheduleSegmentsSave()
   },
