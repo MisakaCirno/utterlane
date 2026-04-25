@@ -9,7 +9,8 @@ import {
   Circle,
   AlertTriangle,
   Scissors,
-  Pilcrow
+  Pilcrow,
+  X
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { cn } from '@renderer/lib/cn'
@@ -134,6 +135,9 @@ export function InspectorView(): React.JSX.Element {
   const recommendedMaxChars = useEditorStore((s) => s.project?.recommendedMaxChars)
   const setSelectedTake = useEditorStore((s) => s.setSelectedTake)
   const deleteTake = useEditorStore((s) => s.deleteTake)
+  const setParagraphStart = useEditorStore((s) => s.setParagraphStart)
+  const setSegmentGap = useEditorStore((s) => s.setSegmentGap)
+  const setTakeTrim = useEditorStore((s) => s.setTakeTrim)
   const playback = useEditorStore((s) => s.playback)
   const recordingSegmentId = useEditorStore((s) => s.recordingSegmentId)
   const missingTakeIds = useEditorStore((s) => s.missingTakeIds)
@@ -215,14 +219,24 @@ export function InspectorView(): React.JSX.Element {
           />
         </Field>
         <Field label={t('inspector.field_paragraph')}>
-          {isParagraphHead ? (
-            <span className="inline-flex items-center gap-1 text-fg">
-              <Pilcrow size={11} className="text-accent" />
-              {t('inspector.paragraph_head_yes')}
-            </span>
-          ) : (
-            <span className="text-fg-dim">{t('inspector.paragraph_head_no')}</span>
-          )}
+          <button
+            type="button"
+            onClick={() => setParagraphStart(selectedId, !isParagraphHead)}
+            disabled={playback !== 'idle' || index === 0}
+            // 首段恒为段首，按钮 disabled；非 idle 也 disabled，避免播放 /
+            // 录音中改写段落结构
+            title={index === 0 ? t('inspector.paragraph_first_locked_hint') : undefined}
+            className={cn(
+              'inline-flex items-center gap-1 rounded-sm border px-2 py-0.5 text-xs',
+              'disabled:cursor-not-allowed disabled:opacity-50',
+              isParagraphHead
+                ? 'border-accent bg-accent-soft text-white'
+                : 'border-border bg-bg-raised text-fg hover:border-border-strong'
+            )}
+          >
+            <Pilcrow size={11} />
+            {isParagraphHead ? t('inspector.paragraph_head_yes') : t('inspector.paragraph_head_no')}
+          </button>
         </Field>
         <Field label={t('inspector.field_gap_after')}>
           {isLast ? (
@@ -230,20 +244,46 @@ export function InspectorView(): React.JSX.Element {
             <span className="text-fg-dim" title={t('inspector.gap_after_last_hint')}>
               {t('inspector.gap_after_last')}
             </span>
-          ) : segment.gapAfter ? (
-            <span className="font-mono tabular-nums text-fg">
-              {segment.gapAfter.ms} ms
-              <span className="ml-2 text-2xs text-fg-dim">
-                {segment.gapAfter.manual
-                  ? t('inspector.gap_after_manual')
-                  : t('inspector.gap_after_auto')}
-              </span>
-            </span>
           ) : (
-            // 未设置：导出时按 ExportEffects.silencePaddingMs 兜底，UI 用占位符
-            <span className="text-fg-dim" title={t('inspector.gap_after_unset_hint')}>
-              {t('inspector.gap_after_unset')}
-            </span>
+            <div className="flex items-center gap-1.5">
+              {/* 数字输入。改值即落 manual: true，applyDefaultGaps 会跳过此段
+                  保留用户意图。空字符串 / NaN 视作 0 */}
+              <input
+                type="number"
+                min={0}
+                step={50}
+                value={segment.gapAfter?.ms ?? 0}
+                onChange={(e) => {
+                  const v = Math.max(0, parseInt(e.currentTarget.value, 10) || 0)
+                  setSegmentGap(selectedId, { ms: v, manual: true })
+                }}
+                disabled={playback !== 'idle'}
+                className={cn(
+                  'w-20 rounded-sm border border-border bg-bg-deep px-1.5 py-0.5',
+                  'text-right font-mono text-xs tabular-nums text-fg',
+                  'outline-none focus:border-accent disabled:cursor-not-allowed disabled:opacity-50'
+                )}
+              />
+              <span className="text-2xs text-fg-muted">ms</span>
+              <span className="text-2xs text-fg-dim">
+                {segment.gapAfter
+                  ? segment.gapAfter.manual
+                    ? t('inspector.gap_after_manual')
+                    : t('inspector.gap_after_auto')
+                  : t('inspector.gap_after_unset')}
+              </span>
+              {segment.gapAfter && (
+                <button
+                  type="button"
+                  onClick={() => setSegmentGap(selectedId, undefined)}
+                  disabled={playback !== 'idle'}
+                  title={t('inspector.gap_after_clear_hint')}
+                  className="rounded-sm p-0.5 text-fg-muted hover:bg-bg-raised hover:text-rec disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <X size={11} />
+                </button>
+              )}
+            </div>
           )}
         </Field>
       </div>
@@ -350,15 +390,85 @@ export function InspectorView(): React.JSX.Element {
                 </div>
                 <div className="flex min-w-0 flex-1 flex-col">
                   <div className="truncate">{t('inspector.take_item', { index: i + 1 })}</div>
-                  {isTrimmed && (
-                    <div className="flex items-center gap-1 font-mono text-2xs tabular-nums text-fg-dim">
+                  {isCurrent ? (
+                    // 当前 Take：trim 起 / 终点改成可编辑数字输入。0 / duration
+                    // 即「未节选」，setTakeTrim 会自动把 trim 字段从 Take 上
+                    // 删除（store 内部清洗）。playback 非 idle 时锁住，与
+                    // 其他 mutate 入口一致
+                    <div className="flex flex-wrap items-center gap-1 text-2xs tabular-nums text-fg-dim">
                       <Scissors size={9} />
-                      <span>
-                        {formatDuration(effectiveRange.startMs)}
-                        <span className="px-0.5 text-fg-muted">→</span>
-                        {formatDuration(effectiveRange.endMs)}
-                      </span>
+                      <input
+                        type="number"
+                        min={0}
+                        max={Math.max(0, effectiveRange.endMs - 1)}
+                        step={10}
+                        value={effectiveRange.startMs}
+                        onChange={(e) => {
+                          const raw = parseInt(e.currentTarget.value, 10)
+                          const next = Number.isFinite(raw) ? Math.max(0, raw) : 0
+                          setTakeTrim(selectedId, take.id, {
+                            startMs: next,
+                            endMs: effectiveRange.endMs
+                          })
+                        }}
+                        disabled={playback !== 'idle' || isMissing}
+                        title={formatDuration(effectiveRange.startMs)}
+                        className={cn(
+                          'w-16 rounded-sm border border-border bg-bg-deep px-1 py-0.5',
+                          'text-right font-mono text-2xs tabular-nums text-fg',
+                          'outline-none focus:border-accent disabled:cursor-not-allowed disabled:opacity-50'
+                        )}
+                      />
+                      <span className="text-fg-muted">ms →</span>
+                      <input
+                        type="number"
+                        min={effectiveRange.startMs + 1}
+                        max={take.durationMs}
+                        step={10}
+                        value={effectiveRange.endMs}
+                        onChange={(e) => {
+                          const raw = parseInt(e.currentTarget.value, 10)
+                          const next = Number.isFinite(raw)
+                            ? Math.min(take.durationMs, Math.max(0, raw))
+                            : take.durationMs
+                          setTakeTrim(selectedId, take.id, {
+                            startMs: effectiveRange.startMs,
+                            endMs: next
+                          })
+                        }}
+                        disabled={playback !== 'idle' || isMissing}
+                        title={formatDuration(effectiveRange.endMs)}
+                        className={cn(
+                          'w-16 rounded-sm border border-border bg-bg-deep px-1 py-0.5',
+                          'text-right font-mono text-2xs tabular-nums text-fg',
+                          'outline-none focus:border-accent disabled:cursor-not-allowed disabled:opacity-50'
+                        )}
+                      />
+                      <span className="text-fg-muted">ms</span>
+                      {isTrimmed && (
+                        <button
+                          type="button"
+                          onClick={() => setTakeTrim(selectedId, take.id, undefined)}
+                          disabled={playback !== 'idle'}
+                          title={t('inspector.take_trim_clear_hint')}
+                          className="rounded-sm p-0.5 text-fg-muted hover:bg-bg-raised hover:text-rec disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          <X size={10} />
+                        </button>
+                      )}
                     </div>
+                  ) : (
+                    // 非当前 Take：保留只读时间显示；要改先「设为当前」
+                    isTrimmed && (
+                      <div className="flex items-center gap-1 font-mono text-2xs tabular-nums text-fg-dim">
+                        <Scissors size={9} />
+                        <span>
+                          {formatDuration(effectiveRange.startMs)}
+                          <span className="px-0.5 text-fg-muted">→</span>
+                          {formatDuration(effectiveRange.endMs)}
+                        </span>
+                      </div>
+                    )
                   )}
                 </div>
                 {isMissing && (
