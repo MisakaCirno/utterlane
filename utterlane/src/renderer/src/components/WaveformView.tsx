@@ -14,7 +14,15 @@ import { subscribePosition } from '@renderer/services/player'
  * ResizeObserver 监听容器宽度变化重绘——dockview 拖动改面板大小时跟着走。
  *
  * 播放游标：订阅 player.subscribePosition，当事件里的 playingPath 正好是自己
- * 显示的 filePath 时，在 canvas 上叠一条垂直线代表播放头位置。
+ * 显示的 filePath 时，在另一层 canvas 上画一条垂直线代表播放头位置——
+ * 用独立 canvas 而非合并到波形那层，避免每帧 60Hz 的 playhead 更新触发
+ * computePeaks（O(samples)）重算波形。
+ *
+ * sampleRate 来自 AudioContext.decodeAudioData：decodeAudioData 会把 PCM
+ * 重采到 AudioContext 的 sampleRate（一般等于设备 sampleRate），所以波形
+ * 上采样数 / 该 rate 算出的「时长」与 audio.duration 一致——playheadMs
+ * 映射到 canvas x 坐标时这两边自然对得上。原始文件的 sample rate 在这里
+ * 不需要也不可见。
  */
 
 type LoadResult = { path: string; samples: Float32Array } | { path: string; errorMessage: string }
@@ -23,7 +31,8 @@ type CacheEntry = { samples: Float32Array; sampleRate: number }
 
 export function WaveformView({ filePath }: { filePath: string | null }): React.JSX.Element {
   const { t } = useTranslation()
-  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const waveCanvasRef = useRef<HTMLCanvasElement>(null)
+  const playheadCanvasRef = useRef<HTMLCanvasElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const [result, setResult] = useState<LoadResult | null>(null)
   // 缓存 sampleRate 用于把 playheadMs 换算到 canvas x 坐标。
@@ -31,6 +40,8 @@ export function WaveformView({ filePath }: { filePath: string | null }): React.J
   const [entry, setEntry] = useState<CacheEntry | null>(null)
   // playheadMs === null：当前不在播本文件；数值：播到了多少毫秒
   const [playheadMs, setPlayheadMs] = useState<number | null>(null)
+  // 容器尺寸——同时影响波形与游标层，单独跟踪让两条 effect 都能依赖
+  const [size, setSize] = useState<{ w: number; h: number }>({ w: 0, h: 0 })
 
   useEffect(() => {
     if (!filePath) return
@@ -70,74 +81,92 @@ export function WaveformView({ filePath }: { filePath: string | null }): React.J
   // 总时长（毫秒），用于把 playheadMs 映射到 x 坐标
   const totalMs = samples && entry ? (samples.length / entry.sampleRate) * 1000 : 0
 
-  // 每次 samples / playheadMs / 尺寸变化都重绘
+  // 容器尺寸跟踪：用 ResizeObserver 写到 size state，让两层 canvas 都依赖
   useEffect(() => {
-    const canvas = canvasRef.current
     const container = containerRef.current
-    if (!canvas || !container) return
-
-    const draw = (): void => {
+    if (!container) return
+    const measure = (): void => {
       const rect = container.getBoundingClientRect()
-      if (rect.width === 0 || rect.height === 0) return
-      const dpr = window.devicePixelRatio || 1
-      canvas.width = Math.floor(rect.width * dpr)
-      canvas.height = Math.floor(rect.height * dpr)
-      canvas.style.width = `${rect.width}px`
-      canvas.style.height = `${rect.height}px`
-
-      const ctx = canvas.getContext('2d')
-      if (!ctx) return
-      ctx.scale(dpr, dpr)
-      ctx.clearRect(0, 0, rect.width, rect.height)
-
-      if (!samples) return
-
-      const buckets = Math.max(1, Math.floor(rect.width))
-      const peaks = computePeaks(samples, buckets)
-      const midY = rect.height / 2
-      const maxHalfHeight = midY - 4
-
-      // 用产品品牌色（Tailwind 里 accent.DEFAULT）硬编码——
-      // 波形是产品识别的一部分，不跟随 dock 主题切换
-      ctx.strokeStyle = '#0e639c'
-      ctx.lineWidth = 1
-      ctx.beginPath()
-      for (let x = 0; x < buckets; x++) {
-        const peak = peaks[x]
-        const h = peak * maxHalfHeight
-        const px = x + 0.5
-        ctx.moveTo(px, midY - h)
-        ctx.lineTo(px, midY + h)
-      }
-      ctx.stroke()
-
-      // 零电平参考线
-      ctx.strokeStyle = 'rgba(204,204,204,0.15)'
-      ctx.lineWidth = 1
-      ctx.beginPath()
-      ctx.moveTo(0, midY)
-      ctx.lineTo(rect.width, midY)
-      ctx.stroke()
-
-      // 播放游标：playheadMs 有值且 totalMs 可算时，画一条竖线
-      if (playheadMs !== null && totalMs > 0) {
-        const ratio = Math.min(1, Math.max(0, playheadMs / totalMs))
-        const cx = Math.floor(ratio * rect.width) + 0.5
-        // 用红色让游标在蓝色波形里视觉上分得清；不透明度给弱一点避免过度打扰
-        ctx.strokeStyle = 'rgba(209, 69, 69, 0.85)'
-        ctx.lineWidth = 1
-        ctx.beginPath()
-        ctx.moveTo(cx, 0)
-        ctx.lineTo(cx, rect.height)
-        ctx.stroke()
-      }
+      setSize({ w: rect.width, h: rect.height })
     }
-
-    draw()
-    const ro = new ResizeObserver(draw)
+    measure()
+    const ro = new ResizeObserver(measure)
     ro.observe(container)
     return () => ro.disconnect()
-  }, [samples, playheadMs, totalMs])
+  }, [])
+
+  // 波形层：仅依赖 samples + size。播放每帧的 playheadMs 变化不会让它重绘，
+  // 不再触发 computePeaks(O(samples)) 的浪费。
+  useEffect(() => {
+    const canvas = waveCanvasRef.current
+    if (!canvas || size.w === 0 || size.h === 0) return
+    const dpr = window.devicePixelRatio || 1
+    canvas.width = Math.floor(size.w * dpr)
+    canvas.height = Math.floor(size.h * dpr)
+    canvas.style.width = `${size.w}px`
+    canvas.style.height = `${size.h}px`
+
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    ctx.scale(dpr, dpr)
+    ctx.clearRect(0, 0, size.w, size.h)
+
+    if (!samples) return
+
+    const buckets = Math.max(1, Math.floor(size.w))
+    const peaks = computePeaks(samples, buckets)
+    const midY = size.h / 2
+    const maxHalfHeight = midY - 4
+
+    // 用产品品牌色（Tailwind 里 accent.DEFAULT）硬编码——
+    // 波形是产品识别的一部分，不跟随 dock 主题切换
+    ctx.strokeStyle = '#0e639c'
+    ctx.lineWidth = 1
+    ctx.beginPath()
+    for (let x = 0; x < buckets; x++) {
+      const peak = peaks[x]
+      const h = peak * maxHalfHeight
+      const px = x + 0.5
+      ctx.moveTo(px, midY - h)
+      ctx.lineTo(px, midY + h)
+    }
+    ctx.stroke()
+
+    // 零电平参考线
+    ctx.strokeStyle = 'rgba(204,204,204,0.15)'
+    ctx.lineWidth = 1
+    ctx.beginPath()
+    ctx.moveTo(0, midY)
+    ctx.lineTo(size.w, midY)
+    ctx.stroke()
+  }, [samples, size])
+
+  // 游标层：仅依赖 playheadMs + totalMs + size。绝对定位覆盖在波形上方，
+  // 每帧只清一次小区域 + 画一条竖线，O(1)
+  useEffect(() => {
+    const canvas = playheadCanvasRef.current
+    if (!canvas || size.w === 0 || size.h === 0) return
+    const dpr = window.devicePixelRatio || 1
+    canvas.width = Math.floor(size.w * dpr)
+    canvas.height = Math.floor(size.h * dpr)
+    canvas.style.width = `${size.w}px`
+    canvas.style.height = `${size.h}px`
+
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    ctx.scale(dpr, dpr)
+    ctx.clearRect(0, 0, size.w, size.h)
+
+    if (playheadMs === null || totalMs <= 0) return
+    const ratio = Math.min(1, Math.max(0, playheadMs / totalMs))
+    const cx = Math.floor(ratio * size.w) + 0.5
+    ctx.strokeStyle = 'rgba(209, 69, 69, 0.85)'
+    ctx.lineWidth = 1
+    ctx.beginPath()
+    ctx.moveTo(cx, 0)
+    ctx.lineTo(cx, size.h)
+    ctx.stroke()
+  }, [playheadMs, totalMs, size])
 
   return (
     <div
@@ -153,7 +182,15 @@ export function WaveformView({ filePath }: { filePath: string | null }): React.J
       {filePath && errorMessage && (
         <Placeholder>{t('timeline.waveform_error', { message: errorMessage })}</Placeholder>
       )}
-      {filePath && !errorMessage && <canvas ref={canvasRef} />}
+      {filePath && !errorMessage && (
+        <>
+          <canvas ref={waveCanvasRef} className="absolute inset-0" />
+          <canvas
+            ref={playheadCanvasRef}
+            className="pointer-events-none absolute inset-0"
+          />
+        </>
+      )}
     </div>
   )
 }
