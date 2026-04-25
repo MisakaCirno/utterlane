@@ -17,30 +17,37 @@ import { DockTab } from './DockTab'
 import { devWarn } from '@renderer/lib/devLog'
 
 /**
- * 所有 panel 内容的统一外壳：强制尺寸严格等于 dockview panel content
- * container，不被内部「max-content 宽度」的子项反向撑出。
+ * 所有 dockview panel 内容的统一外壳：强制尺寸严格等于 dockview content
+ * container，不被内部 max-content 子项反向撑大。
  *
- * 关键 CSS：
- *   - `contain: strict` = size + layout + style + paint containment。
- *     **size containment 让 element 的 size 完全由 width/height 决定，
- *     不被内容影响**。children 用 min-w-max / 固定 width 撑出多大都
- *     不会反向传播到 PanelShell 自己——这是问题的真正根治。
+ * 现象：dockview 把 tab 移到面板左 / 右侧时，ProjectTimeline 的 toolbar
+ * 中右组按钮 + 内容区域会消失。其它 view 没事——它们内部没有 min-w-max
+ * 这种强制 max-content 子项。
+ *
+ * 根因：CSS 默认行为里 element 的 size 受内容影响。当 view 内部有
+ * min-w-max / 显式固定 width 的子项时，这个 max-content 沿着层层 child
+ * 把 PanelShell 自己撑大，超出 dockview content container 后被裁掉。
+ *
+ * 修：`contain: strict` = size + layout + style + paint containment。
+ * **size containment 让 element 的 size 完全由 width/height 决定，
+ * 不被内容反向影响**。children 用 min-w-max / 固定 width 撑出多大都
+ * 到此为止——不会再传播到 PanelShell 自己。
+ *
+ * 配合的细节：
  *   - h-full + w-full 给 size containment 提供显式尺寸（contain:strict
  *     要求两个轴都显式，否则 layout 异常）。
- *   - overflow-hidden 兜底，防 children 视觉上溢出（虽然 size containment
- *     已保证 PanelShell 不被撑大）。
+ *   - overflow-hidden 兜底处理「视觉上溢出」（contain 只阻 size 反向，
+ *     children 自己仍可能在 PanelShell 边界外渲染）。
+ *   - 内层包一个 flex flex-col 容器给 view 用，PanelShell 自己保持
+ *     containment 不被 flex 行为干扰
  *
- * 背景：之前的版本仅靠 w-full + flex 行为约束子项尺寸。但在 dockview 的
- * 垂直 tab 模式下（tab 切到面板左/右），panel content container 的 layout
- * 与默认顶部 tab 不同，「width:100%」的传播链被打破——内部 view（如
- * ProjectTimeline 的 toolbar 用了 min-w-max）的 max-content 反向撑大整
- * 个层级。contain: strict 强制截断这条反向传播
+ * Electron 39 / Chromium 130+ 完整支持 `contain` 属性
  */
 function PanelShell({ children }: { children: React.ReactNode }): React.JSX.Element {
   return (
     <div
       className="h-full w-full overflow-hidden"
-      // contain: strict 不在 Tailwind 默认配置里，用 inline style
+      // contain 不在 Tailwind 默认配置里，用 inline style
       style={{ contain: 'strict' }}
     >
       <div className="flex h-full w-full flex-col">{children}</div>
