@@ -269,10 +269,7 @@ export function InspectorView(): React.JSX.Element {
                     }}
                     disabled={playback !== 'idle'}
                     className={cn(
-                      // pr-5 给浏览器原生 spinner 让位，否则数字会跟上下
-                      // 箭头挤在一起。w-24 比 w-20 略宽，配合 pr-5 后数字
-                      // 区与之前视觉宽度相当
-                      'w-24 rounded-sm border border-border bg-bg-deep py-0.5 pr-5 pl-1.5',
+                      'w-20 rounded-sm border border-border bg-bg-deep px-1.5 py-0.5',
                       'text-right font-mono text-xs tabular-nums text-fg',
                       'outline-none focus:border-accent disabled:cursor-not-allowed disabled:opacity-50'
                     )}
@@ -734,9 +731,7 @@ function NumInput({
         onChange(Number.isFinite(raw) ? Math.max(0, raw) : 0)
       }}
       className={cn(
-        // pr-5 留给原生 spinner，避免数字跟上下箭头视觉粘连；列宽不够
-        // 时由调用方通过列宽 state 拉宽
-        'w-full rounded-sm border border-border bg-bg-deep py-0.5 pr-5 pl-1',
+        'w-full rounded-sm border border-border bg-bg-deep px-1 py-0.5',
         'text-right font-mono text-2xs tabular-nums text-fg',
         'outline-none focus:border-accent disabled:cursor-not-allowed disabled:opacity-50'
       )}
