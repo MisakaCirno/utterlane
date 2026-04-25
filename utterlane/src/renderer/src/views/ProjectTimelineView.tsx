@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import * as ContextMenu from '@radix-ui/react-context-menu'
 import {
@@ -486,19 +486,24 @@ function TimelineContent({ pxPerMs }: { pxPerMs: number }): React.JSX.Element {
   const order = useEditorStore((s) => s.order)
   const segmentsById = useEditorStore((s) => s.segmentsById)
   const reorderSegments = useEditorStore((s) => s.reorderSegments)
+  const setTimelineScroll = useEditorStore((s) => s.setTimelineScroll)
+  const timelineZoom = useEditorStore((s) => s.timelineZoom)
+  const persistedScrollLeft = useEditorStore.getState().timelineScrollLeft
 
-  // 每个 clip 的起点时间戳：累积「前序 clip 的 take 时长 + gapAfter 时长」
-  const startMsById = new Map<string, number>()
-  {
+  // 每个 clip 的起点时间戳：累积「前序 clip 的 take 时长 + gapAfter 时长」。
+  // 用 useMemo 避免 timelineScrollLeft 变化重渲染时反复重算 O(N)
+  const { startMsById, totalMs } = useMemo(() => {
+    const map = new Map<string, number>()
     let acc = 0
     for (const id of order) {
-      startMsById.set(id, acc)
+      map.set(id, acc)
       const seg = segmentsById[id]
       const take = seg?.takes.find((t) => t.id === seg.selectedTakeId)
       acc += take?.durationMs ?? 0
       acc += seg?.gapAfter?.ms ?? 0
     }
-  }
+    return { startMsById: map, totalMs: acc }
+  }, [order, segmentsById])
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }))
 
@@ -511,10 +516,54 @@ function TimelineContent({ pxPerMs }: { pxPerMs: number }): React.JSX.Element {
     reorderSegments(arrayMove(order, from, to))
   }
 
+  // ruler 与 content 在同一个水平滚动容器里：原实现 ruler 自带
+  // overflow-hidden、和下方独立滚动，标尺永远静止贴左缘，scrollLeft
+  // 也从未持久化。统一容器后 ruler 跟随 content 滚动，下面再把当前
+  // scrollLeft 推回 store 持久化。
+  const scrollerRef = useRef<HTMLDivElement | null>(null)
+  // viewport 宽度：用于决定 ruler 实际需要画多少 tick（不再硬编码 3000 个）
+  const [viewportWidth, setViewportWidth] = useState(0)
+  const [scrollLeft, setScrollLeft] = useState(persistedScrollLeft)
+
+  // 初次挂载时把持久化的 scrollLeft 还原回 DOM；之后由用户滚动驱动。
+  // 用 layoutEffect 不必要——一帧延迟内还看不到内容，普通 effect 即可。
+  useEffect(() => {
+    const el = scrollerRef.current
+    if (!el) return
+    el.scrollLeft = persistedScrollLeft
+    setScrollLeft(persistedScrollLeft)
+    setViewportWidth(el.clientWidth)
+    const ro = new ResizeObserver(() => setViewportWidth(el.clientWidth))
+    ro.observe(el)
+    return () => ro.disconnect()
+    // 仅初始化一次：persistedScrollLeft 之后由 store ↔ DOM 双向同步管理
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // scroll 事件 → 本地 state（ruler 偏移 / 虚拟化窗口都依赖它）
+  // 同时 push 给 store 让 workspace.json 持久化（store 内部不 debounce，
+  // main 的 scheduleWorkspaceSave 已经合并连续滚动的写盘）
+  const onScroll = (): void => {
+    const el = scrollerRef.current
+    if (!el) return
+    const sl = el.scrollLeft
+    setScrollLeft(sl)
+    setTimelineScroll(sl, timelineZoom)
+  }
+
+  // 内容总宽度：所有 clip 的占位宽度 + 间隔。pxPerMs 用浮点，做一次 ceil
+  // 让滚动条容纳尾部那一两个像素的舍入误差
+  const contentWidthPx = Math.ceil(totalMs * pxPerMs) + 32 // 32 = 内边距与缓冲
+
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
-      <TimeRuler pxPerMs={pxPerMs} />
-      <div className="flex-1 overflow-auto">
+      <div ref={scrollerRef} onScroll={onScroll} className="flex-1 overflow-auto">
+        <TimeRuler
+          pxPerMs={pxPerMs}
+          scrollLeft={scrollLeft}
+          viewportWidth={viewportWidth}
+          contentWidthPx={contentWidthPx}
+        />
         <div className="relative h-24 min-w-max p-2">
           <DndContext
             sensors={sensors}
@@ -556,29 +605,56 @@ function TimelineContent({ pxPerMs }: { pxPerMs: number }): React.JSX.Element {
 /**
  * 时间标尺。tick 间距按当前 pxPerMs 自适应：
  *   - 主 tick 间距尽量保持在 80~160 px 之间
- *   - 候选间距集（ms）：100 / 250 / 500 / 1000 / 2000 / 5000 / 10000 / 30000 / 60000
- *   - 在候选集合里挑「让 px 落到 80~160」的最小间距
+ *   - 候选间距集见 TICK_CANDIDATES_MS
+ *
+ * === 虚拟化 ===
+ *
+ * 旧实现硬编码 3000 个 tick div 一次性渲染——zoom 变化 / 任何重渲染都是
+ * 3000 次 DOM diff，且大多数是不可见的浪费。改成「只渲染当前 scrollLeft +
+ * viewportWidth 覆盖到的那段」。tickPx = tickIntervalMs * pxPerMs 用作
+ * 单 tick 宽度，按 scrollLeft 算 startTickIndex / endTickIndex，再用绝对
+ * 定位让标尺紧贴可见区。content scrollLeft 变化时 ruler 自然跟随。
  */
-function TimeRuler({ pxPerMs }: { pxPerMs: number }): React.JSX.Element {
+function TimeRuler({
+  pxPerMs,
+  scrollLeft,
+  viewportWidth,
+  contentWidthPx
+}: {
+  pxPerMs: number
+  scrollLeft: number
+  viewportWidth: number
+  contentWidthPx: number
+}): React.JSX.Element {
   const tickIntervalMs = pickTickInterval(pxPerMs)
   const tickPx = tickIntervalMs * pxPerMs
+  // viewport 还没测到时退化为渲染前 24 个 tick（约一屏内的合理量）
+  const effectiveWidth = viewportWidth > 0 ? viewportWidth : 24 * tickPx
+  // 多渲染左右各 4 个 tick 作为缓冲，避免快速滚动时露出空白
+  const overscan = 4
+  const startTick = Math.max(0, Math.floor(scrollLeft / tickPx) - overscan)
+  const endTick = Math.ceil((scrollLeft + effectiveWidth) / tickPx) + overscan
 
-  // 容器宽度无法静态拿到——画一段足够宽的 ruler（比如 3000 个 tick）就能
-  // 覆盖几乎任何项目长度。多余 tick 横向 overflow 隐藏，不影响滚动
-  const ticks = 3000
+  const ticks: React.JSX.Element[] = []
+  for (let i = startTick; i < endTick; i++) {
+    ticks.push(
+      <div
+        key={i}
+        style={{ position: 'absolute', left: i * tickPx, width: tickPx }}
+        className="flex h-full items-end border-r border-border-subtle pb-0.5 pl-1 font-mono text-[9px] text-fg-dim"
+      >
+        {formatRulerLabel(i * tickIntervalMs)}
+      </div>
+    )
+  }
 
   return (
-    <div className="relative h-6 shrink-0 overflow-hidden border-b border-border bg-bg-deep">
-      <div className="absolute inset-0 flex">
-        {Array.from({ length: ticks }, (_, i) => (
-          <div
-            key={i}
-            style={{ width: tickPx }}
-            className="flex shrink-0 items-end border-r border-border-subtle pb-0.5 pl-1 font-mono text-[9px] text-fg-dim"
-          >
-            {formatRulerLabel(i * tickIntervalMs)}
-          </div>
-        ))}
+    <div
+      className="sticky top-0 z-10 h-6 border-b border-border bg-bg-deep"
+      style={{ width: contentWidthPx }}
+    >
+      <div className="relative h-full" style={{ width: contentWidthPx }}>
+        {ticks}
       </div>
     </div>
   )
