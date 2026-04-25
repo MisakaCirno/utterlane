@@ -1,7 +1,12 @@
 import type { Segment } from '@renderer/types/project'
 import { useHistoryStore } from '@renderer/store/historyStore'
+import { useEditorStore } from '@renderer/store/editorStore'
 import type { EditorActions, EditorState, SliceCreator } from './types'
 import { markDirty, pushWorkspace, scheduleSegmentsSave } from './save'
+
+function patch(fn: (s: EditorState) => Partial<EditorState> | null): void {
+  useEditorStore.getState().applyHistoryPatch(fn)
+}
 
 /**
  * 工作区 slice：选择 / 滚动 / 缩放 / playback 状态字段写入。
@@ -111,14 +116,43 @@ export const createWorkspaceSlice: SliceCreator<
       }
     }
 
-    useHistoryStore
-      .getState()
-      .push(`deleteSegmentsBatch:${removed.length}`, 'history.delete_segments_batch', {
-        type: 'deleteSegmentsBatch',
-        removed,
-        prevSelectedSegmentId: prev.selectedSegmentId,
-        nextSelectedSegmentId: nextSelected
-      })
+    const removedSnapshot = removed.map((r) => ({ index: r.index, segment: r.segment }))
+    const removedIdsSet = new Set(removedSnapshot.map((r) => r.segment.id))
+    const prevSelected = prev.selectedSegmentId
+    const nextSelectedFinal = nextSelected
+
+    useHistoryStore.getState().push({
+      coalesceKey: `deleteSegmentsBatch:${removed.length}`,
+      labelKey: 'history.delete_segments_batch',
+      apply: () =>
+        patch((s) => {
+          const byId = { ...s.segmentsById }
+          for (const id of removedIdsSet) delete byId[id]
+          return {
+            order: s.order.filter((id) => !removedIdsSet.has(id)),
+            segmentsById: byId,
+            selectedSegmentId: nextSelectedFinal
+          }
+        }),
+      revert: () =>
+        patch((s) => {
+          // 把每条 removed 按 index 升序逐个 splice 回 order；index 是删除前的
+          // 下标，按升序处理保证插入位置正确——前面 splice 后续 index 都偏移 +1，
+          // 但每条 r.index 也是按删除前的下标，因此直接用 r.index 即可
+          const byId = { ...s.segmentsById }
+          for (const r of removedSnapshot) byId[r.segment.id] = r.segment
+          const order = s.order.slice()
+          const sorted = removedSnapshot.slice().sort((a, b) => a.index - b.index)
+          for (const r of sorted) {
+            order.splice(Math.min(r.index, order.length), 0, r.segment.id)
+          }
+          return {
+            order,
+            segmentsById: byId,
+            selectedSegmentId: prevSelected
+          }
+        })
+    })
 
     const nextById = { ...prev.segmentsById }
     for (const { segment } of removed) delete nextById[segment.id]
