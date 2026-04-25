@@ -210,13 +210,51 @@ export type Command =
       nextSelectedSegmentId: string | undefined
     }
 
+/**
+ * 入栈条目的存储格式。
+ *
+ * 不再保存 Command 联合类型，而是直接持有 apply / revert 闭包——调用方在
+ * push 时把「这次怎么做、撤销时怎么做」用闭包捕获下来。好处：
+ *   - 中央 dispatcher 消失，每条 mutation 的 apply/revert 紧贴它的 mutation site
+ *   - 加新 mutation 不再需要往全局 Command union / applyCommand / revertCommand
+ *     三处加分支，本地写完即可
+ *
+ * 兼容：旧的 push(coalesceKey, labelKey, command) 调用通过 wrapper 把 command
+ * 包成闭包后存到这里，所以新旧 push 路径产生的 entry 同形态，undo / redo
+ * 不需要分支。下一步逐个迁移 mutation，最后删除 Command + applyCommand/
+ * revertCommand 的 dispatcher（见 #19 后续 commit）
+ */
 export type HistoryEntry = {
-  command: Command
   /** 合并判定用：同 key + 同时间窗 = 合并进栈顶 */
   coalesceKey: string
   /** i18n key，用于菜单显示「撤销：编辑文案」这类动态标签 */
   labelKey: string
   ts: number
+  /** 重做时执行 */
+  apply: () => void
+  /** 撤销时执行 */
+  revert: () => void
+  /**
+   * 是否参与合并。仅 editText / setSegmentGap 这类「同一目标的连续小步
+   * 修改」需要合并；删除 / 拆分等结构性操作每次独立。
+   */
+  mergeable: boolean
+}
+
+/**
+ * 新 push API 接收的规约。
+ *
+ * apply / revert 必须是纯粹改 store 状态的函数：调用方在 push 之前已经
+ * 完成了「现在的 mutation」，apply 是给 redo 用的「再做一遍」、revert
+ * 是给 undo 用的「反过来做一遍」。
+ */
+export type HistoryCommandSpec = {
+  coalesceKey: string
+  labelKey: string
+  apply: () => void
+  revert: () => void
+  /** 默认 false。同 coalesceKey + 同窗内 → 与上一条合并：保留旧的 revert，采用新的 apply */
+  mergeable?: boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -227,8 +265,15 @@ type HistoryState = {
   past: HistoryEntry[]
   future: HistoryEntry[]
 
-  /** 推入一条命令；调用方应该在执行 mutation 之前或之后都行，本函数不执行命令 */
-  push: (coalesceKey: string, labelKey: string, command: Command) => void
+  /**
+   * 重载：
+   *   - push(spec)：新 API，传 { coalesceKey, labelKey, apply, revert, mergeable? }
+   *   - push(coalesceKey, labelKey, command)：旧 API，把 Command 包装成闭包后入栈
+   *
+   * 旧 API 只为兼容尚未迁移的 mutation，下一步会逐个 call site 切到新形式
+   */
+  push: ((spec: HistoryCommandSpec) => void) &
+    ((coalesceKey: string, labelKey: string, command: Command) => void)
 
   /** 撤销栈顶；playback !== 'idle' 或 past 为空时 no-op */
   undo: () => void
@@ -239,44 +284,87 @@ type HistoryState = {
   clear: () => void
 }
 
+/**
+ * 内部统一入栈：拿到完整 entry shape 后做合并 / append。
+ *
+ * 合并规则（Strategy A）：top.coalesceKey === entry.coalesceKey && 时间窗内
+ * && 两条都 mergeable → 用 entry.apply 替换 top.apply、保留 top.revert。
+ * 这意味着 redo 直接到达最新状态，undo 一次回到「连续编辑前」的最早值——
+ * 与原 mergeCoalescable 在 editText / setSegmentGap 上的语义等价。
+ */
+function pushEntry(
+  state: { past: HistoryEntry[] },
+  entry: HistoryEntry
+): { past: HistoryEntry[]; future: HistoryEntry[] } {
+  const { past } = state
+  const top = past[past.length - 1]
+  if (
+    top &&
+    top.mergeable &&
+    entry.mergeable &&
+    top.coalesceKey === entry.coalesceKey &&
+    entry.ts - top.ts < COALESCE_WINDOW_MS
+  ) {
+    const merged: HistoryEntry = {
+      ...top,
+      ts: entry.ts,
+      apply: entry.apply,
+      labelKey: entry.labelKey
+    }
+    const nextPast = past.slice()
+    nextPast[nextPast.length - 1] = merged
+    return { past: nextPast, future: [] }
+  }
+
+  const nextPast = [...past, entry]
+  // 超上限从底部丢弃，避免长期使用下无限增长
+  if (nextPast.length > MAX_STACK) nextPast.splice(0, nextPast.length - MAX_STACK)
+  return { past: nextPast, future: [] }
+}
+
 export const useHistoryStore = create<HistoryState>((set, get) => ({
   past: [],
   future: [],
 
-  push: (coalesceKey, labelKey, command) => {
+  // 实现签名是宽松的 (a, b?, c?)，运行期按参数形态分派。新 API 只传一个对象，
+  // 旧 API 传三个参数；TypeScript 重载（HistoryState.push）保证调用点类型安全。
+  push: ((
+    a: HistoryCommandSpec | string,
+    b?: string,
+    c?: Command
+  ) => {
     const now = Date.now()
-    const { past } = get()
-    const top = past[past.length - 1]
-
-    // 同 coalesceKey 且在时间窗内 → 合并。
-    // 合并策略：保留 top.command.before（最早的原始值），把 top.command.after
-    // 替换成当前命令的 after；ts 更新为 now，让时间窗继续延展。
-    //
-    // 目前两类命令支持合并：editText（连续打字）和 setSegmentGap（拖拽
-    // 时间轴间隔）。两者都是「同一目标的连续小步修改，应当作为一格 undo」
-    if (
-      top &&
-      top.coalesceKey === coalesceKey &&
-      now - top.ts < COALESCE_WINDOW_MS &&
-      top.command.type === command.type
-    ) {
-      const merged = mergeCoalescable(top.command, command)
-      if (merged) {
-        const mergedTop: HistoryEntry = { ...top, ts: now, command: merged }
-        const nextPast = past.slice()
-        nextPast[nextPast.length - 1] = mergedTop
-        // 新一轮编辑也要清 future
-        set({ past: nextPast, future: [] })
-        return
-      }
+    if (typeof a !== 'string') {
+      // 新 API
+      const spec = a
+      set((state) =>
+        pushEntry(state, {
+          coalesceKey: spec.coalesceKey,
+          labelKey: spec.labelKey,
+          apply: spec.apply,
+          revert: spec.revert,
+          mergeable: !!spec.mergeable,
+          ts: now
+        })
+      )
+      return
     }
-
-    const entry: HistoryEntry = { command, coalesceKey, labelKey, ts: now }
-    const nextPast = [...past, entry]
-    // 超上限从底部丢弃，避免长期使用下无限增长
-    if (nextPast.length > MAX_STACK) nextPast.splice(0, nextPast.length - MAX_STACK)
-    set({ past: nextPast, future: [] })
-  },
+    // 旧 API：把 Command 包成闭包，并通过 mergeCoalescable 决定可合并性
+    const command = c as Command
+    const labelKey = b as string
+    const coalesceKey = a
+    const mergeable = isLegacyMergeable(command)
+    set((state) =>
+      pushEntry(state, {
+        coalesceKey,
+        labelKey,
+        apply: () => applyCommand(command),
+        revert: () => revertCommand(command),
+        mergeable,
+        ts: now
+      })
+    )
+  }) as HistoryState['push'],
 
   undo: () => {
     const editor = useEditorStore.getState()
@@ -285,7 +373,7 @@ export const useHistoryStore = create<HistoryState>((set, get) => ({
     const entry = past[past.length - 1]
     if (!entry) return
 
-    revertCommand(entry.command)
+    entry.revert()
     set({ past: past.slice(0, -1), future: [...future, entry] })
   },
 
@@ -296,7 +384,7 @@ export const useHistoryStore = create<HistoryState>((set, get) => ({
     const entry = future[future.length - 1]
     if (!entry) return
 
-    applyCommand(entry.command)
+    entry.apply()
     set({ future: future.slice(0, -1), past: [...past, entry] })
   },
 
@@ -304,20 +392,12 @@ export const useHistoryStore = create<HistoryState>((set, get) => ({
 }))
 
 /**
- * 合并两个相邻的同 type / 同 target 的命令为一个。返回 null 表示这俩命令
- * 不可合并（push 应当作新条目）。
- *
- * 仅 editText 与 setSegmentGap 两类命令进入这里——其他类型（删除 / 拆分 /
- * 合并）每次操作语义独立，不应合并
+ * 旧 Command 是否参与合并：保留与原 mergeCoalescable 完全一致的语义，
+ * 仅 editText / setSegmentGap 两类支持。其他 type 的 Command 入栈时
+ * mergeable = false，永远独立成条目。
  */
-function mergeCoalescable(top: Command, next: Command): Command | null {
-  if (top.type === 'editText' && next.type === 'editText' && top.segId === next.segId) {
-    return { ...top, after: next.after }
-  }
-  if (top.type === 'setSegmentGap' && next.type === 'setSegmentGap' && top.segId === next.segId) {
-    return { ...top, after: next.after }
-  }
-  return null
+function isLegacyMergeable(cmd: Command): boolean {
+  return cmd.type === 'editText' || cmd.type === 'setSegmentGap'
 }
 
 // ---------------------------------------------------------------------------
