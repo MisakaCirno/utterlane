@@ -834,12 +834,20 @@ export function ProjectTimelineView(): React.JSX.Element {
   }, [zoom, setTimelineScroll])
 
   return (
-    // overflow-hidden + min-w-0：dockview 把 tab 移到面板左/右侧时面板
-    // 可用宽度变窄，但内部子项（toolbar 的 min-w-max、TimelineContent 的
-    // contentWidthPx）保持原宽度。如果 root 不约束 overflow，子项会撑出
-    // panel 边界，scrollbar 视觉上延伸到 panel 外被父级裁掉。
-    // min-w-0 保证 flex item 能收缩到比内容更小，不撑大父级
-    <div ref={wrapperRef} className="flex h-full min-w-0 flex-col overflow-hidden bg-bg">
+    // 严格约束 root 尺寸 = panel 给定的可见尺寸，否则内部 toolbar 的
+    // `min-w-max` 会把 root 撑成 max-content 宽度（dockview 的 panel
+    // content-container 是 absolute 定位，normal-flow 子元素的 width:auto
+    // 退化为 shrink-to-fit = max-content，不是 stretch-to-fit），从而：
+    //   - root 比 panel 宽 → 超出部分被 dockview 父级 overflow:hidden 裁
+    //     → 用户看到的「toolbar 中右组、内容右半部分都消失了」
+    //   - 内层 scrollerRef 拿到 root 的过宽尺寸 → 滚动条变得超长
+    //
+    // 修：w-full 强制 width:100%（= panel 可用宽度）；overflow-hidden 兜底
+    // 防止 root 自己出滚动条；min-w-0 让 root 在外层 flex 里能收缩
+    <div
+      ref={wrapperRef}
+      className="flex h-full w-full min-w-0 flex-col overflow-hidden bg-bg"
+    >
       <ProjectControlRow
         zoom={zoom}
         onZoomChange={(next) =>
