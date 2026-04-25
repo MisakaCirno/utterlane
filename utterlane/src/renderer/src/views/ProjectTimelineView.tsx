@@ -56,11 +56,11 @@ const ZOOM_MAX = 16
 const UNRECORDED_CLIP_WIDTH_AT_1X = 60
 
 /**
- * 默认间隔：句间 200ms / 段间 800ms。这两个值决定 applyDefaultGaps 的填充
- * 量。后续若需要项目级配置，把这两个常量挪进 preferences 即可
+ * 内置默认间隔：句间 200ms / 段间 800ms。当 project.defaultGaps 未配置 /
+ * 字段缺失时回退到这两个值
  */
-const DEFAULT_SENTENCE_GAP_MS = 200
-const DEFAULT_PARAGRAPH_GAP_MS = 800
+const FALLBACK_SENTENCE_GAP_MS = 200
+const FALLBACK_PARAGRAPH_GAP_MS = 800
 
 function IconButton({
   children,
@@ -110,12 +110,14 @@ function ProjectControlRow({
   const applyDefaultGaps = useEditorStore((s) => s.applyDefaultGaps)
   const resetGapsToDefault = useEditorStore((s) => s.resetGapsToDefault)
   const clearAutoGaps = useEditorStore((s) => s.clearAutoGaps)
+  // 默认间隔从 project.defaultGaps 读，缺失字段回退到内置默认
+  const projectDefaultGaps = useEditorStore((s) => s.project?.defaultGaps)
 
   const isBusy = playback !== 'idle'
   const canEditGaps = !isBusy && order.length > 1
   const defaults = {
-    sentenceMs: DEFAULT_SENTENCE_GAP_MS,
-    paragraphMs: DEFAULT_PARAGRAPH_GAP_MS
+    sentenceMs: projectDefaultGaps?.sentenceMs ?? FALLBACK_SENTENCE_GAP_MS,
+    paragraphMs: projectDefaultGaps?.paragraphMs ?? FALLBACK_PARAGRAPH_GAP_MS
   }
 
   // 三段式 grid 布局：左 = 间隔操作；中 = 播放控制；右 = 缩放。
@@ -130,8 +132,8 @@ function ProjectControlRow({
       <div className="flex items-center gap-1">
         <IconButton
           title={t('timeline.tb_apply_default_gaps_hint', {
-            sentence: DEFAULT_SENTENCE_GAP_MS,
-            paragraph: DEFAULT_PARAGRAPH_GAP_MS
+            sentence: defaults.sentenceMs,
+            paragraph: defaults.paragraphMs
           })}
           onClick={() => applyDefaultGaps(defaults)}
           disabled={!canEditGaps}

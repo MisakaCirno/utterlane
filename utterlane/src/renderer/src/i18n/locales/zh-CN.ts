@@ -99,7 +99,13 @@ export const zhCN = {
     replace_done_title: '替换完成',
     replace_done_desc: '已替换 {{count}} 个 Segment 中的内容',
     replace_none_title: '没有匹配项',
-    replace_none_desc: '没有 Segment 包含查找内容'
+    replace_none_desc: '没有 Segment 包含查找内容',
+    ctx_insert_before: '在前插入空白 Segment',
+    ctx_insert_after: '在后插入空白 Segment',
+    ctx_mark_paragraph_head: '设为段首',
+    ctx_unmark_paragraph_head: '取消段首',
+    ctx_merge_prev: '合并到前一段',
+    ctx_delete: '删除 Segment'
   },
 
   inspector: {
@@ -183,6 +189,9 @@ export const zhCN = {
     field_recommended_max_chars: '推荐最大字数',
     recommended_max_chars_placeholder: '不限制',
     recommended_max_chars_hint: '超过该数值的 Segment 将被红色高亮提示，但不会阻止保存',
+    section_gaps: '默认间隔',
+    field_default_sentence_gap: '句间间隔',
+    field_default_paragraph_gap: '段间间隔',
     channel_mono: 'Mono',
     channel_stereo: 'Stereo'
   },
@@ -240,7 +249,11 @@ export const zhCN = {
     save_project_description: 'project.json 写入出错：{{message}}',
     recording_start_title: '无法开始录音',
     recording_stop_title: '停止录音失败',
+    recording_stop_description:
+      '录音过程中断：{{message}}\n\n这通常是麦克风被其他应用占用或设备临时断开。本次录音的音频可能已经丢失，请重试。',
     recording_persist_title: '录音落盘失败',
+    recording_persist_description:
+      '录音音频写入工程目录失败：{{message}}\n\n常见原因：磁盘空间不足、工程目录不可写、被杀毒软件 / OneDrive 等同步工具锁定。请检查工程目录权限后重试。',
     recording_device_missing: '录音设备已不可用，请在偏好设置里重新选择输入设备'
   },
 

@@ -63,6 +63,14 @@ function emitPosition(path: string | null, positionMs: number): void {
  */
 function startAnalysis(audio: HTMLAudioElement, relativePath: string): void {
   const ctx = new AudioContext()
+  // 保险：用户手势经过 IPC 等 await 后 Chromium 可能判定 user gesture 链
+  // 失效，新建的 AudioContext 处于 suspended 状态。显式 resume 一次让
+  // 后面 audio 经 MediaElementSource 的数据能走到 destination
+  if (ctx.state === 'suspended') {
+    void ctx.resume().catch((err) => {
+      console.error('[player] AudioContext resume failed:', err)
+    })
+  }
   const source = ctx.createMediaElementSource(audio)
   const analyser = ctx.createAnalyser()
   analyser.fftSize = 512
@@ -152,8 +160,23 @@ export async function playFile(relativePath: string): Promise<void> {
       resolve()
     }
     audio.addEventListener('ended', done, { once: true })
-    audio.addEventListener('error', done, { once: true })
-    void audio.play().catch(done)
+    // 错误日志：方便用户报告播放失败时定位是哪种原因。MEDIA_ERR_DECODE
+    // 常见于源损坏；MEDIA_ERR_SRC_NOT_SUPPORTED 是格式不被 Chromium 接受
+    audio.addEventListener(
+      'error',
+      () => {
+        const err = audio.error
+        console.error(
+          `[player] audio element error for ${relativePath}: code=${err?.code} message=${err?.message ?? '(none)'}`
+        )
+        done()
+      },
+      { once: true }
+    )
+    void audio.play().catch((err) => {
+      console.error(`[player] play() rejected for ${relativePath}:`, err)
+      done()
+    })
   })
 }
 

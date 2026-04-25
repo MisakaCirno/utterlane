@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import * as ContextMenu from '@radix-ui/react-context-menu'
 import {
   DndContext,
   PointerSensor,
@@ -34,6 +35,7 @@ import {
   Plus,
   ArrowUpFromLine,
   ArrowDownFromLine,
+  ArrowUpToLine,
   Eraser,
   FileInput,
   Pilcrow,
@@ -166,11 +168,18 @@ function SegmentRow({
   highlight: string
   gridStyle: React.CSSProperties
 }): React.JSX.Element | null {
+  const { t } = useTranslation()
   const seg = useEditorStore((s) => s.segmentsById[id])
   const selected = useEditorStore((s) => s.selectedSegmentId === id)
   const extraSelected = useEditorStore((s) => s.extraSelectedSegmentIds.has(id))
   const selectSegmentExtended = useEditorStore((s) => s.selectSegmentExtended)
   const editSegmentText = useEditorStore((s) => s.editSegmentText)
+  const insertSegmentBefore = useEditorStore((s) => s.insertSegmentBefore)
+  const insertSegmentAfter = useEditorStore((s) => s.insertSegmentAfter)
+  const mergeSegmentWithPrevious = useEditorStore((s) => s.mergeSegmentWithPrevious)
+  const setParagraphStart = useEditorStore((s) => s.setParagraphStart)
+  const deleteSegment = useEditorStore((s) => s.deleteSegment)
+  const playback = useEditorStore((s) => s.playback)
   const recommendedMaxChars = useEditorStore((s) => s.project?.recommendedMaxChars)
   // 段首推导：order 中的第 0 个或显式 paragraphStart === true。
   // useEditorStore 直接订阅 idx === 0 的衍生量需要 order 的引用；用 idx 参数
@@ -244,116 +253,204 @@ function SegmentRow({
     setEditing(false)
   }
 
+  const isIdle = playback === 'idle'
+  const canMerge = isIdle && idx > 0
+  const isFirstInOrder = idx === 0
+
+  async function onDeleteFromMenu(): Promise<void> {
+    const ok = await confirm({
+      title: t('confirm.delete_segment_title'),
+      description: seg!.text,
+      confirmLabel: t('common.delete'),
+      tone: 'danger'
+    })
+    if (ok) deleteSegment(id)
+  }
+
   return (
-    <div
-      ref={combinedRef}
-      onClick={onRowClick}
-      style={style}
-      className={cn(
-        'group grid h-8 cursor-default items-center text-xs',
-        // 段首行：上方加一道实线，让段落分组视觉清晰；首段（idx === 0）不加，
-        // 否则会顶到 header 边界看着糊
-        isParagraphHead && idx > 0
-          ? 'border-t-2 border-t-border border-b border-b-border-subtle'
-          : 'border-b border-border-subtle',
-        selected
-          ? 'bg-accent-soft text-white'
-          : extraSelected
-            ? // 副选中：用低饱和的 accent 让多选可见但又区别于主选
-              'bg-accent-soft/40 text-fg'
-            : 'hover:bg-bg-raised',
-        isDragging && 'bg-bg-raised shadow-lg ring-1 ring-accent'
-      )}
-    >
-      <div
-        {...attributes}
-        {...listeners}
-        className={cn(
-          'flex h-full cursor-grab items-center justify-center text-fg-dim',
-          'opacity-0 group-hover:opacity-100 active:cursor-grabbing'
-        )}
-        // 把 drag handle 的点击 / 双击事件拦下来，避免触发行的选中逻辑
-        onClick={(e) => e.stopPropagation()}
-      >
-        <GripVertical size={12} />
-      </div>
-      <div
-        className={cn(
-          'flex items-center justify-end gap-1 px-2 tabular-nums',
-          selected ? 'text-white/80' : 'text-fg-dim'
-        )}
-      >
-        {/*
+    <ContextMenu.Root>
+      <ContextMenu.Trigger asChild>
+        <div
+          ref={combinedRef}
+          onClick={onRowClick}
+          // 右键先选中：和 Project Timeline 的 clip 行为一致——用户点哪条就操作哪条
+          onContextMenu={() => selectSegmentExtended(id, 'single')}
+          style={style}
+          className={cn(
+            'group grid h-8 cursor-default items-center text-xs',
+            // 段首行：上方加一道实线，让段落分组视觉清晰；首段（idx === 0）不加，
+            // 否则会顶到 header 边界看着糊
+            isParagraphHead && idx > 0
+              ? 'border-t-2 border-t-border border-b border-b-border-subtle'
+              : 'border-b border-border-subtle',
+            selected
+              ? 'bg-accent-soft text-white'
+              : extraSelected
+                ? // 副选中：用低饱和的 accent 让多选可见但又区别于主选
+                  'bg-accent-soft/40 text-fg'
+                : 'hover:bg-bg-raised',
+            isDragging && 'bg-bg-raised shadow-lg ring-1 ring-accent'
+          )}
+        >
+          <div
+            {...attributes}
+            {...listeners}
+            className={cn(
+              'flex h-full cursor-grab items-center justify-center text-fg-dim',
+              'opacity-0 group-hover:opacity-100 active:cursor-grabbing'
+            )}
+            // 把 drag handle 的点击 / 双击事件拦下来，避免触发行的选中逻辑
+            onClick={(e) => e.stopPropagation()}
+          >
+            <GripVertical size={12} />
+          </div>
+          <div
+            className={cn(
+              'flex items-center justify-end gap-1 px-2 tabular-nums',
+              selected ? 'text-white/80' : 'text-fg-dim'
+            )}
+          >
+            {/*
           段首标记 ¶（Pilcrow）。tooltip 提示这是段首；视觉上不抢序号的位置，
           用低强度图标即可
         */}
-        {isParagraphHead && (
-          <Pilcrow
-            size={10}
-            className={selected ? 'text-white/70' : 'text-accent'}
-            aria-label="paragraph start"
-          />
-        )}
-        <span>{idx + 1}</span>
-      </div>
-      {editing ? (
-        <input
-          ref={inputRef}
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onBlur={commit}
-          onClick={(e) => e.stopPropagation()}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault()
-              commit()
-            } else if (e.key === 'Escape') {
-              e.preventDefault()
-              cancel()
-            }
-          }}
-          className={cn(
-            'mx-1 h-6 min-w-0 rounded-sm border border-accent bg-bg-deep px-1.5 text-xs',
-            'text-fg outline-none'
+            {isParagraphHead && (
+              <Pilcrow
+                size={10}
+                className={selected ? 'text-white/70' : 'text-accent'}
+                aria-label="paragraph start"
+              />
+            )}
+            <span>{idx + 1}</span>
+          </div>
+          {editing ? (
+            <input
+              ref={inputRef}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onBlur={commit}
+              onClick={(e) => e.stopPropagation()}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault()
+                  commit()
+                } else if (e.key === 'Escape') {
+                  e.preventDefault()
+                  cancel()
+                }
+              }}
+              className={cn(
+                'mx-1 h-6 min-w-0 rounded-sm border border-accent bg-bg-deep px-1.5 text-xs',
+                'text-fg outline-none'
+              )}
+            />
+          ) : (
+            <div
+              onDoubleClick={startEditing}
+              title={
+                // 文案过长时 tooltip 加一行提示；否则照常显示完整文本（用于 truncate 截断时露出尾部）
+                isTooLong
+                  ? `${seg.text}\n\n[${seg.text.length} / ${recommendedMaxChars}] 文案过长，建议拆分`
+                  : seg.text
+              }
+              className={cn(
+                'min-w-0 truncate px-2',
+                // 主选中行已经是 accent 底 + 白字，红字会冲突；仅非选中态显示红色
+                isTooLong && !selected && 'text-rec'
+              )}
+            >
+              <HighlightedText text={seg.text} highlight={highlight} dim={selected} />
+            </div>
           )}
-        />
-      ) : (
-        <div
-          onDoubleClick={startEditing}
-          title={
-            // 文案过长时 tooltip 加一行提示；否则照常显示完整文本（用于 truncate 截断时露出尾部）
-            isTooLong
-              ? `${seg.text}\n\n[${seg.text.length} / ${recommendedMaxChars}] 文案过长，建议拆分`
-              : seg.text
-          }
+          <div className="px-2">
+            <StatusCell count={seg.takes.length} />
+          </div>
+          <div
+            className={cn(
+              'px-2 text-right tabular-nums',
+              selected ? 'text-white/80' : 'text-fg-muted'
+            )}
+          >
+            {seg.takes.length}
+          </div>
+          <div
+            className={cn(
+              'px-2 text-right font-mono text-2xs tabular-nums',
+              selected ? 'text-white/80' : 'text-fg-muted'
+            )}
+          >
+            {duration > 0 ? formatDuration(duration) : '—'}
+          </div>
+        </div>
+      </ContextMenu.Trigger>
+      <ContextMenu.Portal>
+        <ContextMenu.Content
           className={cn(
-            'min-w-0 truncate px-2',
-            // 主选中行已经是 accent 底 + 白字，红字会冲突；仅非选中态显示红色
-            isTooLong && !selected && 'text-rec'
+            'min-w-[200px] rounded-sm border border-border bg-bg-panel py-1 shadow-xl',
+            'text-xs text-fg'
           )}
         >
-          <HighlightedText text={seg.text} highlight={highlight} dim={selected} />
-        </div>
-      )}
-      <div className="px-2">
-        <StatusCell count={seg.takes.length} />
-      </div>
-      <div
-        className={cn('px-2 text-right tabular-nums', selected ? 'text-white/80' : 'text-fg-muted')}
-      >
-        {seg.takes.length}
-      </div>
-      <div
-        className={cn(
-          'px-2 text-right font-mono text-2xs tabular-nums',
-          selected ? 'text-white/80' : 'text-fg-muted'
-        )}
-      >
-        {duration > 0 ? formatDuration(duration) : '—'}
-      </div>
-    </div>
+          <ContextMenu.Item
+            onSelect={() => insertSegmentBefore(id)}
+            disabled={!isIdle}
+            className={menuItemClass}
+          >
+            <ArrowUpFromLine size={11} />
+            {t('segments.ctx_insert_before')}
+          </ContextMenu.Item>
+          <ContextMenu.Item
+            onSelect={() => insertSegmentAfter(id)}
+            disabled={!isIdle}
+            className={menuItemClass}
+          >
+            <ArrowDownFromLine size={11} />
+            {t('segments.ctx_insert_after')}
+          </ContextMenu.Item>
+          <ContextMenu.Separator className="my-1 h-px bg-border" />
+          <ContextMenu.Item
+            onSelect={() => !isFirstInOrder && setParagraphStart(id, !isParagraphHead)}
+            // 首段不可取消段首；其他段总能切换
+            disabled={!isIdle || isFirstInOrder}
+            className={menuItemClass}
+          >
+            <Pilcrow size={11} />
+            {isParagraphHead
+              ? t('segments.ctx_unmark_paragraph_head')
+              : t('segments.ctx_mark_paragraph_head')}
+          </ContextMenu.Item>
+          <ContextMenu.Item
+            onSelect={() => mergeSegmentWithPrevious(id)}
+            disabled={!canMerge}
+            className={menuItemClass}
+          >
+            <ArrowUpToLine size={11} />
+            {t('segments.ctx_merge_prev')}
+          </ContextMenu.Item>
+          <ContextMenu.Separator className="my-1 h-px bg-border" />
+          <ContextMenu.Item
+            onSelect={(e) => {
+              // Radix 在 onSelect 默认会关菜单；await confirm 期间需要保留事件
+              // preventDefault 后菜单不立即关；onDeleteFromMenu 完成后由 dialog 关
+              e.preventDefault()
+              void onDeleteFromMenu()
+            }}
+            disabled={!isIdle}
+            className={cn(menuItemClass, 'text-rec data-[highlighted]:bg-rec')}
+          >
+            <Trash2 size={11} />
+            {t('segments.ctx_delete')}
+          </ContextMenu.Item>
+        </ContextMenu.Content>
+      </ContextMenu.Portal>
+    </ContextMenu.Root>
   )
 }
+
+const menuItemClass = cn(
+  'flex cursor-default items-center gap-2 px-3 py-1.5 outline-none',
+  'data-[highlighted]:bg-accent data-[highlighted]:text-white',
+  'data-[disabled]:cursor-not-allowed data-[disabled]:opacity-40 data-[disabled]:pointer-events-none'
+)
 
 /**
  * 顶部工具栏的 26x26 图标按钮。带 active / danger / disabled 三种态

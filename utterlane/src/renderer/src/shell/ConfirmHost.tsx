@@ -53,15 +53,17 @@ export function ConfirmHost(): React.JSX.Element {
           </div>
 
           <div className="flex shrink-0 items-center justify-end gap-2 px-4 py-2">
-            <AlertDialog.Cancel
-              onClick={() => resolve(false)}
-              className={cn(
-                'h-6 rounded-sm border border-border bg-bg-raised px-3 text-2xs text-fg',
-                'hover:border-border-strong hover:bg-chrome-hover'
-              )}
-            >
-              {pending?.cancelLabel ?? '取消'}
-            </AlertDialog.Cancel>
+            {!pending?.hideCancel && (
+              <AlertDialog.Cancel
+                onClick={() => resolve(false)}
+                className={cn(
+                  'h-6 rounded-sm border border-border bg-bg-raised px-3 text-2xs text-fg',
+                  'hover:border-border-strong hover:bg-chrome-hover'
+                )}
+              >
+                {pending?.cancelLabel ?? '取消'}
+              </AlertDialog.Cancel>
+            )}
             <AlertDialog.Action
               onClick={() => resolve(true)}
               className={cn(

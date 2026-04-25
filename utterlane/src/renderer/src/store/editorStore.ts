@@ -9,6 +9,7 @@ import type { PlaybackMode, Project, Segment, Take } from '@renderer/types/proje
 import * as recorder from '@renderer/services/recorder'
 import * as player from '@renderer/services/player'
 import { showError } from '@renderer/store/toastStore'
+import { alert as alertDialog } from '@renderer/store/confirmStore'
 import { useHistoryStore } from '@renderer/store/historyStore'
 import { usePreferencesStore } from '@renderer/store/preferencesStore'
 import i18n from '@renderer/i18n'
@@ -1408,14 +1409,28 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       result = await recorder.stopRecording()
     } catch (err) {
       set({ playback: 'idle', recordingSegmentId: null, recordingTakeId: null })
-      showError(i18n.t('errors.recording_stop_title'), (err as Error).message)
+      // 录音失败用强模态 alert：toast 一闪就过用户可能看不到，下次回放才发现
+      // 录音没保存。alert 必须用户点 OK 才消失，确保 acknowledge
+      void alertDialog({
+        title: i18n.t('errors.recording_stop_title'),
+        description: i18n.t('errors.recording_stop_description', {
+          message: (err as Error).message
+        }),
+        tone: 'danger'
+      })
       return
     }
 
     const writeRes = await window.api.recording.writeTake(segmentId, takeId, result.buffer)
     if (!writeRes.ok) {
       set({ playback: 'idle', recordingSegmentId: null, recordingTakeId: null })
-      showError(i18n.t('errors.recording_persist_title'), writeRes.message)
+      void alertDialog({
+        title: i18n.t('errors.recording_persist_title'),
+        description: i18n.t('errors.recording_persist_description', {
+          message: writeRes.message
+        }),
+        tone: 'danger'
+      })
       return
     }
 

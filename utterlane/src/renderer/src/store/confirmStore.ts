@@ -25,6 +25,11 @@ export type ConfirmOptions = {
   confirmLabel?: string
   cancelLabel?: string
   tone?: ConfirmTone
+  /**
+   * Alert 模式：不显示取消按钮，只有确认按钮（标签默认为「OK」）。
+   * 用于「告知 + 必须确认」场景，比如录音失败这种用户必须看到的错误
+   */
+  hideCancel?: boolean
 }
 
 type PendingConfirm = ConfirmOptions & {
@@ -63,4 +68,29 @@ export const useConfirmStore = create<ConfirmState>((set, get) => ({
 /** 非组件调用方的便捷入口 */
 export function confirm(opts: ConfirmOptions): Promise<boolean> {
   return useConfirmStore.getState().show(opts)
+}
+
+/**
+ * 单按钮模态提示（alert）。封装在 confirm 之上：复用同一个 dialog host，
+ * 但隐藏取消按钮。用户必须点 OK 才会消失，不会自动关。
+ *
+ * 用于「严重错误必须告知 + 用户必须确认看到」的场景：录音落盘失败 / 工程
+ * 文件写入失败 / 等。toast 一闪而过，alert 强制 acknowledge
+ */
+export function alert(opts: {
+  title: string
+  description?: string
+  okLabel?: string
+  tone?: ConfirmTone
+}): Promise<void> {
+  return useConfirmStore
+    .getState()
+    .show({
+      title: opts.title,
+      description: opts.description,
+      confirmLabel: opts.okLabel ?? 'OK',
+      tone: opts.tone,
+      hideCancel: true
+    })
+    .then(() => undefined)
 }

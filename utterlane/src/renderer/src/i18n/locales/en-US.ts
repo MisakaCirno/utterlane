@@ -97,7 +97,13 @@ export const enUS: TranslationSchema = {
     replace_done_title: 'Replace done',
     replace_done_desc: 'Replaced text in {{count}} segment(s)',
     replace_none_title: 'No matches',
-    replace_none_desc: 'No segment contains the search text'
+    replace_none_desc: 'No segment contains the search text',
+    ctx_insert_before: 'Insert empty Segment before',
+    ctx_insert_after: 'Insert empty Segment after',
+    ctx_mark_paragraph_head: 'Mark as paragraph head',
+    ctx_unmark_paragraph_head: 'Unmark paragraph head',
+    ctx_merge_prev: 'Merge into previous',
+    ctx_delete: 'Delete Segment'
   },
 
   inspector: {
@@ -183,6 +189,9 @@ export const enUS: TranslationSchema = {
     recommended_max_chars_placeholder: 'No limit',
     recommended_max_chars_hint:
       'Segments exceeding this length will be highlighted in red, but saving is not blocked',
+    section_gaps: 'Default gaps',
+    field_default_sentence_gap: 'Sentence gap',
+    field_default_paragraph_gap: 'Paragraph gap',
     channel_mono: 'Mono',
     channel_stereo: 'Stereo'
   },
@@ -243,7 +252,11 @@ export const enUS: TranslationSchema = {
     save_project_description: 'Error writing project.json: {{message}}',
     recording_start_title: 'Cannot start recording',
     recording_stop_title: 'Failed to stop recording',
+    recording_stop_description:
+      'Recording was interrupted: {{message}}\n\nUsually means the microphone was preempted by another app or the device disconnected. The captured audio may be lost; please try again.',
     recording_persist_title: 'Failed to save recording',
+    recording_persist_description:
+      'Could not write the recorded audio to the project: {{message}}\n\nCommon causes: disk full, project folder not writable, locked by antivirus / OneDrive sync. Check folder permissions and retry.',
     recording_device_missing: 'Recording device unavailable. Pick a different input in Preferences.'
   },
 

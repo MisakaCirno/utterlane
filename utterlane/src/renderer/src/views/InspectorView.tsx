@@ -8,9 +8,7 @@ import {
   Check,
   Circle,
   AlertTriangle,
-  Scissors,
-  ArrowUpToLine,
-  Pilcrow
+  Scissors
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { cn } from '@renderer/lib/cn'
@@ -113,8 +111,6 @@ export function InspectorView(): React.JSX.Element {
   const editSegmentText = useEditorStore((s) => s.editSegmentText)
   const deleteSegment = useEditorStore((s) => s.deleteSegment)
   const splitSegmentAt = useEditorStore((s) => s.splitSegmentAt)
-  const mergeSegmentWithPrevious = useEditorStore((s) => s.mergeSegmentWithPrevious)
-  const setParagraphStart = useEditorStore((s) => s.setParagraphStart)
   const recommendedMaxChars = useEditorStore((s) => s.project?.recommendedMaxChars)
   const setSelectedTake = useEditorStore((s) => s.setSelectedTake)
   const deleteTake = useEditorStore((s) => s.deleteTake)
@@ -175,10 +171,6 @@ export function InspectorView(): React.JSX.Element {
     splitSegmentAt(selectedId, at)
   }
   const canSplit = hasTextFocus && playback === 'idle' && segment.text.length > 1
-  const canMerge = playback === 'idle' && index > 0
-  // 段首切换：首段（idx === 0）天然就是段首，不允许取消，按钮 disabled
-  const canToggleParagraph = playback === 'idle' && index > 0
-  const isParagraphHead = index === 0 || !!segment.paragraphStart
 
   return (
     <div className="flex h-full flex-col bg-bg">
@@ -245,33 +237,13 @@ export function InspectorView(): React.JSX.Element {
         )}
         <div className="mx-1 h-4 w-px bg-border" />
         {/*
-          拆分 / 合并：纯 segments.json 操作，不动音频文件。
-          - 拆分：textarea 必须聚焦才启用，由光标位置决定拆点
-          - 合并：当前不是首段才启用，目标是「合并到前一段」
-          以鼠标移到按钮时通过 title 解释「为什么禁用」（onMouseDown 时
-          textarea 会先 blur 然后再 click，所以光标位置仍是 textarea 失焦
-          那一刻的位置——浏览器原生行为，不用特殊处理）
+          拆分按钮：留在 Inspector 是因为它依赖光标在 textarea 中的位置——
+          SegmentsView 的右键菜单里没有 textarea 焦点，没法做。
+          合并 / 段首切换搬到了 SegmentsView 工具栏 + 右键菜单
         */}
         <ToolbarButton onClick={onSplit} disabled={!canSplit} title={t('inspector.btn_split_hint')}>
           <Scissors size={11} />
           {t('inspector.btn_split')}
-        </ToolbarButton>
-        <ToolbarButton onClick={() => mergeSegmentWithPrevious(selectedId)} disabled={!canMerge}>
-          <ArrowUpToLine size={11} />
-          {t('inspector.btn_merge_prev')}
-        </ToolbarButton>
-        <ToolbarButton
-          onClick={() => setParagraphStart(selectedId, !isParagraphHead)}
-          active={isParagraphHead}
-          disabled={!canToggleParagraph}
-          title={
-            index === 0
-              ? t('inspector.btn_paragraph_head_locked')
-              : t('inspector.btn_paragraph_head')
-          }
-        >
-          <Pilcrow size={11} />
-          {t('inspector.btn_paragraph_head')}
         </ToolbarButton>
         <div className="ml-auto" />
         <ToolbarButton danger onClick={onDeleteSegment} disabled={isRecordingThis}>

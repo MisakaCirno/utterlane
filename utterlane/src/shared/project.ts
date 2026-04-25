@@ -85,6 +85,17 @@ export type Project = {
    * 所以放在 project.json 而不是 preferences.json
    */
   recommendedMaxChars?: number
+
+  /**
+   * 「应用默认间隔」一键填充时使用的默认值。undefined 时回退到内置默认
+   * （200ms 句间 / 800ms 段间）。可由 ProjectSettingsView 配置，跟工程走
+   */
+  defaultGaps?: {
+    /** 句间默认毫秒数 */
+    sentenceMs?: number
+    /** 段间默认毫秒数 */
+    paragraphMs?: number
+  }
 }
 
 // ---------------------------------------------------------------------------

@@ -81,6 +81,32 @@ export function ProjectSettingsView(): React.JSX.Element {
       </Field>
 
       <div className="mt-4">
+        <SectionTitle>{t('project_settings.section_gaps')}</SectionTitle>
+      </div>
+      <Field label={t('project_settings.field_default_sentence_gap')}>
+        <GapInput
+          value={project.defaultGaps?.sentenceMs}
+          fallback={200}
+          onChange={(v) =>
+            updateProject({
+              defaultGaps: { ...project.defaultGaps, sentenceMs: v }
+            })
+          }
+        />
+      </Field>
+      <Field label={t('project_settings.field_default_paragraph_gap')}>
+        <GapInput
+          value={project.defaultGaps?.paragraphMs}
+          fallback={800}
+          onChange={(v) =>
+            updateProject({
+              defaultGaps: { ...project.defaultGaps, paragraphMs: v }
+            })
+          }
+        />
+      </Field>
+
+      <div className="mt-4">
         <SectionTitle>{t('project_settings.section_export_defaults')}</SectionTitle>
       </div>
       <Field label={t('project_settings.field_audio_format')}>
@@ -99,6 +125,40 @@ export function ProjectSettingsView(): React.JSX.Element {
       <Field label={t('project_settings.field_audios_dir')}>
         <span className="font-mono text-2xs text-fg-muted">{project.paths.audiosDir}</span>
       </Field>
+    </div>
+  )
+}
+
+/**
+ * 间隔毫秒数输入。空 / 0 视为「未设置」（保存为 undefined），UI 上显示
+ * fallback 作为 placeholder 提示当前生效值
+ */
+function GapInput({
+  value,
+  fallback,
+  onChange
+}: {
+  value: number | undefined
+  fallback: number
+  onChange: (next: number | undefined) => void
+}): React.JSX.Element {
+  return (
+    <div className="flex items-center gap-2">
+      <input
+        type="number"
+        min={0}
+        max={60000}
+        step={50}
+        value={value !== undefined && value > 0 ? String(value) : ''}
+        placeholder={String(fallback)}
+        onChange={(e) => {
+          const raw = e.target.value
+          const n = raw === '' ? 0 : Math.max(0, Math.min(60000, Number(raw) || 0))
+          onChange(n > 0 ? n : undefined)
+        }}
+        className="w-24 rounded-sm border border-border bg-bg-deep px-2 py-1 text-xs outline-none focus:border-accent"
+      />
+      <span className="text-2xs text-fg-dim">ms</span>
     </div>
   )
 }
