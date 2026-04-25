@@ -120,109 +120,117 @@ function ProjectControlRow({
     paragraphMs: projectDefaultGaps?.paragraphMs ?? FALLBACK_PARAGRAPH_GAP_MS
   }
 
-  // 三段式 grid 布局：左 = 间隔操作；中 = 播放控制；右 = 缩放。
-  // 用 grid 而不是 flex+ml-auto 是为了让中间组「真正居中」——
-  // ml-auto 的居中受左右两侧宽度差影响，会偏移
+  // 布局策略：
+  //   - 内层 grid 用 `1fr auto 1fr` 让中间播放控制组在面板够宽时真正
+  //     居中（不会被左右组宽度差推动）。
+  //   - 外层包一层 overflow-x-auto + 内层 min-w-max。当 dockview 把 tab
+  //     移到左边、面板可用宽度变窄时，三组按钮的总宽度仍然得到保留，
+  //     超出部分横向滚动而不是被裁掉——重点是「所有按钮始终可点」。
+  //   - shrink-0 在外层保持工具栏自身高度不被纵向挤压
   return (
-    <div
-      className="grid h-8 shrink-0 items-center gap-2 border-b border-border-subtle bg-bg-panel px-2"
-      style={{ gridTemplateColumns: '1fr auto 1fr' }}
-    >
-      {/* 左：间隔操作组 */}
-      <div className="flex items-center gap-1">
-        <IconButton
-          title={t('timeline.tb_apply_default_gaps_hint', {
-            sentence: defaults.sentenceMs,
-            paragraph: defaults.paragraphMs
-          })}
-          onClick={() => applyDefaultGaps(defaults)}
-          disabled={!canEditGaps}
-        >
-          <AlignVerticalJustifyCenter size={12} />
-        </IconButton>
-        {/* 重置：覆盖 manual，强制全部回到默认值 */}
-        <IconButton
-          title={t('timeline.tb_reset_gaps_hint')}
-          onClick={() => resetGapsToDefault(defaults)}
-          disabled={!canEditGaps}
-        >
-          <RefreshCw size={11} />
-        </IconButton>
-        {/* 清除：仅清掉非 manual 的，保留用户手动设置过的 */}
-        <IconButton
-          title={t('timeline.tb_clear_auto_gaps_hint')}
-          onClick={() => clearAutoGaps()}
-          disabled={!canEditGaps}
-        >
-          <Eraser size={11} />
-        </IconButton>
-      </div>
+    <div className="h-8 shrink-0 overflow-x-auto border-b border-border-subtle bg-bg-panel">
+      <div
+        className="grid h-full min-w-max items-center gap-2 px-2"
+        style={{ gridTemplateColumns: '1fr auto 1fr' }}
+      >
+        {/* 左：间隔操作组 */}
+        <div className="flex items-center gap-1">
+          <IconButton
+            title={t('timeline.tb_apply_default_gaps_hint', {
+              sentence: defaults.sentenceMs,
+              paragraph: defaults.paragraphMs
+            })}
+            onClick={() => applyDefaultGaps(defaults)}
+            disabled={!canEditGaps}
+          >
+            <AlignVerticalJustifyCenter size={12} />
+          </IconButton>
+          {/* 重置：覆盖 manual，强制全部回到默认值 */}
+          <IconButton
+            title={t('timeline.tb_reset_gaps_hint')}
+            onClick={() => resetGapsToDefault(defaults)}
+            disabled={!canEditGaps}
+          >
+            <RefreshCw size={11} />
+          </IconButton>
+          {/* 清除：仅清掉非 manual 的，保留用户手动设置过的 */}
+          <IconButton
+            title={t('timeline.tb_clear_auto_gaps_hint')}
+            onClick={() => clearAutoGaps()}
+            disabled={!canEditGaps}
+          >
+            <Eraser size={11} />
+          </IconButton>
+        </div>
 
-      {/* 中：播放控制组（始终居中，不被左右组宽度推动） */}
-      <div className="flex items-center gap-0.5 justify-self-center rounded-sm border border-border bg-bg-deep p-0.5">
-        <IconButton
-          title={t('timeline.btn_play_project_from_start')}
-          onClick={() => {
-            if (order.length > 0) selectSegment(order[0])
-            void playProject()
-          }}
-          disabled={isBusy || order.length === 0}
-        >
-          <Rewind size={12} />
-        </IconButton>
-        <IconButton
-          title={
-            playback === 'project' ? t('timeline.btn_stop_project') : t('timeline.btn_play_project')
-          }
-          active={playback === 'project'}
-          disabled={playback === 'segment' || playback === 'recording' || order.length === 0}
-          onClick={playback === 'project' ? stopPlayback : () => void playProject()}
-        >
-          {playback === 'project' ? <Square size={11} /> : <Play size={12} />}
-        </IconButton>
-        <IconButton
-          title={paused ? t('timeline.btn_resume_project') : t('timeline.btn_pause_project')}
-          active={paused}
-          onClick={togglePause}
-          disabled={playback !== 'project'}
-        >
-          {paused ? <Play size={12} /> : <Pause size={12} />}
-        </IconButton>
-        <IconButton
-          title={t('timeline.btn_stop_project')}
-          onClick={stopPlayback}
-          disabled={playback !== 'project'}
-        >
-          <Square size={11} />
-        </IconButton>
-      </div>
+        {/* 中：播放控制组（始终居中，不被左右组宽度推动） */}
+        <div className="flex items-center gap-0.5 justify-self-center rounded-sm border border-border bg-bg-deep p-0.5">
+          <IconButton
+            title={t('timeline.btn_play_project_from_start')}
+            onClick={() => {
+              if (order.length > 0) selectSegment(order[0])
+              void playProject()
+            }}
+            disabled={isBusy || order.length === 0}
+          >
+            <Rewind size={12} />
+          </IconButton>
+          <IconButton
+            title={
+              playback === 'project'
+                ? t('timeline.btn_stop_project')
+                : t('timeline.btn_play_project')
+            }
+            active={playback === 'project'}
+            disabled={playback === 'segment' || playback === 'recording' || order.length === 0}
+            onClick={playback === 'project' ? stopPlayback : () => void playProject()}
+          >
+            {playback === 'project' ? <Square size={11} /> : <Play size={12} />}
+          </IconButton>
+          <IconButton
+            title={paused ? t('timeline.btn_resume_project') : t('timeline.btn_pause_project')}
+            active={paused}
+            onClick={togglePause}
+            disabled={playback !== 'project'}
+          >
+            {paused ? <Play size={12} /> : <Pause size={12} />}
+          </IconButton>
+          <IconButton
+            title={t('timeline.btn_stop_project')}
+            onClick={stopPlayback}
+            disabled={playback !== 'project'}
+          >
+            <Square size={11} />
+          </IconButton>
+        </div>
 
-      {/* 右：缩放控制组 */}
-      <div className="flex items-center gap-0.5 justify-self-end rounded-sm border border-border bg-bg-deep p-0.5">
-        <IconButton
-          title={t('timeline.zoom_out')}
-          onClick={() => onZoomChange(clampZoom(zoom / 1.5))}
-          disabled={zoom <= ZOOM_MIN}
-        >
-          <ZoomOut size={12} />
-        </IconButton>
-        <IconButton
-          title={t('timeline.zoom_reset')}
-          onClick={() => onZoomChange(1)}
-          disabled={zoom === 1}
-        >
-          <Maximize2 size={11} />
-        </IconButton>
-        <IconButton
-          title={t('timeline.zoom_in')}
-          onClick={() => onZoomChange(clampZoom(zoom * 1.5))}
-          disabled={zoom >= ZOOM_MAX}
-        >
-          <ZoomIn size={12} />
-        </IconButton>
-        <span className="px-1 font-mono text-2xs tabular-nums text-fg-dim">
-          {zoom >= 1 ? zoom.toFixed(1) : zoom.toFixed(2)}x
-        </span>
+        {/* 右：缩放控制组 */}
+        <div className="flex items-center gap-0.5 justify-self-end rounded-sm border border-border bg-bg-deep p-0.5">
+          <IconButton
+            title={t('timeline.zoom_out')}
+            onClick={() => onZoomChange(clampZoom(zoom / 1.5))}
+            disabled={zoom <= ZOOM_MIN}
+          >
+            <ZoomOut size={12} />
+          </IconButton>
+          <IconButton
+            title={t('timeline.zoom_reset')}
+            onClick={() => onZoomChange(1)}
+            disabled={zoom === 1}
+          >
+            <Maximize2 size={11} />
+          </IconButton>
+          <IconButton
+            title={t('timeline.zoom_in')}
+            onClick={() => onZoomChange(clampZoom(zoom * 1.5))}
+            disabled={zoom >= ZOOM_MAX}
+          >
+            <ZoomIn size={12} />
+          </IconButton>
+          <span className="px-1 font-mono text-2xs tabular-nums text-fg-dim">
+            {zoom >= 1 ? zoom.toFixed(1) : zoom.toFixed(2)}x
+          </span>
+        </div>
       </div>
     </div>
   )
