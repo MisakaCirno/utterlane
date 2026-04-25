@@ -8,7 +8,8 @@ import {
   RotateCcw,
   SkipBack,
   SkipForward,
-  Square
+  Square,
+  X
 } from 'lucide-react'
 import { cn } from '@renderer/lib/cn'
 import { useEditorStore } from '@renderer/store/editorStore'
@@ -79,6 +80,7 @@ function SegmentControlRow(): React.JSX.Element {
   const startRecording = useEditorStore((s) => s.startRecordingForSelected)
   const startRerecording = useEditorStore((s) => s.startRerecordingSelected)
   const stopRecording = useEditorStore((s) => s.stopRecordingAndSave)
+  const cancelRecording = useEditorStore((s) => s.cancelRecording)
   const playCurrentSegment = useEditorStore((s) => s.playCurrentSegment)
   const stopPlayback = useEditorStore((s) => s.stopPlayback)
   const togglePause = useEditorStore((s) => s.togglePausePlayback)
@@ -180,19 +182,36 @@ function SegmentControlRow(): React.JSX.Element {
           active={isRecordingThis}
           danger
           disabled={
-            isRecordingOther || !selectedId || playback === 'segment' || playback === 'project'
+            isRecordingOther ||
+            !selectedId ||
+            playback === 'segment' ||
+            playback === 'project' ||
+            playback === 'countdown'
           }
           onClick={onRecordClick}
         >
           {isRecordingThis ? <Square size={11} /> : <Mic size={12} />}
         </IconButton>
-        <IconButton
-          title={t('timeline.btn_rerecord')}
-          disabled={playback !== 'idle' || !segment?.selectedTakeId}
-          onClick={() => void startRerecording()}
-        >
-          <RotateCcw size={12} />
-        </IconButton>
+        {isRecordingThis ? (
+          // 录音状态机：录音中只允许「停止并保存」（上面的 Square 按钮）和
+          // 「停止并取消」（下面的 X 按钮）。重录按钮在录音 / 倒计时中
+          // disabled，避免「按重录的瞬间隐式提交并立刻又开一段」这种语义不
+          // 清的复合操作
+          <IconButton
+            title={t('inspector.btn_cancel')}
+            onClick={() => void cancelRecording()}
+          >
+            <X size={12} />
+          </IconButton>
+        ) : (
+          <IconButton
+            title={t('timeline.btn_rerecord')}
+            disabled={playback !== 'idle' || !segment?.selectedTakeId}
+            onClick={() => void startRerecording()}
+          >
+            <RotateCcw size={12} />
+          </IconButton>
+        )}
       </div>
     </div>
   )

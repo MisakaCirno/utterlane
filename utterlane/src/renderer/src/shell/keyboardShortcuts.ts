@@ -110,7 +110,7 @@ function dispatchAction(id: CustomizableActionId): boolean {
 
   switch (id) {
     case 'record': {
-      // 录音中按 record 视作「停止录音」，否则发起新录
+      // 录音中按 record 视作「停止并保存」；其他状态发起新录
       if (state.playback === 'recording') {
         void state.stopRecordingAndSave()
         return true
@@ -119,11 +119,11 @@ function dispatchAction(id: CustomizableActionId): boolean {
       return true
     }
     case 'rerecord': {
-      // 录音中按 rerecord 也视作停止；重录默认是覆盖当前 Take，要先有当前 Take
-      if (state.playback === 'recording') {
-        void state.stopRecordingAndSave()
-        return true
-      }
+      // 录音状态机收紧：录音中只允许「停止并保存」（record 键）或「停止并
+      // 取消」（stopOrCancel 键）。rerecord 键在 recording 中吞掉但不动作，
+      // 避免「按 rerecord 的瞬间隐式提交并立刻又开一段重录」这种语义不清的
+      // 复合操作。countdown 同理。
+      if (state.playback === 'recording' || state.playback === 'countdown') return true
       void state.startRerecordingSelected()
       return true
     }
