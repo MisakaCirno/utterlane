@@ -156,6 +156,13 @@ type EditorState = {
    */
   appendTakeFromOrphan: (segmentId: string, take: Take) => void
 
+  /**
+   * Dev-only：在末尾追加 N 条假 Segment（仅 text，无 takes），用于
+   * 测试虚拟化 / 大工程渲染性能。直接走 setState + scheduleSegmentsSave，
+   * 不进 undo 栈——纯测试用途，不要污染历史
+   */
+  __dev_appendFakeSegments: (count: number) => void
+
   // 录音
   startRecordingForSelected: () => Promise<void>
   /** 重录：覆盖当前选中 Take 的音频文件，selectedTakeId 不变 */
@@ -864,6 +871,27 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     })
     scheduleSegmentsSave()
     pushWorkspace(get())
+  },
+
+  __dev_appendFakeSegments: (count) => {
+    const prev = get()
+    const newSegs: Segment[] = []
+    for (let i = 0; i < count; i++) {
+      const idx = prev.order.length + i + 1
+      newSegs.push({
+        id: crypto.randomUUID(),
+        text: `[Dev] Segment ${idx} - Lorem ipsum dolor sit amet, consectetur adipiscing elit ${idx}.`,
+        takes: []
+      })
+    }
+    const nextById = { ...prev.segmentsById }
+    for (const s of newSegs) nextById[s.id] = s
+    set({
+      order: [...prev.order, ...newSegs.map((s) => s.id)],
+      segmentsById: nextById,
+      ...markDirty()
+    })
+    scheduleSegmentsSave()
   },
 
   // -------- 录音 --------

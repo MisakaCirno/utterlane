@@ -86,6 +86,18 @@ function buildGridTemplate(w: ColWidths): string {
 }
 
 /**
+ * 虚拟化参数。
+ *
+ * ROW_HEIGHT 必须与 SegmentRow 上的 className `h-8`（即 32px）保持一致——
+ * 一旦行高变了这里也要改，否则虚拟化算出的可见区与实际位置错位。
+ *
+ * OVERSCAN：可见窗上下各多渲染的行数。给 dnd-kit 拖拽预留缓冲，避免拖到
+ * 边缘时目标行还没进 DOM
+ */
+const ROW_HEIGHT = 32
+const OVERSCAN = 8
+
+/**
  * 空列表时显示的引导。新建工程之后 Segments 为空，
  * 让用户一眼知道下一步该做什么。
  */
@@ -476,22 +488,101 @@ export function SegmentsView(): React.JSX.Element {
         <div className="px-2 text-right leading-7">{t('segments.col_duration')}</div>
       </div>
 
-      <div className="flex-1 overflow-y-auto">
-        {order.length === 0 ? <EmptySegmentsHint /> : null}
-        {/*
-          搜索时禁用拖拽：filteredOrder 不包含被过滤掉的项，dnd-kit 的
-          SortableContext items 必须和实际渲染的 children 一致才行；
-          要支持过滤态拖拽得手动把过滤项的位置在 onDragEnd 里翻译回 order，
-          复杂度跳跃太大。先简化：搜索打开就只用作浏览，不拖
-        */}
-        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-          <SortableContext items={filteredOrder} strategy={verticalListSortingStrategy}>
-            {filteredOrder.map((id) => (
-              <SegmentRow key={id} id={id} idx={order.indexOf(id)} gridStyle={gridStyle} />
-            ))}
-          </SortableContext>
-        </DndContext>
-      </div>
+      {order.length === 0 ? (
+        <div className="flex-1 overflow-y-auto">
+          <EmptySegmentsHint />
+        </div>
+      ) : (
+        <VirtualizedRows
+          filteredOrder={filteredOrder}
+          fullOrder={order}
+          gridStyle={gridStyle}
+          sensors={sensors}
+          onDragEnd={handleDragEnd}
+        />
+      )}
+    </div>
+  )
+}
+
+/**
+ * 虚拟化的行容器：仅渲染 viewport 可见 + overscan 范围内的行。
+ *
+ * 实现要点：
+ *   - 监听 scroll + ResizeObserver 跟踪 scrollTop / containerHeight
+ *   - SortableContext.items 喂全量 filteredOrder，dnd-kit 知道完整顺序；
+ *     useSortable 只挂在 visible 行上，拖拽时靠 dnd-kit 的 autoScroll 把
+ *     目标行滚进 viewport 即可被识别为 drop target
+ *   - 容器内放一个 totalHeight 高度的占位 div 撑出滚动条，可见行用绝对定位
+ *     按 startIdx * ROW_HEIGHT 偏移
+ *   - orderIndex Map 给序号列查 O(1) 下标，避免每行 array.indexOf 的 O(n)
+ */
+function VirtualizedRows({
+  filteredOrder,
+  fullOrder,
+  gridStyle,
+  sensors,
+  onDragEnd
+}: {
+  filteredOrder: string[]
+  fullOrder: string[]
+  gridStyle: React.CSSProperties
+  sensors: ReturnType<typeof useSensors>
+  onDragEnd: (e: DragEndEvent) => void
+}): React.JSX.Element {
+  const containerRef = useRef<HTMLDivElement | null>(null)
+  const [scrollTop, setScrollTop] = useState(0)
+  const [containerHeight, setContainerHeight] = useState(0)
+
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const onScroll = (): void => setScrollTop(el.scrollTop)
+    el.addEventListener('scroll', onScroll, { passive: true })
+    setContainerHeight(el.clientHeight)
+    const ro = new ResizeObserver(() => setContainerHeight(el.clientHeight))
+    ro.observe(el)
+    return () => {
+      el.removeEventListener('scroll', onScroll)
+      ro.disconnect()
+    }
+  }, [])
+
+  // 全量 order 的下标查找：保留虚拟化下序号列正确显示
+  const orderIndex = (() => {
+    const m = new Map<string, number>()
+    for (let i = 0; i < fullOrder.length; i++) m.set(fullOrder[i], i)
+    return m
+  })()
+
+  const totalHeight = filteredOrder.length * ROW_HEIGHT
+  // 容器高度尚未测量（首帧）时回落渲染前 30 行，避免空白闪烁
+  const effectiveHeight = containerHeight > 0 ? containerHeight : 30 * ROW_HEIGHT
+  const startIdx = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN)
+  const endIdx = Math.min(
+    filteredOrder.length,
+    Math.ceil((scrollTop + effectiveHeight) / ROW_HEIGHT) + OVERSCAN
+  )
+  const visibleIds = filteredOrder.slice(startIdx, endIdx)
+  const offsetTop = startIdx * ROW_HEIGHT
+
+  return (
+    <div ref={containerRef} className="flex-1 overflow-y-auto">
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+        <SortableContext items={filteredOrder} strategy={verticalListSortingStrategy}>
+          {/*
+            外层 div 高度 = totalHeight，撑出滚动条；内层 div 用绝对定位
+            按 offsetTop 偏移，仅渲染可见区块的行
+          */}
+          <div style={{ height: totalHeight, position: 'relative' }}>
+            <div style={{ position: 'absolute', top: offsetTop, left: 0, right: 0 }}>
+              {visibleIds.map((id) => (
+                <SegmentRow key={id} id={id} idx={orderIndex.get(id) ?? 0} gridStyle={gridStyle} />
+              ))}
+            </div>
+          </div>
+        </SortableContext>
+      </DndContext>
     </div>
   )
 }

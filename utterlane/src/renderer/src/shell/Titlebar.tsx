@@ -175,7 +175,38 @@ function buildMenus(
           onSelect: () => void window.api.logs.openFolder()
         }
       ]
-    }
+    },
+    // Dev 菜单：仅 import.meta.env.DEV 为 true 时挂载（开发模式 / Hot reload）。
+    // 打包后 Vite 会在编译期把这个常量替换为 false 并 tree-shake 整个分支，
+    // 用户安装包里看不到这一项。所有需要在打开真实工程下试验的开发功能都
+    // 集中放这里——大工程压测、状态注入、构造特殊数据等
+    ...(import.meta.env.DEV
+      ? [
+          {
+            label: 'Dev',
+            items: [
+              {
+                kind: 'item' as const,
+                label: 'Append 100 fake segments',
+                disabled: !hasProject,
+                onSelect: () => useEditorStore.getState().__dev_appendFakeSegments(100)
+              },
+              {
+                kind: 'item' as const,
+                label: 'Append 500 fake segments',
+                disabled: !hasProject,
+                onSelect: () => useEditorStore.getState().__dev_appendFakeSegments(500)
+              },
+              {
+                kind: 'item' as const,
+                label: 'Append 1000 fake segments',
+                disabled: !hasProject,
+                onSelect: () => useEditorStore.getState().__dev_appendFakeSegments(1000)
+              }
+            ]
+          }
+        ]
+      : [])
   ]
 }
 
