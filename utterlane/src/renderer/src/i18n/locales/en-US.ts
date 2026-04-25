@@ -140,6 +140,12 @@ export const enUS: TranslationSchema = {
     btn_record: 'Record',
     btn_stop_recording: 'Stop recording',
     btn_rerecord: 'Re-record (overwrite current Take)',
+    tb_apply_default_gaps: 'Apply default gaps',
+    tb_apply_default_gaps_hint:
+      'Auto-fill gaps for segments that have not been set manually: {{sentence}} ms between sentences, {{paragraph}} ms between paragraphs. Manually set gaps are preserved.',
+    zoom_in: 'Zoom in (Ctrl+wheel)',
+    zoom_out: 'Zoom out (Ctrl+wheel)',
+    zoom_reset: 'Reset to 1x',
     btn_play_project_from_start: 'Play project from start',
     btn_play_project: 'Play project',
     btn_stop_project: 'Stop project',
@@ -279,7 +285,9 @@ export const enUS: TranslationSchema = {
     insert_segment_after: 'Insert Segment After',
     clear_segments: 'Clear Segments',
     set_paragraph_start: 'Toggle Paragraph Head',
-    replace_all: 'Replace All'
+    replace_all: 'Replace All',
+    set_segment_gap: 'Adjust Trailing Gap',
+    apply_default_gaps: 'Apply Default Gaps'
   },
 
   audit_dialog: {

@@ -163,6 +163,22 @@ export type Command =
       edits: Array<{ segId: string; before: string; after: string }>
     }
   | {
+      type: 'setSegmentGap'
+      segId: string
+      /** 改之前的 gapAfter，可能是 undefined */
+      before: { ms: number; manual?: boolean } | undefined
+      after: { ms: number; manual?: boolean } | undefined
+    }
+  | {
+      type: 'applyDefaultGaps'
+      /** 仅记录被覆盖的 segments：对每个原本非 manual 的段，记录 before / after */
+      edits: Array<{
+        segId: string
+        before: { ms: number; manual?: boolean } | undefined
+        after: { ms: number; manual?: boolean } | undefined
+      }>
+    }
+  | {
       type: 'mergeSegment'
       /** 接收方 Segment ID（合并后留下的那个，一般是前一段） */
       targetSegmentId: string
@@ -219,27 +235,27 @@ export const useHistoryStore = create<HistoryState>((set, get) => ({
     const { past } = get()
     const top = past[past.length - 1]
 
-    // 同 coalesceKey 且在时间窗内 → 合并：仅连续文本编辑会走到这里。
+    // 同 coalesceKey 且在时间窗内 → 合并。
     // 合并策略：保留 top.command.before（最早的原始值），把 top.command.after
     // 替换成当前命令的 after；ts 更新为 now，让时间窗继续延展。
+    //
+    // 目前两类命令支持合并：editText（连续打字）和 setSegmentGap（拖拽
+    // 时间轴间隔）。两者都是「同一目标的连续小步修改，应当作为一格 undo」
     if (
       top &&
       top.coalesceKey === coalesceKey &&
       now - top.ts < COALESCE_WINDOW_MS &&
-      top.command.type === 'editText' &&
-      command.type === 'editText' &&
-      top.command.segId === command.segId
+      top.command.type === command.type
     ) {
-      const mergedTop: HistoryEntry = {
-        ...top,
-        ts: now,
-        command: { ...top.command, after: command.after }
+      const merged = mergeCoalescable(top.command, command)
+      if (merged) {
+        const mergedTop: HistoryEntry = { ...top, ts: now, command: merged }
+        const nextPast = past.slice()
+        nextPast[nextPast.length - 1] = mergedTop
+        // 新一轮编辑也要清 future
+        set({ past: nextPast, future: [] })
+        return
       }
-      const nextPast = past.slice()
-      nextPast[nextPast.length - 1] = mergedTop
-      // 新一轮编辑也要清 future
-      set({ past: nextPast, future: [] })
-      return
     }
 
     const entry: HistoryEntry = { command, coalesceKey, labelKey, ts: now }
@@ -273,6 +289,23 @@ export const useHistoryStore = create<HistoryState>((set, get) => ({
 
   clear: () => set({ past: [], future: [] })
 }))
+
+/**
+ * 合并两个相邻的同 type / 同 target 的命令为一个。返回 null 表示这俩命令
+ * 不可合并（push 应当作新条目）。
+ *
+ * 仅 editText 与 setSegmentGap 两类命令进入这里——其他类型（删除 / 拆分 /
+ * 合并）每次操作语义独立，不应合并
+ */
+function mergeCoalescable(top: Command, next: Command): Command | null {
+  if (top.type === 'editText' && next.type === 'editText' && top.segId === next.segId) {
+    return { ...top, after: next.after }
+  }
+  if (top.type === 'setSegmentGap' && next.type === 'setSegmentGap' && top.segId === next.segId) {
+    return { ...top, after: next.after }
+  }
+  return null
+}
 
 // ---------------------------------------------------------------------------
 // apply / revert dispatcher
@@ -438,6 +471,30 @@ function applyCommand(cmd: Command): void {
           const seg = nextById[e.segId]
           if (!seg) continue
           nextById[e.segId] = { ...seg, text: e.after }
+        }
+        return { segmentsById: nextById }
+      })
+      return
+    case 'setSegmentGap':
+      editor.applyHistoryPatch((s) => {
+        const seg = s.segmentsById[cmd.segId]
+        if (!seg) return null
+        const next = { ...seg }
+        if (cmd.after) next.gapAfter = { ...cmd.after }
+        else delete next.gapAfter
+        return { segmentsById: { ...s.segmentsById, [cmd.segId]: next } }
+      })
+      return
+    case 'applyDefaultGaps':
+      editor.applyHistoryPatch((s) => {
+        const nextById = { ...s.segmentsById }
+        for (const e of cmd.edits) {
+          const seg = nextById[e.segId]
+          if (!seg) continue
+          const nextSeg = { ...seg }
+          if (e.after) nextSeg.gapAfter = { ...e.after }
+          else delete nextSeg.gapAfter
+          nextById[e.segId] = nextSeg
         }
         return { segmentsById: nextById }
       })
@@ -619,6 +676,30 @@ function revertCommand(cmd: Command): void {
           const seg = nextById[e.segId]
           if (!seg) continue
           nextById[e.segId] = { ...seg, text: e.before }
+        }
+        return { segmentsById: nextById }
+      })
+      return
+    case 'setSegmentGap':
+      editor.applyHistoryPatch((s) => {
+        const seg = s.segmentsById[cmd.segId]
+        if (!seg) return null
+        const next = { ...seg }
+        if (cmd.before) next.gapAfter = { ...cmd.before }
+        else delete next.gapAfter
+        return { segmentsById: { ...s.segmentsById, [cmd.segId]: next } }
+      })
+      return
+    case 'applyDefaultGaps':
+      editor.applyHistoryPatch((s) => {
+        const nextById = { ...s.segmentsById }
+        for (const e of cmd.edits) {
+          const seg = nextById[e.segId]
+          if (!seg) continue
+          const nextSeg = { ...seg }
+          if (e.before) nextSeg.gapAfter = { ...e.before }
+          else delete nextSeg.gapAfter
+          nextById[e.segId] = nextSeg
         }
         return { segmentsById: nextById }
       })

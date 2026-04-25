@@ -160,6 +160,17 @@ type EditorState = {
    * 大小写敏感、子串匹配。返回实际改动的 Segment 数量供 UI 反馈
    */
   replaceAllInSegments: (find: string, replaceWith: string) => number
+  /**
+   * 设置 / 清除某个 Segment 的 gapAfter（其后的空白间隔）。
+   * gap === undefined 等价于「无间隔」（数据上把字段删除）。
+   * manual: true 表示用户手动设置，applyDefaultGaps 跳过此段
+   */
+  setSegmentGap: (segmentId: string, gap: { ms: number; manual?: boolean } | undefined) => void
+  /**
+   * 一键应用默认间隔：跳过 manual === true 的 segment，给其他段写入
+   * 句间 / 段间默认值。最后一段的 gapAfter 不写（拼接导出时无意义）
+   */
+  applyDefaultGaps: (defaults: { sentenceMs: number; paragraphMs: number }) => void
 
   // 音频文件审计
   /** 用 audit 扫描结果覆盖 missingTakeIds，集合会被 UI 用作缺失徽标的依据 */
@@ -300,6 +311,19 @@ function sleep(ms: number): Promise<void> {
  */
 export function sanitizeSegmentText(text: string): string {
   return text.replace(/[\r\n\t]+/g, ' ')
+}
+
+/** 比较两个 gap，undefined 与 { ms: 0, ... } 视作等价（两者都意味着「无间隔」） */
+function gapEquals(
+  a: { ms: number; manual?: boolean } | undefined,
+  b: { ms: number; manual?: boolean } | undefined
+): boolean {
+  const aMs = a?.ms ?? 0
+  const bMs = b?.ms ?? 0
+  if (aMs !== bMs) return false
+  // ms 都 0 时 manual 标志不重要（字段会被删）
+  if (aMs === 0) return true
+  return !!a?.manual === !!b?.manual
 }
 
 async function beginRecordingFlow(
@@ -1073,6 +1097,84 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       segmentsById: { ...prev.segmentsById, [segmentId]: nextSeg },
       ...markDirty()
     })
+    scheduleSegmentsSave()
+  },
+
+  setSegmentGap: (segmentId, gap) => {
+    const prev = get()
+    const seg = prev.segmentsById[segmentId]
+    if (!seg) return
+    const before = seg.gapAfter
+    if (gapEquals(before, gap)) return
+
+    // coalesceKey 加 segId 后缀：连续拖拽同一段的 spacer 时合并成一格 undo；
+    // 切到别段拖拽则开新条目
+    useHistoryStore.getState().push(`setSegmentGap:${segmentId}`, 'history.set_segment_gap', {
+      type: 'setSegmentGap',
+      segId: segmentId,
+      before: before ? { ...before } : undefined,
+      after: gap ? { ...gap } : undefined
+    })
+
+    const nextSeg = { ...seg }
+    if (gap && gap.ms > 0) nextSeg.gapAfter = { ms: gap.ms, manual: gap.manual }
+    else delete nextSeg.gapAfter
+    set({
+      segmentsById: { ...prev.segmentsById, [segmentId]: nextSeg },
+      ...markDirty()
+    })
+    scheduleSegmentsSave()
+  },
+
+  applyDefaultGaps: (defaults) => {
+    const prev = get()
+    if (prev.order.length <= 1) return
+    const edits: Array<{
+      segId: string
+      before: { ms: number; manual?: boolean } | undefined
+      after: { ms: number; manual?: boolean } | undefined
+    }> = []
+
+    for (let i = 0; i < prev.order.length; i++) {
+      const segId = prev.order[i]
+      const seg = prev.segmentsById[segId]
+      if (!seg) continue
+      // 最后一段的 gapAfter 在拼接里无意义，不写
+      if (i === prev.order.length - 1) continue
+      // 用户手动设过的不动
+      if (seg.gapAfter?.manual) continue
+
+      // 决定句间还是段间：依据「下一段是否为段首」
+      const next = prev.segmentsById[prev.order[i + 1]]
+      const isParagraphBoundary = !!next?.paragraphStart
+      const ms = isParagraphBoundary ? defaults.paragraphMs : defaults.sentenceMs
+      const newGap = ms > 0 ? { ms } : undefined
+
+      if (gapEquals(seg.gapAfter, newGap)) continue
+      edits.push({
+        segId,
+        before: seg.gapAfter ? { ...seg.gapAfter } : undefined,
+        after: newGap
+      })
+    }
+
+    if (edits.length === 0) return
+
+    useHistoryStore.getState().push('applyDefaultGaps', 'history.apply_default_gaps', {
+      type: 'applyDefaultGaps',
+      edits
+    })
+
+    const nextById = { ...prev.segmentsById }
+    for (const e of edits) {
+      const seg = nextById[e.segId]
+      if (!seg) continue
+      const nextSeg = { ...seg }
+      if (e.after) nextSeg.gapAfter = { ...e.after }
+      else delete nextSeg.gapAfter
+      nextById[e.segId] = nextSeg
+    }
+    set({ segmentsById: nextById, ...markDirty() })
     scheduleSegmentsSave()
   },
 

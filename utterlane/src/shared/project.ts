@@ -40,6 +40,21 @@ export type Segment = {
    * 用于将来导出时区分「句间」和「段间」静音（句间默认间距 vs 段间更长间距）。
    */
   paragraphStart?: boolean
+  /**
+   * 该 Segment 之后的空白间隔（毫秒）。导出时用作 segment-to-segment 的填充。
+   *
+   *   - undefined：未设置，导出时回退到 ExportEffects.silencePaddingMs（如果有）
+   *   - manual: true：用户手动设置（拖拽 / 单段编辑），applyDefaultGaps 会跳过
+   *     该字段不覆盖
+   *   - manual: false / undefined：由 applyDefaultGaps 自动写入，下次自动应用
+   *     时可以被新的默认值覆盖
+   *
+   * 最后一段的 gapAfter 在拼接导出中无意义；UI 也不显示 / 不可拖拽
+   */
+  gapAfter?: {
+    ms: number
+    manual?: boolean
+  }
 }
 
 export type Project = {

@@ -7,7 +7,7 @@ import { projectSession } from '../project-storage'
 import { loadSegmentsFile, loadProjectFile } from '../project-storage/io'
 import { readWav, decodeWavToFloat32, buildWavFromChannels } from './wav'
 import { resampleChannels } from './resample'
-import { concatWithSilence, normalizePeak, normalizePeakAcrossItems } from './post-processing'
+import { concatWithVariableGaps, normalizePeak, normalizePeakAcrossItems } from './post-processing'
 import { buildSrt } from './srt'
 
 /**
@@ -194,13 +194,18 @@ export function registerExportIpc(): void {
 
       try {
         if (options.mode === 'concat') {
-          // 拼接模式：先 concat（带可选静音填充）→ 整体峰值归一 → 编码 → 写盘。
-          // 归一化放在 concat 之后是因为目标是「整个工程峰值」而不是「每段峰值」
-          const merged = concatWithSilence(
+          // 拼接模式：每段之后的间隔取 segment.gapAfter.ms ?? 全局 silenceMs。
+          // gap[i] 是段 i 之后的间隔；最后一段的 gap 被 concatWithVariableGaps
+          // 自动忽略。归一化放在 concat 之后是因为目标是「整个工程峰值」
+          const gaps = items.map((it, i) => {
+            if (i === items.length - 1) return 0
+            return it.segment.gapAfter?.ms ?? silenceMs
+          })
+          const merged = concatWithVariableGaps(
             prepared.perItemChannels,
             prepared.channels,
             options.sampleRate,
-            silenceMs
+            gaps
           )
           if (peakDb !== undefined) normalizePeak(merged, peakDb)
 

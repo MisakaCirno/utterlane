@@ -142,6 +142,12 @@ export const zhCN = {
     btn_record: '录音',
     btn_stop_recording: '停止录音',
     btn_rerecord: '重录（覆盖当前 Take）',
+    tb_apply_default_gaps: '应用默认间隔',
+    tb_apply_default_gaps_hint:
+      '把所有未手动设置过间隔的 Segment 自动填充：句间 {{sentence}} ms / 段间 {{paragraph}} ms。已手动设置的不会被覆盖。',
+    zoom_in: '放大（Ctrl+滚轮）',
+    zoom_out: '缩小（Ctrl+滚轮）',
+    zoom_reset: '恢复 1x',
     btn_play_project_from_start: '从头播放项目',
     btn_play_project: '播放项目',
     btn_stop_project: '停止项目',
@@ -277,7 +283,9 @@ export const zhCN = {
     insert_segment_after: '在后插入 Segment',
     clear_segments: '清空 Segment',
     set_paragraph_start: '切换段首',
-    replace_all: '全部替换'
+    replace_all: '全部替换',
+    set_segment_gap: '调整段后间隔',
+    apply_default_gaps: '应用默认间隔'
   },
 
   audit_dialog: {

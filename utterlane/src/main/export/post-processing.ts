@@ -82,6 +82,45 @@ export function concatWithSilence(
   return concatChannels(items, channelCount)
 }
 
+/**
+ * 拼接 + 段间可变长度静音填充。
+ *
+ * gapsMs[i] 是段 i 之后插入的静音毫秒数；最后一段的 gap 被忽略（拼接没有「之后」）。
+ * 数组长度允许小于段数——缺失的段当作 0 ms 处理。
+ *
+ * 这条路径取代了「全局 silenceMs」语义：导出 IPC 把 segment.gapAfter ?? 全局
+ * 默认整理成 gapsMs，再调这里。整体 0 的情况下退化成普通拼接
+ */
+export function concatWithVariableGaps(
+  perItemChannels: Float32Array[][],
+  channelCount: number,
+  sampleRate: number,
+  gapsMs: number[]
+): Float32Array[] {
+  const n = perItemChannels.length
+  if (n <= 1) return concatChannels(perItemChannels, channelCount)
+
+  // 只在需要时分配静音 buffer，避免 0ms 段也分配
+  // 同尺寸的 silence 复用——常见场景（applyDefaultGaps）只产生两种值：句间 / 段间
+  const silenceCache = new Map<number, Float32Array[]>()
+  const items: Float32Array[][] = []
+  for (let i = 0; i < n; i++) {
+    items.push(perItemChannels[i])
+    if (i < n - 1) {
+      const ms = Math.max(0, gapsMs[i] ?? 0)
+      if (ms > 0) {
+        let sil = silenceCache.get(ms)
+        if (!sil) {
+          sil = makeSilenceBuffer(sampleRate, channelCount, ms)
+          silenceCache.set(ms, sil)
+        }
+        items.push(sil)
+      }
+    }
+  }
+  return concatChannels(items, channelCount)
+}
+
 function concatChannels(items: Float32Array[][], channelCount: number): Float32Array[] {
   const out: Float32Array[] = []
   for (let c = 0; c < channelCount; c++) {
