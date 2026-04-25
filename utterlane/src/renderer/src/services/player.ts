@@ -168,11 +168,32 @@ export function stop(): void {
 }
 
 /**
+ * playFile 的可选区间。两个字段都是相对文件起点的毫秒数。
+ *   - startMs：从该位置起播。loadedmetadata 触发后通过 audio.currentTime
+ *     设置；之前设无效（duration 未知）
+ *   - endMs：到该位置自动停止。timeupdate 事件每 ~250ms 触发一次，所以
+ *     真正停下的位置可能晚 0~250ms——voice 场景这点漂移不可闻
+ *
+ * 任一字段未提供时，对应端走默认（startMs=0 / 自然播完）。两端都给即可
+ * 实现 Take 节选播放
+ */
+export type PlayFileOptions = {
+  startMs?: number
+  endMs?: number
+}
+
+/**
  * 播放一个 Take 文件。Promise 在自然播完 / 被 stop / 出错时 resolve。
  * 不区分「是否被打断」——调用方通过 stop() 之后的状态自己感知。
  */
-export async function playFile(relativePath: string): Promise<void> {
-  devLog(`[player] playFile START ${relativePath}`)
+export async function playFile(
+  relativePath: string,
+  options: PlayFileOptions = {}
+): Promise<void> {
+  const { startMs, endMs } = options
+  devLog(
+    `[player] playFile START ${relativePath} startMs=${startMs ?? 0} endMs=${endMs ?? 'eof'}`
+  )
   stop()
   sequenceAborted = false
 
@@ -191,18 +212,28 @@ export async function playFile(relativePath: string): Promise<void> {
   // 创建于首次 play 之前（不然会警告 CORS / already-connected 之类）
   startAnalysis(audio, relativePath)
 
-  // 诊断：duration 何时拿到、是不是 NaN / 0。正常情况下 play() 之前不一定
-  // 有 duration（metadata 可能还没加载），但 loadedmetadata 触发后必有
-  audio.addEventListener('loadedmetadata', () => {
-    devLog(`[player] loadedmetadata ${relativePath} duration=${audio.duration}s`)
-  })
-
   return new Promise<void>((resolve) => {
     // resolved 标记 + 显式 removeEventListener 双重保险：
     // teardown 内部会把 audio.src 清空（释放资源 / 帮 GC），那一步会再
     // 触发一次 audio 的 'error' 事件（"Empty src attribute"）。如果不
     // 摘掉监听器，会跑出一条看着像出错但其实是清理动作的日志
     let resolved = false
+
+    const onLoadedMetadata = (): void => {
+      devLog(`[player] loadedmetadata ${relativePath} duration=${audio.duration}s`)
+      // duration 仅在 loadedmetadata 后稳定，此时再设 currentTime 是安全的。
+      // 把 startMs clamp 到 [0, duration]：既防御越界，也兼容 trim 后段
+      // 时长被改小但旧 startMs 没同步的极端情况
+      if (startMs !== undefined && startMs > 0 && Number.isFinite(audio.duration)) {
+        audio.currentTime = Math.min(Math.max(0, startMs / 1000), audio.duration)
+      }
+    }
+    const onTimeUpdate = (): void => {
+      // endMs 早停：currentTime 单位秒，转回 ms 与 endMs 比对
+      if (endMs !== undefined && audio.currentTime * 1000 >= endMs) {
+        done('end-ms-reached')
+      }
+    }
     const onEnded = (): void => done('ended')
     const onError = (): void => {
       const err = audio.error
@@ -218,6 +249,8 @@ export async function playFile(relativePath: string): Promise<void> {
     const done = (reason: string): void => {
       if (resolved) return
       resolved = true
+      audio.removeEventListener('loadedmetadata', onLoadedMetadata)
+      audio.removeEventListener('timeupdate', onTimeUpdate)
       audio.removeEventListener('ended', onEnded)
       audio.removeEventListener('error', onError)
       devLog(
@@ -225,9 +258,14 @@ export async function playFile(relativePath: string): Promise<void> {
       )
       // 只有当前这个 audio 还是活跃会话时才清理——
       // 避免「新的 playFile 已经启动但旧 audio 的 ended 晚到」引发的误清理
-      if (currentAudio === audio) teardown()
+      if (currentAudio === audio) {
+        if (!audio.paused) audio.pause()
+        teardown()
+      }
       resolve()
     }
+    audio.addEventListener('loadedmetadata', onLoadedMetadata)
+    if (endMs !== undefined) audio.addEventListener('timeupdate', onTimeUpdate)
     audio.addEventListener('ended', onEnded)
     audio.addEventListener('error', onError)
     void audio
