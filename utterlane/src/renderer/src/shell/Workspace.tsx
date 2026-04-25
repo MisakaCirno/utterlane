@@ -16,13 +16,59 @@ import { applyDefaultLayout, setWorkspaceApi } from './workspaceHandle'
 import { DockTab } from './DockTab'
 import { devWarn } from '@renderer/lib/devLog'
 
+/**
+ * 所有 panel 内容的统一外壳：强制尺寸严格等于 dockview panel content
+ * container，不被内部「max-content 宽度」的子项撑出。
+ *
+ * 背景：dockview 的 panel content container 通常用 absolute 定位 + 显式
+ * 尺寸控制 panel 可见区。在 absolute 父级里，普通 block / flex 元素的
+ * `width: auto` 行为是 **shrink-to-fit = max-content**，而不是 stretch
+ * 占满父级。如果面板内部有 `min-w-max` 之类的 max-content 子项（比如
+ * ProjectTimeline 的 toolbar、SegmentsView 的 grid 列宽），整个 view
+ * root 会被撑成超过 panel 可见宽度，导致：
+ *   - 超出部分被 dockview 裁掉，按钮 / 内容看不见
+ *   - 内层 scroll 容器拿到的 clientWidth 是过宽尺寸，scrollbar 长度
+ *     大于 panel 可见宽度
+ *
+ * w-full + h-full 强制 stretch；overflow-hidden 兜底防 view 自身溢出；
+ * min-w-0 让 view root 在 PanelShell 的 flex 上下文里能收缩。view 自己
+ * 不需要再操心这层约束
+ */
+function PanelShell({ children }: { children: React.ReactNode }): React.JSX.Element {
+  return <div className="flex h-full w-full min-w-0 flex-col overflow-hidden">{children}</div>
+}
+
 const components: Record<string, React.FunctionComponent<IDockviewPanelProps>> = {
-  segments: () => <SegmentsView />,
-  inspector: () => <InspectorView />,
-  projectSettings: () => <ProjectSettingsView />,
-  segmentTimeline: () => <SegmentTimelineView />,
-  projectTimeline: () => <ProjectTimelineView />,
-  levelMeter: () => <LevelMeterView />
+  segments: () => (
+    <PanelShell>
+      <SegmentsView />
+    </PanelShell>
+  ),
+  inspector: () => (
+    <PanelShell>
+      <InspectorView />
+    </PanelShell>
+  ),
+  projectSettings: () => (
+    <PanelShell>
+      <ProjectSettingsView />
+    </PanelShell>
+  ),
+  segmentTimeline: () => (
+    <PanelShell>
+      <SegmentTimelineView />
+    </PanelShell>
+  ),
+  projectTimeline: () => (
+    <PanelShell>
+      <ProjectTimelineView />
+    </PanelShell>
+  ),
+  levelMeter: () => (
+    <PanelShell>
+      <LevelMeterView />
+    </PanelShell>
+  )
 }
 
 /**
