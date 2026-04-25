@@ -164,7 +164,24 @@ export async function playFile(relativePath: string): Promise<void> {
   })
 
   return new Promise<void>((resolve) => {
+    // resolved 标记 + 显式 removeEventListener 双重保险：
+    // teardown 内部会把 audio.src 清空（释放资源 / 帮 GC），那一步会再
+    // 触发一次 audio 的 'error' 事件（"Empty src attribute"）。如果不
+    // 摘掉监听器，会跑出一条看着像出错但其实是清理动作的日志
+    let resolved = false
+    const onEnded = (): void => done('ended')
+    const onError = (): void => {
+      const err = audio.error
+      console.error(
+        `[player] audio element error for ${relativePath}: code=${err?.code} message=${err?.message ?? '(none)'}`
+      )
+      done('error-event')
+    }
     const done = (reason: string): void => {
+      if (resolved) return
+      resolved = true
+      audio.removeEventListener('ended', onEnded)
+      audio.removeEventListener('error', onError)
       console.log(
         `[player] done(${reason}) ${relativePath} currentTime=${audio.currentTime}s duration=${audio.duration}s`
       )
@@ -173,20 +190,8 @@ export async function playFile(relativePath: string): Promise<void> {
       if (currentAudio === audio) teardown()
       resolve()
     }
-    audio.addEventListener('ended', () => done('ended'), { once: true })
-    // 错误日志：方便用户报告播放失败时定位是哪种原因。MEDIA_ERR_DECODE
-    // 常见于源损坏；MEDIA_ERR_SRC_NOT_SUPPORTED 是格式不被 Chromium 接受
-    audio.addEventListener(
-      'error',
-      () => {
-        const err = audio.error
-        console.error(
-          `[player] audio element error for ${relativePath}: code=${err?.code} message=${err?.message ?? '(none)'}`
-        )
-        done('error-event')
-      },
-      { once: true }
-    )
+    audio.addEventListener('ended', onEnded)
+    audio.addEventListener('error', onError)
     void audio
       .play()
       .then(() => console.log(`[player] play() resolved ${relativePath}`))
