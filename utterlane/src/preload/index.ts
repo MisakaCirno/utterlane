@@ -128,7 +128,14 @@ const api = {
 
     /** 读取工程内某个 Take 文件（relativePath 来自 Take.filePath），用于播放 */
     readTakeFile: (relativePath: string): Promise<ArrayBuffer> =>
-      ipcRenderer.invoke(PROJECT_IPC.readTakeFile, relativePath)
+      ipcRenderer.invoke(PROJECT_IPC.readTakeFile, relativePath),
+
+    /**
+     * 在系统文件管理器中定位（高亮）某个 Take 的音频文件——Windows 资源
+     * 管理器、macOS Finder 等。relativePath 与 readTakeFile 一致
+     */
+    revealTakeFile: (relativePath: string): Promise<{ ok: boolean; message?: string }> =>
+      ipcRenderer.invoke(PROJECT_IPC.revealTakeFile, relativePath)
   },
 
   recording: {

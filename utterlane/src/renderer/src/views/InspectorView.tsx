@@ -5,11 +5,10 @@ import {
   Mic,
   RotateCcw,
   Trash2,
-  Check,
-  Circle,
   AlertTriangle,
   Scissors,
   Pilcrow,
+  FolderOpen,
   X
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -245,45 +244,72 @@ export function InspectorView(): React.JSX.Element {
               {t('inspector.gap_after_last')}
             </span>
           ) : (
-            <div className="flex items-center gap-1.5">
-              {/* 数字输入。改值即落 manual: true，applyDefaultGaps 会跳过此段
-                  保留用户意图。空字符串 / NaN 视作 0 */}
-              <input
-                type="number"
-                min={0}
-                step={50}
-                value={segment.gapAfter?.ms ?? 0}
-                onChange={(e) => {
-                  const v = Math.max(0, parseInt(e.currentTarget.value, 10) || 0)
-                  setSegmentGap(selectedId, { ms: v, manual: true })
-                }}
-                disabled={playback !== 'idle'}
-                className={cn(
-                  'w-20 rounded-sm border border-border bg-bg-deep px-1.5 py-0.5',
-                  'text-right font-mono text-xs tabular-nums text-fg',
-                  'outline-none focus:border-accent disabled:cursor-not-allowed disabled:opacity-50'
-                )}
-              />
-              <span className="text-2xs text-fg-muted">ms</span>
-              <span className="text-2xs text-fg-dim">
-                {segment.gapAfter
-                  ? segment.gapAfter.manual
-                    ? t('inspector.gap_after_manual')
-                    : t('inspector.gap_after_auto')
-                  : t('inspector.gap_after_unset')}
-              </span>
-              {segment.gapAfter && (
-                <button
-                  type="button"
-                  onClick={() => setSegmentGap(selectedId, undefined)}
-                  disabled={playback !== 'idle'}
-                  title={t('inspector.gap_after_clear_hint')}
-                  className="rounded-sm p-0.5 text-fg-muted hover:bg-bg-raised hover:text-rec disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  <X size={11} />
-                </button>
-              )}
-            </div>
+            (() => {
+              // gap 三态映射到 UI：
+              //   undefined           → ms=0, follow=true（未触碰，等待
+              //                          applyDefaultGaps 写入）
+              //   { ms, manual:false } → follow=true（已自动写入，下次默认
+              //                          应用还会被覆盖）
+              //   { ms, manual:true }  → follow=false（用户手动设置，
+              //                          applyDefaultGaps 跳过）
+              const followsGlobal = !segment.gapAfter || !segment.gapAfter.manual
+              const currentMs = segment.gapAfter?.ms ?? 0
+              return (
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {/* 数字输入。改值即落 manual: true：用户键入显式数字就是
+                      在表达「这一段就用这个数」，自动 uncheck follow */}
+                  <input
+                    type="number"
+                    min={0}
+                    step={50}
+                    value={currentMs}
+                    onChange={(e) => {
+                      const v = Math.max(0, parseInt(e.currentTarget.value, 10) || 0)
+                      setSegmentGap(selectedId, { ms: v, manual: true })
+                    }}
+                    disabled={playback !== 'idle'}
+                    className={cn(
+                      'w-20 rounded-sm border border-border bg-bg-deep px-1.5 py-0.5',
+                      'text-right font-mono text-xs tabular-nums text-fg',
+                      'outline-none focus:border-accent disabled:cursor-not-allowed disabled:opacity-50'
+                    )}
+                  />
+                  <span className="text-2xs text-fg-muted">ms</span>
+                  <label
+                    className={cn(
+                      'inline-flex items-center gap-1 text-2xs text-fg-dim',
+                      playback !== 'idle' && 'cursor-not-allowed opacity-50'
+                    )}
+                    title={t('inspector.gap_after_follow_global_hint')}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={followsGlobal}
+                      onChange={(e) =>
+                        setSegmentGap(selectedId, {
+                          ms: currentMs,
+                          manual: !e.currentTarget.checked
+                        })
+                      }
+                      disabled={playback !== 'idle'}
+                      className="h-3 w-3 cursor-pointer accent-accent disabled:cursor-not-allowed"
+                    />
+                    {t('inspector.gap_after_follow_global')}
+                  </label>
+                  {segment.gapAfter && (
+                    <button
+                      type="button"
+                      onClick={() => setSegmentGap(selectedId, undefined)}
+                      disabled={playback !== 'idle'}
+                      title={t('inspector.gap_after_clear_hint')}
+                      className="rounded-sm p-0.5 text-fg-muted hover:bg-bg-raised hover:text-rec disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      <X size={11} />
+                    </button>
+                  )}
+                </div>
+              )
+            })()
           )}
         </Field>
       </div>
@@ -356,196 +382,301 @@ export function InspectorView(): React.JSX.Element {
         </span>
       </div>
 
-      <div className="flex-1 overflow-y-auto">
-        {segment.takes.length === 0 ? (
-          <div className="flex h-full items-center justify-center text-2xs text-fg-dim">
-            {t('inspector.takes_empty')}
-          </div>
-        ) : (
-          segment.takes.map((take, i) => {
-            const isCurrent = take.id === segment.selectedTakeId
-            const isMissing = missingTakeIds.has(take.id)
-            // 节选信息：trim 字段缺失 → 整段，UI 不显示 trim 行 / 仅显示
-            // 单一时长。trim 设置过 → 显示「有效 / 原始」两个数字 + 起止
-            // 时间，让用户在 list 里就能看清裁了多少
-            const effectiveRange = takeEffectiveRange(take)
-            const isTrimmed = effectiveRange.startMs > 0 || effectiveRange.endMs < take.durationMs
-            const effectiveDur = takeEffectiveDurationMs(take)
-            return (
-              <div
-                key={take.id}
-                className={cn(
-                  // h-8 → min-h-8 + auto：trim 时多一行 trim 范围，整体高度
-                  // 自适应而不是把第二行裁掉
-                  'flex min-h-8 items-center gap-2 border-b border-border-subtle px-3 py-1 text-xs',
-                  isCurrent ? 'bg-accent-soft/40' : 'hover:bg-bg-raised'
-                )}
-              >
-                <div className="flex w-4 items-center justify-center self-start pt-1">
-                  {isCurrent ? (
-                    <Check size={12} className="text-accent" />
-                  ) : (
-                    <Circle size={8} className="text-fg-dim" />
-                  )}
-                </div>
-                <div className="flex min-w-0 flex-1 flex-col">
-                  <div className="truncate">{t('inspector.take_item', { index: i + 1 })}</div>
-                  {isCurrent ? (
-                    // 当前 Take：trim 起 / 终点改成可编辑数字输入。0 / duration
-                    // 即「未节选」，setTakeTrim 会自动把 trim 字段从 Take 上
-                    // 删除（store 内部清洗）。playback 非 idle 时锁住，与
-                    // 其他 mutate 入口一致
-                    <div className="flex flex-wrap items-center gap-1 text-2xs tabular-nums text-fg-dim">
-                      <Scissors size={9} />
-                      <input
-                        type="number"
-                        min={0}
-                        max={Math.max(0, effectiveRange.endMs - 1)}
-                        step={10}
-                        value={effectiveRange.startMs}
-                        onChange={(e) => {
-                          const raw = parseInt(e.currentTarget.value, 10)
-                          const next = Number.isFinite(raw) ? Math.max(0, raw) : 0
-                          setTakeTrim(selectedId, take.id, {
-                            startMs: next,
-                            endMs: effectiveRange.endMs
-                          })
-                        }}
-                        disabled={playback !== 'idle' || isMissing}
-                        title={formatDuration(effectiveRange.startMs)}
-                        className={cn(
-                          'w-16 rounded-sm border border-border bg-bg-deep px-1 py-0.5',
-                          'text-right font-mono text-2xs tabular-nums text-fg',
-                          'outline-none focus:border-accent disabled:cursor-not-allowed disabled:opacity-50'
-                        )}
-                      />
-                      <span className="text-fg-muted">ms →</span>
-                      <input
-                        type="number"
-                        min={effectiveRange.startMs + 1}
-                        max={take.durationMs}
-                        step={10}
-                        value={effectiveRange.endMs}
-                        onChange={(e) => {
-                          const raw = parseInt(e.currentTarget.value, 10)
-                          const next = Number.isFinite(raw)
-                            ? Math.min(take.durationMs, Math.max(0, raw))
-                            : take.durationMs
-                          setTakeTrim(selectedId, take.id, {
-                            startMs: effectiveRange.startMs,
-                            endMs: next
-                          })
-                        }}
-                        disabled={playback !== 'idle' || isMissing}
-                        title={formatDuration(effectiveRange.endMs)}
-                        className={cn(
-                          'w-16 rounded-sm border border-border bg-bg-deep px-1 py-0.5',
-                          'text-right font-mono text-2xs tabular-nums text-fg',
-                          'outline-none focus:border-accent disabled:cursor-not-allowed disabled:opacity-50'
-                        )}
-                      />
-                      <span className="text-fg-muted">ms</span>
-                      {isTrimmed && (
-                        <button
-                          type="button"
-                          onClick={() => setTakeTrim(selectedId, take.id, undefined)}
-                          disabled={playback !== 'idle'}
-                          title={t('inspector.take_trim_clear_hint')}
-                          className="rounded-sm p-0.5 text-fg-muted hover:bg-bg-raised hover:text-rec disabled:cursor-not-allowed disabled:opacity-40"
-                        >
-                          <X size={10} />
-                        </button>
-                      )}
-                    </div>
-                  ) : (
-                    // 非当前 Take：保留只读时间显示；要改先「设为当前」
-                    isTrimmed && (
-                      <div className="flex items-center gap-1 font-mono text-2xs tabular-nums text-fg-dim">
-                        <Scissors size={9} />
-                        <span>
-                          {formatDuration(effectiveRange.startMs)}
-                          <span className="px-0.5 text-fg-muted">→</span>
-                          {formatDuration(effectiveRange.endMs)}
-                        </span>
-                      </div>
-                    )
-                  )}
-                </div>
-                {isMissing && (
-                  <div
-                    className="flex items-center gap-0.5 rounded-sm border border-rec/60 bg-rec/10 px-1 text-2xs text-rec"
-                    title={t('audit_dialog.inspector_missing_tooltip')}
-                  >
-                    <AlertTriangle size={9} />
-                    {t('audit_dialog.inspector_missing_badge')}
-                  </div>
-                )}
-                <div
-                  className="w-24 text-right font-mono text-2xs tabular-nums text-fg-muted"
-                  title={
-                    isTrimmed
-                      ? t('inspector.take_duration_trimmed_hint', {
-                          effective: formatDuration(effectiveDur),
-                          total: formatDuration(take.durationMs)
-                        })
-                      : undefined
-                  }
-                >
-                  {isTrimmed ? (
-                    <>
-                      {formatDuration(effectiveDur)}
-                      <span className="ml-1 text-fg-dim/70">
-                        / {formatDuration(take.durationMs)}
-                      </span>
-                    </>
-                  ) : (
-                    formatDuration(take.durationMs)
-                  )}
-                </div>
-                <button
-                  // 单 take 试听：直接走 player.playFile，不走 store 的
-                  // playCurrentSegment——后者只播 selectedTakeId，这里允许
-                  // 用户预览非当前 take 而不必先「设为当前」。
-                  // 节选 take 也只播节选段，与 playCurrentSegment 一致
-                  onClick={() => {
-                    const range = takeEffectiveRange(take)
-                    const opts: { startMs?: number; endMs?: number } = {}
-                    if (range.startMs > 0) opts.startMs = range.startMs
-                    if (range.endMs < take.durationMs) opts.endMs = range.endMs
-                    void player.playFile(take.filePath, opts)
-                  }}
-                  disabled={isMissing || playback !== 'idle'}
-                  aria-label={t('inspector.take_play_aria')}
-                  title={t('inspector.take_play_aria')}
-                  className={cn(
-                    'rounded-sm p-1 text-fg-muted hover:bg-bg-raised hover:text-fg',
-                    'disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-fg-muted'
-                  )}
-                >
-                  <Play size={11} />
-                </button>
-                <button
-                  onClick={() => setSelectedTake(selectedId, take.id)}
-                  className={cn(
-                    'rounded-sm px-1.5 py-0.5 text-2xs',
-                    isCurrent ? 'text-accent' : 'text-fg-muted hover:bg-bg-raised hover:text-fg'
-                  )}
-                  disabled={isCurrent}
-                >
-                  {isCurrent ? t('inspector.take_current') : t('inspector.take_set_current')}
-                </button>
-                <button
-                  onClick={() => deleteTake(selectedId, take.id)}
-                  className="rounded-sm p-1 text-fg-muted hover:bg-bg-raised hover:text-rec"
-                  aria-label={t('inspector.take_delete_aria')}
-                >
-                  <Trash2 size={11} />
-                </button>
-              </div>
-            )
-          })
-        )}
-      </div>
+      {segment.takes.length === 0 ? (
+        <div className="flex flex-1 items-center justify-center text-2xs text-fg-dim">
+          {t('inspector.takes_empty')}
+        </div>
+      ) : (
+        // 表格容器：Inspector 太窄时横向溢出滚动，让所有列都可访问。
+        // 纵向独立滚动让长 take 列表也能用
+        <div className="flex-1 overflow-auto">
+          <TakesTable
+            segmentId={selectedId}
+            takes={segment.takes}
+            selectedTakeId={segment.selectedTakeId}
+            missingTakeIds={missingTakeIds}
+            playback={playback}
+            setSelectedTake={setSelectedTake}
+            setTakeTrim={setTakeTrim}
+            deleteTake={deleteTake}
+          />
+        </div>
+      )}
     </div>
+  )
+}
+
+/**
+ * Take 列表的表格视图。8 列：
+ *   1. 启用（语义上是单选 = selectedTakeId，按 user 要求渲染成 checkbox）
+ *   2. 名称（Take N + 缺失徽标）
+ *   3. 节选起点（ms 数字输入）
+ *   4. 节选终点（ms 数字输入）
+ *   5. 持续时间 / 总时间
+ *   6. 试听
+ *   7. 删除
+ *   8. 在系统文件管理器中定位
+ *
+ * 用 CSS grid 让所有行的列宽对齐。最小宽度收紧到能放 6 列 24px 按钮 +
+ * 名称 + 输入：约 280px；Inspector 实际更窄时由 overflow-auto 接管成
+ * 横向滚动条，所有功能仍可达
+ */
+const TAKE_GRID_COLS =
+  'grid-cols-[20px_minmax(48px,auto)_60px_60px_minmax(96px,1fr)_24px_24px_24px]'
+
+function TakesTable({
+  segmentId,
+  takes,
+  selectedTakeId,
+  missingTakeIds,
+  playback,
+  setSelectedTake,
+  setTakeTrim,
+  deleteTake
+}: {
+  segmentId: string
+  takes: import('@shared/project').Take[]
+  selectedTakeId: string | undefined
+  missingTakeIds: ReadonlySet<string>
+  playback: string
+  setSelectedTake: (segmentId: string, takeId: string) => void
+  setTakeTrim: (
+    segmentId: string,
+    takeId: string,
+    trim: { startMs: number; endMs: number } | undefined
+  ) => void
+  deleteTake: (segmentId: string, takeId: string) => void
+}): React.JSX.Element {
+  const { t } = useTranslation()
+  const isIdle = playback === 'idle'
+
+  return (
+    // min-w-max 让 grid 在窄面板下保留全部列宽（不被父级压扁），由父级
+    // overflow-auto 兜成横向滚动
+    <div className="min-w-max">
+      {/* 表头：sticky 让滚动 take 列表时列名一直可见 */}
+      <div
+        className={cn(
+          'sticky top-0 z-10 grid items-center gap-1 border-b border-border bg-bg px-3 py-1',
+          'text-2xs font-medium text-fg-muted',
+          TAKE_GRID_COLS
+        )}
+      >
+        <span />
+        <span>{t('inspector.col_take')}</span>
+        <span className="text-right">{t('inspector.col_trim_start')}</span>
+        <span className="text-right">{t('inspector.col_trim_end')}</span>
+        <span className="text-right">{t('inspector.col_duration')}</span>
+        <span />
+        <span />
+        <span />
+      </div>
+
+      {takes.map((take, i) => {
+        const isCurrent = take.id === selectedTakeId
+        const isMissing = missingTakeIds.has(take.id)
+        const effectiveRange = takeEffectiveRange(take)
+        const isTrimmed = effectiveRange.startMs > 0 || effectiveRange.endMs < take.durationMs
+        const effectiveDur = takeEffectiveDurationMs(take)
+
+        const onPlay = (): void => {
+          // 与之前的「逐 Take 试听」语义一致：节选只播节选段
+          const opts: { startMs?: number; endMs?: number } = {}
+          if (effectiveRange.startMs > 0) opts.startMs = effectiveRange.startMs
+          if (effectiveRange.endMs < take.durationMs) opts.endMs = effectiveRange.endMs
+          void player.playFile(take.filePath, opts)
+        }
+
+        const onReveal = (): void => {
+          void window.api.project.revealTakeFile(take.filePath)
+        }
+
+        return (
+          <div
+            key={take.id}
+            className={cn(
+              'grid items-center gap-1 border-b border-border-subtle px-3 py-1 text-xs',
+              TAKE_GRID_COLS,
+              isCurrent ? 'bg-accent-soft/40' : 'hover:bg-bg-raised'
+            )}
+          >
+            {/* 1. 启用：实际是 selectedTakeId 单选，按 user 要求用 checkbox
+                  外观。点击当前选中的不会取消（store 不接受 undefined） */}
+            <input
+              type="checkbox"
+              checked={isCurrent}
+              onChange={() => {
+                if (!isCurrent) setSelectedTake(segmentId, take.id)
+              }}
+              disabled={!isIdle || isCurrent}
+              aria-label={isCurrent ? t('inspector.take_current') : t('inspector.take_set_current')}
+              title={isCurrent ? t('inspector.take_current') : t('inspector.take_set_current')}
+              className="h-3 w-3 cursor-pointer accent-accent disabled:cursor-default"
+            />
+
+            {/* 2. 名称 + 缺失徽标 */}
+            <div className="flex min-w-0 items-center gap-1">
+              <span className="truncate">{t('inspector.take_item', { index: i + 1 })}</span>
+              {isMissing && (
+                <AlertTriangle
+                  size={10}
+                  className="shrink-0 text-rec"
+                  aria-label={t('audit_dialog.inspector_missing_badge')}
+                />
+              )}
+            </div>
+
+            {/* 3. 节选起点 */}
+            <NumInput
+              value={effectiveRange.startMs}
+              min={0}
+              max={Math.max(0, effectiveRange.endMs - 1)}
+              disabled={!isIdle || isMissing}
+              title={formatDuration(effectiveRange.startMs)}
+              onChange={(v) =>
+                setTakeTrim(segmentId, take.id, {
+                  startMs: v,
+                  endMs: effectiveRange.endMs
+                })
+              }
+            />
+
+            {/* 4. 节选终点 */}
+            <NumInput
+              value={effectiveRange.endMs}
+              min={effectiveRange.startMs + 1}
+              max={take.durationMs}
+              disabled={!isIdle || isMissing}
+              title={formatDuration(effectiveRange.endMs)}
+              onChange={(v) =>
+                setTakeTrim(segmentId, take.id, {
+                  startMs: effectiveRange.startMs,
+                  endMs: Math.min(take.durationMs, Math.max(0, v))
+                })
+              }
+            />
+
+            {/* 5. 时长：节选时显示「有效 / 原始」，否则只显示总时长 */}
+            <div
+              className="text-right font-mono text-2xs tabular-nums text-fg-muted"
+              title={
+                isTrimmed
+                  ? t('inspector.take_duration_trimmed_hint', {
+                      effective: formatDuration(effectiveDur),
+                      total: formatDuration(take.durationMs)
+                    })
+                  : undefined
+              }
+            >
+              {isTrimmed ? (
+                <>
+                  {formatDuration(effectiveDur)}
+                  <span className="ml-1 text-fg-dim/70">/ {formatDuration(take.durationMs)}</span>
+                </>
+              ) : (
+                formatDuration(take.durationMs)
+              )}
+            </div>
+
+            {/* 6. 试听 */}
+            <IconActionButton
+              onClick={onPlay}
+              disabled={isMissing || !isIdle}
+              title={t('inspector.take_play_aria')}
+            >
+              <Play size={11} />
+            </IconActionButton>
+
+            {/* 7. 删除 */}
+            <IconActionButton
+              onClick={() => deleteTake(segmentId, take.id)}
+              danger
+              title={t('inspector.take_delete_aria')}
+            >
+              <Trash2 size={11} />
+            </IconActionButton>
+
+            {/* 8. 在文件管理器中定位 */}
+            <IconActionButton
+              onClick={onReveal}
+              disabled={isMissing}
+              title={t('inspector.take_reveal_aria')}
+            >
+              <FolderOpen size={11} />
+            </IconActionButton>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+/** Trim 列共用的 ms 数字输入。把样式 / 解析逻辑收成一个组件，避免 4 处重复 */
+function NumInput({
+  value,
+  min,
+  max,
+  disabled,
+  title,
+  onChange
+}: {
+  value: number
+  min: number
+  max: number
+  disabled?: boolean
+  title?: string
+  onChange: (next: number) => void
+}): React.JSX.Element {
+  return (
+    <input
+      type="number"
+      min={min}
+      max={max}
+      step={10}
+      value={value}
+      disabled={disabled}
+      title={title}
+      onChange={(e) => {
+        const raw = parseInt(e.currentTarget.value, 10)
+        onChange(Number.isFinite(raw) ? Math.max(0, raw) : 0)
+      }}
+      className={cn(
+        'w-full rounded-sm border border-border bg-bg-deep px-1 py-0.5',
+        'text-right font-mono text-2xs tabular-nums text-fg',
+        'outline-none focus:border-accent disabled:cursor-not-allowed disabled:opacity-50'
+      )}
+    />
+  )
+}
+
+/** 表格右侧三个 24px 图标按钮的统一样式：保持列宽对齐 */
+function IconActionButton({
+  children,
+  onClick,
+  danger,
+  disabled,
+  title
+}: {
+  children: React.ReactNode
+  onClick: () => void
+  danger?: boolean
+  disabled?: boolean
+  title: string
+}): React.JSX.Element {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      aria-label={title}
+      className={cn(
+        'flex h-6 w-6 items-center justify-center rounded-sm text-fg-muted',
+        'disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-fg-muted',
+        danger ? 'hover:bg-bg-raised hover:text-rec' : 'hover:bg-bg-raised hover:text-fg'
+      )}
+    >
+      {children}
+    </button>
   )
 }

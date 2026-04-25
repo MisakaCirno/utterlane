@@ -1,4 +1,4 @@
-import { BrowserWindow, dialog, ipcMain } from 'electron'
+import { BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { promises as fs } from 'fs'
 import {
   PROJECT_SCHEMA_VERSION,
@@ -168,6 +168,32 @@ export function registerProjectIpc(): void {
       const buf = await fs.readFile(absolute)
       // Node 的 Buffer 底层是 ArrayBuffer 共享池；拷贝一份纯净 ArrayBuffer 避免 IPC 上的生命周期问题
       return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength)
+    }
+  )
+
+  /**
+   * 在系统文件管理器中定位（高亮）一个 Take 文件。
+   *
+   * 走 shell.showItemInFolder 而不是 shell.openPath：前者会高亮目标文件，
+   * 后者会用关联程序「打开」它（音频文件就直接放音了，不是用户期望）。
+   *
+   * 失败时返回 message 让 UI 弹错（路径不存在 / 权限不足 / 越界）。
+   * 文件还没落盘就 reveal 这种边界情况由 stat 检查兜底
+   */
+  ipcMain.handle(
+    PROJECT_IPC.revealTakeFile,
+    async (_e, relativePath: string): Promise<{ ok: boolean; message?: string }> => {
+      const projectDir = projectSession.path
+      if (!projectDir) return { ok: false, message: '没有活动工程' }
+      try {
+        const absolute = resolveProjectRelative(projectDir, relativePath)
+        const stat = await fs.stat(absolute)
+        if (!stat.isFile()) return { ok: false, message: '目标不是文件' }
+        shell.showItemInFolder(absolute)
+        return { ok: true }
+      } catch (err) {
+        return { ok: false, message: (err as Error).message }
+      }
     }
   )
 }

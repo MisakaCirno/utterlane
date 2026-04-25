@@ -25,7 +25,8 @@ export const PROJECT_IPC = {
   saveWorkspace: 'project:save-workspace',
   saveSegments: 'project:save-segments',
   saveProject: 'project:save-project',
-  readTakeFile: 'project:read-take-file'
+  readTakeFile: 'project:read-take-file',
+  revealTakeFile: 'project:reveal-take-file'
 } as const
 
 export const RECORDING_IPC = {
