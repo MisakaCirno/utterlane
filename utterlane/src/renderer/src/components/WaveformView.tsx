@@ -23,13 +23,44 @@ import { subscribePosition } from '@renderer/services/player'
  * 上采样数 / 该 rate 算出的「时长」与 audio.duration 一致——playheadMs
  * 映射到 canvas x 坐标时这两边自然对得上。原始文件的 sample rate 在这里
  * 不需要也不可见。
+ *
+ * === Trim 编辑（可选） ===
+ *
+ * 若调用方传入 durationMs + onTrimChange，则在波形两端渲染可拖拽手柄：
+ * 用户拖动左 / 右手柄设置节选起 / 终点。手柄外的区域以半透明遮罩覆盖，
+ * 视觉上区分「保留段」与「裁掉段」。trim === undefined 时手柄默认贴边
+ * （0 / durationMs），用户拖动后自动激活节选
  */
 
 type LoadResult = { path: string; samples: Float32Array } | { path: string; errorMessage: string }
 
 type CacheEntry = { samples: Float32Array; sampleRate: number }
 
-export function WaveformView({ filePath }: { filePath: string | null }): React.JSX.Element {
+/** 拖拽节选手柄时的最小区间长度（毫秒），防止两个手柄重叠成 0 长度区间 */
+const MIN_TRIM_SPAN_MS = 50
+
+export type WaveformTrim = { startMs: number; endMs: number }
+
+export function WaveformView({
+  filePath,
+  durationMs,
+  trim,
+  onTrimChange
+}: {
+  filePath: string | null
+  /**
+   * Take 总时长，用于 trim 手柄的 px ↔ ms 换算。波形 canvas 自身用解码
+   * 后的 samples.length / sampleRate 得到时长（理论上一致）；这里多传
+   * 一份是因为 trim 编辑可能在 samples 还没加载完时就要响应
+   */
+  durationMs?: number
+  trim?: WaveformTrim
+  /**
+   * 节选变更回调。undefined → 用户清空 trim（手柄拖回两端）；
+   * 否则传新区间。仅当传了这个 prop 时才显示手柄
+   */
+  onTrimChange?: (trim: WaveformTrim | undefined) => void
+}): React.JSX.Element {
   const { t } = useTranslation()
   const waveCanvasRef = useRef<HTMLCanvasElement>(null)
   const playheadCanvasRef = useRef<HTMLCanvasElement>(null)
@@ -168,6 +199,62 @@ export function WaveformView({ filePath }: { filePath: string | null }): React.J
     ctx.stroke()
   }, [playheadMs, totalMs, size])
 
+  // ========================================================================
+  // Trim 编辑：手柄 + 遮罩
+  // ========================================================================
+
+  // 当前用于 trim 渲染的有效区间。durationMs / trim 缺失时回落到「整段」，
+  // 这样手柄默认贴在两端，用户从那里开始拖即可激活节选
+  const trimDurationMs = durationMs && durationMs > 0 ? durationMs : 0
+  const effectiveTrimStart = Math.max(0, Math.min(trim?.startMs ?? 0, trimDurationMs))
+  const effectiveTrimEnd = Math.max(0, Math.min(trim?.endMs ?? trimDurationMs, trimDurationMs))
+  const showTrimUi = !!onTrimChange && trimDurationMs > 0 && size.w > 0
+  const startX = trimDurationMs > 0 ? (effectiveTrimStart / trimDurationMs) * size.w : 0
+  const endX = trimDurationMs > 0 ? (effectiveTrimEnd / trimDurationMs) * size.w : size.w
+
+  // 拖拽状态：单一 ref 跨 pointermove / up 共享
+  const dragRef = useRef<{
+    side: 'start' | 'end'
+    startClientX: number
+    initialMs: number
+  } | null>(null)
+
+  function startDrag(side: 'start' | 'end', e: React.PointerEvent): void {
+    if (!onTrimChange || trimDurationMs <= 0) return
+    e.preventDefault()
+    e.stopPropagation()
+    dragRef.current = {
+      side,
+      startClientX: e.clientX,
+      initialMs: side === 'start' ? effectiveTrimStart : effectiveTrimEnd
+    }
+    ;(e.currentTarget as Element).setPointerCapture?.(e.pointerId)
+  }
+
+  function onDragMove(e: React.PointerEvent): void {
+    const ctx = dragRef.current
+    if (!ctx || !onTrimChange || size.w <= 0) return
+    const dx = e.clientX - ctx.startClientX
+    const dMs = (dx / size.w) * trimDurationMs
+    let nextStart = effectiveTrimStart
+    let nextEnd = effectiveTrimEnd
+    if (ctx.side === 'start') {
+      nextStart = Math.max(0, Math.min(ctx.initialMs + dMs, effectiveTrimEnd - MIN_TRIM_SPAN_MS))
+    } else {
+      nextEnd = Math.min(
+        trimDurationMs,
+        Math.max(ctx.initialMs + dMs, effectiveTrimStart + MIN_TRIM_SPAN_MS)
+      )
+    }
+    onTrimChange({ startMs: nextStart, endMs: nextEnd })
+  }
+
+  function endDrag(e: React.PointerEvent): void {
+    if (!dragRef.current) return
+    dragRef.current = null
+    ;(e.currentTarget as Element).releasePointerCapture?.(e.pointerId)
+  }
+
   return (
     <div
       ref={containerRef}
@@ -185,9 +272,105 @@ export function WaveformView({ filePath }: { filePath: string | null }): React.J
       {filePath && !errorMessage && (
         <>
           <canvas ref={waveCanvasRef} className="absolute inset-0" />
+          {/* 节选 trim 遮罩：手柄外的区域用半透明黑覆盖，视觉上提示
+              「这段不会被播放 / 导出」。pointer-events-none 不挡 click /
+              hover */}
+          {showTrimUi && startX > 0 && (
+            <div
+              aria-hidden
+              className="pointer-events-none absolute top-0 bottom-0 left-0 bg-bg-deep/70"
+              style={{ width: startX }}
+            />
+          )}
+          {showTrimUi && endX < size.w && (
+            <div
+              aria-hidden
+              className="pointer-events-none absolute top-0 bottom-0 bg-bg-deep/70"
+              style={{ left: endX, right: 0 }}
+            />
+          )}
+          {/* 播放游标层。z 叠在波形之上、trim 手柄之下——播放时游标在
+              「裁掉段」上也能看见进度（虽然导出时这部分会被丢，但播放时
+              当前实现仍然走全段时间） */}
           <canvas ref={playheadCanvasRef} className="pointer-events-none absolute inset-0" />
+          {/* trim 手柄：只在传入 onTrimChange 且 durationMs > 0 时渲染 */}
+          {showTrimUi && (
+            <>
+              <TrimHandle
+                side="start"
+                x={startX}
+                title={t('timeline.trim_start_handle')}
+                onPointerDown={(e) => startDrag('start', e)}
+                onPointerMove={onDragMove}
+                onPointerUp={endDrag}
+                onPointerCancel={endDrag}
+              />
+              <TrimHandle
+                side="end"
+                x={endX}
+                title={t('timeline.trim_end_handle')}
+                onPointerDown={(e) => startDrag('end', e)}
+                onPointerMove={onDragMove}
+                onPointerUp={endDrag}
+                onPointerCancel={endDrag}
+              />
+            </>
+          )}
         </>
       )}
+    </div>
+  )
+}
+
+/**
+ * 节选手柄。竖线 + 顶 / 底各一个小方块作为视觉抓手。
+ * 真正可拖拽的是宽 8px 的透明热区，让手柄即便在波形密集时也好抓
+ */
+function TrimHandle({
+  side,
+  x,
+  title,
+  onPointerDown,
+  onPointerMove,
+  onPointerUp,
+  onPointerCancel
+}: {
+  side: 'start' | 'end'
+  x: number
+  title: string
+  onPointerDown: (e: React.PointerEvent) => void
+  onPointerMove: (e: React.PointerEvent) => void
+  onPointerUp: (e: React.PointerEvent) => void
+  onPointerCancel: (e: React.PointerEvent) => void
+}): React.JSX.Element {
+  return (
+    <div
+      title={title}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerCancel}
+      className={cn(
+        'absolute top-0 bottom-0 z-30 flex w-2 cursor-ew-resize items-stretch justify-center',
+        side === 'start' ? '-translate-x-1/2' : '-translate-x-1/2'
+      )}
+      style={{ left: x }}
+    >
+      {/* 视觉竖线 + 顶/底抓手 */}
+      <div className="relative h-full w-px bg-accent">
+        <div
+          className={cn(
+            'absolute h-2 w-2 -translate-x-1/2 bg-accent',
+            side === 'start' ? 'top-0 rounded-br-sm' : 'top-0 rounded-bl-sm'
+          )}
+        />
+        <div
+          className={cn(
+            'absolute bottom-0 h-2 w-2 -translate-x-1/2 bg-accent',
+            side === 'start' ? 'rounded-tr-sm' : 'rounded-tl-sm'
+          )}
+        />
+      </div>
     </div>
   )
 }

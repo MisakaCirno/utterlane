@@ -241,19 +241,67 @@ function SegmentTextEditor(): React.JSX.Element {
 }
 
 export function SegmentTimelineView(): React.JSX.Element {
-  // 波形对应当前选中 Segment 的当前 Take 文件路径
+  // 波形 + trim 编辑挂在当前选中 Segment 的当前 Take 上。
+  // selector 拆细：filePath / durationMs / trim 各取一份，避免任意字段
+  // 变化都让 SegmentTimelineView 整体 re-render
+  const selectedId = useEditorStore((s) => s.selectedSegmentId)
   const filePath = useEditorStore((s) => {
     if (!s.selectedSegmentId) return null
     const seg = s.segmentsById[s.selectedSegmentId]
     const take = seg?.takes.find((t) => t.id === seg.selectedTakeId)
     return take?.filePath ?? null
   })
+  const takeDurationMs = useEditorStore((s) => {
+    if (!s.selectedSegmentId) return undefined
+    const seg = s.segmentsById[s.selectedSegmentId]
+    const take = seg?.takes.find((t) => t.id === seg.selectedTakeId)
+    return take?.durationMs
+  })
+  const takeId = useEditorStore((s) => {
+    if (!s.selectedSegmentId) return undefined
+    const seg = s.segmentsById[s.selectedSegmentId]
+    return seg?.selectedTakeId
+  })
+  const trimStartMs = useEditorStore((s) => {
+    if (!s.selectedSegmentId) return undefined
+    const seg = s.segmentsById[s.selectedSegmentId]
+    const take = seg?.takes.find((t) => t.id === seg.selectedTakeId)
+    return take?.trimStartMs
+  })
+  const trimEndMs = useEditorStore((s) => {
+    if (!s.selectedSegmentId) return undefined
+    const seg = s.segmentsById[s.selectedSegmentId]
+    const take = seg?.takes.find((t) => t.id === seg.selectedTakeId)
+    return take?.trimEndMs
+  })
+  const setTakeTrim = useEditorStore((s) => s.setTakeTrim)
+
+  // trim 给 WaveformView 的形态总是「填充后的 startMs / endMs」——视图层
+  // 只关心区间，不关心是否「显式 set 过」。setTakeTrim 在 store 层会把
+  // 0/duration 等价整段的情况自动清掉字段，所以这里只管按当前位置算
+  const trim =
+    takeDurationMs !== undefined
+      ? {
+          startMs: trimStartMs ?? 0,
+          endMs: trimEndMs ?? takeDurationMs
+        }
+      : undefined
+
+  const onTrimChange = (next: { startMs: number; endMs: number } | undefined): void => {
+    if (!selectedId || !takeId) return
+    setTakeTrim(selectedId, takeId, next)
+  }
 
   return (
     <div className="flex h-full flex-col bg-bg">
       <SegmentControlRow />
       <SegmentTextEditor />
-      <WaveformView filePath={filePath} />
+      <WaveformView
+        filePath={filePath}
+        durationMs={takeDurationMs}
+        trim={trim}
+        onTrimChange={onTrimChange}
+      />
     </div>
   )
 }

@@ -172,7 +172,12 @@ export const zhCN = {
     segment_text_placeholder: '选中 Segment 后在此编辑文案',
     waveform_unrecorded: '未录制',
     waveform_loading: '加载波形中…',
-    waveform_error: '波形加载失败：{{message}}'
+    waveform_error: '波形加载失败：{{message}}',
+    trim_start_handle: '拖拽设置节选起点',
+    trim_end_handle: '拖拽设置节选终点',
+    trim_label: '节选',
+    trim_full: '整段',
+    trim_clear: '清除节选'
   },
 
   project_settings: {

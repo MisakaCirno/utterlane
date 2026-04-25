@@ -171,7 +171,12 @@ export const enUS: TranslationSchema = {
     segment_text_placeholder: 'Select a segment to edit its text',
     waveform_unrecorded: 'Not recorded',
     waveform_loading: 'Loading waveform…',
-    waveform_error: 'Waveform load failed: {{message}}'
+    waveform_error: 'Waveform load failed: {{message}}',
+    trim_start_handle: 'Drag to set trim start',
+    trim_end_handle: 'Drag to set trim end',
+    trim_label: 'Trim',
+    trim_full: 'Full take',
+    trim_clear: 'Clear trim'
   },
 
   project_settings: {
