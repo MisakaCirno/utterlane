@@ -30,6 +30,14 @@ type DialogState = {
   audioAuditOpen: boolean
   openAudioAudit: () => void
   closeAudioAudit: () => void
+
+  /**
+   * SegmentsView 的查找 / 替换悬浮面板开关。状态放在 dialogStore 而不是
+   * 视图本地，是为了让 Ctrl+F 等全局快捷键能跨组件切换它
+   */
+  findReplaceOpen: boolean
+  toggleFindReplace: () => void
+  closeFindReplace: () => void
 }
 
 export const useDialogStore = create<DialogState>((set) => ({
@@ -51,5 +59,9 @@ export const useDialogStore = create<DialogState>((set) => ({
 
   audioAuditOpen: false,
   openAudioAudit: () => set({ audioAuditOpen: true }),
-  closeAudioAudit: () => set({ audioAuditOpen: false })
+  closeAudioAudit: () => set({ audioAuditOpen: false }),
+
+  findReplaceOpen: false,
+  toggleFindReplace: () => set((s) => ({ findReplaceOpen: !s.findReplaceOpen })),
+  closeFindReplace: () => set({ findReplaceOpen: false })
 }))

@@ -569,8 +569,11 @@ export function SegmentsView(): React.JSX.Element {
   )
 
   // 查找 / 替换：唯一的「过滤 + 文字操作」入口。
-  // findText 为空时不过滤；非空时按子串匹配（大小写敏感，简化版）
-  const [findOpen, setFindOpen] = useState(false)
+  // findText 为空时不过滤；非空时按子串匹配（大小写敏感，简化版）。
+  // findOpen 由 dialogStore 管理，让 Ctrl+F 能从全局快捷键切换它
+  const findOpen = useDialogStore((s) => s.findReplaceOpen)
+  const toggleFindOpen = useDialogStore((s) => s.toggleFindReplace)
+  const closeFindOpen = useDialogStore((s) => s.closeFindReplace)
   const [findText, setFindText] = useState('')
   const [replaceText, setReplaceText] = useState('')
 
@@ -793,7 +796,7 @@ export function SegmentsView(): React.JSX.Element {
         </ToolbarIconButton>
         <div className="mx-1 h-4 w-px bg-border" />
         <ToolbarIconButton
-          onClick={() => setFindOpen((v) => !v)}
+          onClick={toggleFindOpen}
           active={findOpen}
           title={t('segments.tb_find_replace')}
         >
@@ -828,7 +831,7 @@ export function SegmentsView(): React.JSX.Element {
           onReplaceChange={setReplaceText}
           onReplaceAll={handleReplaceAll}
           onClose={() => {
-            setFindOpen(false)
+            closeFindOpen()
             setFindText('')
             setReplaceText('')
           }}

@@ -119,6 +119,13 @@ export type Command =
       sourceTextBefore: string
       /** 拆分位置（字符索引） */
       splitAt: number
+      /**
+       * 拆分前 source 的 gapAfter——必须保存以正确处理拆分边界：
+       * apply 时把它转交给后半段（它才是新的「最后一段」、对接原下一段），
+       * 前半段 gapAfter 被清零（中间是新的内部边界，不该有间隔）。
+       * revert 时再把这份 gapAfter 还回前半段
+       */
+      sourceGapBefore: { ms: number; manual?: boolean } | undefined
       /** 新生成的后半段 Segment ID（apply 时用，revert 时删它） */
       newSegmentId: string
       /** 新 Segment 在 order 中的插入位置（一般是 source 的下一位） */
@@ -188,7 +195,13 @@ export type Command =
       targetTextAfter: string
       /** 合并前接收方的 takes 列表 */
       targetTakesBefore: Take[]
-      /** 被合并掉、在合并后从 segmentsById 中删除的源 Segment（含 takes） */
+      /**
+       * 合并前接收方的 gapAfter。
+       * apply 时丢弃它（merged 体的 gapAfter 来自 mergedSegment——它本来就是
+       * 「与下一段的间隔」），revert 时还回 target
+       */
+      targetGapBefore: { ms: number; manual?: boolean } | undefined
+      /** 被合并掉、在合并后从 segmentsById 中删除的源 Segment（含 takes / gapAfter） */
       mergedSegment: Segment
       /** mergedSegment 在原 order 里的下标 */
       mergedIndex: number
@@ -384,18 +397,22 @@ function applyCommand(cmd: Command): void {
         if (!source) return null
         const beforeText = cmd.sourceTextBefore.slice(0, cmd.splitAt).trimEnd()
         const afterText = cmd.sourceTextBefore.slice(cmd.splitAt).trimStart()
+        // 后半段继承原 gapAfter（它现在是对外的「最后一段」），前半段清零
         const newSegment: Segment = {
           id: cmd.newSegmentId,
           text: afterText,
           takes: []
         }
+        if (cmd.sourceGapBefore) newSegment.gapAfter = { ...cmd.sourceGapBefore }
+        const frontSegment = { ...source, text: beforeText }
+        delete frontSegment.gapAfter
         const nextOrder = s.order.slice()
         nextOrder.splice(cmd.newSegmentIndex, 0, cmd.newSegmentId)
         return {
           order: nextOrder,
           segmentsById: {
             ...s.segmentsById,
-            [cmd.sourceSegmentId]: { ...source, text: beforeText },
+            [cmd.sourceSegmentId]: frontSegment,
             [cmd.newSegmentId]: newSegment
           },
           selectedSegmentId: cmd.nextSelectedSegmentId
@@ -409,11 +426,19 @@ function applyCommand(cmd: Command): void {
         const nextOrder = s.order.filter((id) => id !== cmd.mergedSegment.id)
         const nextById = { ...s.segmentsById }
         delete nextById[cmd.mergedSegment.id]
-        nextById[cmd.targetSegmentId] = {
+        // merged 体的 gapAfter 接管 mergedSegment 的（= 合并体到下一段的间隔），
+        // target 原来的 gapAfter（= 合并前 target 到 mergedSegment 的内部边界）丢弃
+        const mergedTarget = {
           ...target,
           text: cmd.targetTextAfter,
           takes: [...cmd.targetTakesBefore, ...cmd.mergedSegment.takes]
         }
+        if (cmd.mergedSegment.gapAfter) {
+          mergedTarget.gapAfter = { ...cmd.mergedSegment.gapAfter }
+        } else {
+          delete mergedTarget.gapAfter
+        }
+        nextById[cmd.targetSegmentId] = mergedTarget
         return {
           order: nextOrder,
           segmentsById: nextById,
@@ -574,11 +599,15 @@ function revertCommand(cmd: Command): void {
       editor.applyHistoryPatch((s) => {
         const source = s.segmentsById[cmd.sourceSegmentId]
         if (!source) return null
-        // revert 拆分：删掉新 Segment，把 source.text 还原成原始完整文本
+        // revert 拆分：删掉新 Segment，把 source.text 还原成原始完整文本，
+        // 把 sourceGapBefore 还回前段（apply 时它被转交给了后段）
         const nextOrder = s.order.filter((id) => id !== cmd.newSegmentId)
         const nextById = { ...s.segmentsById }
         delete nextById[cmd.newSegmentId]
-        nextById[cmd.sourceSegmentId] = { ...source, text: cmd.sourceTextBefore }
+        const restored = { ...source, text: cmd.sourceTextBefore }
+        if (cmd.sourceGapBefore) restored.gapAfter = { ...cmd.sourceGapBefore }
+        else delete restored.gapAfter
+        nextById[cmd.sourceSegmentId] = restored
         return {
           order: nextOrder,
           segmentsById: nextById,
@@ -590,18 +619,21 @@ function revertCommand(cmd: Command): void {
       editor.applyHistoryPatch((s) => {
         const target = s.segmentsById[cmd.targetSegmentId]
         if (!target) return null
-        // revert 合并：把 mergedSegment 重新插回 order，target 的 text / takes 还原
+        // revert 合并：把 mergedSegment 重新插回 order，target 的 text / takes / gapAfter 还原
         const nextOrder = s.order.slice()
         nextOrder.splice(cmd.mergedIndex, 0, cmd.mergedSegment.id)
+        const restoredTarget = {
+          ...target,
+          text: cmd.targetTextBefore,
+          takes: cmd.targetTakesBefore
+        }
+        if (cmd.targetGapBefore) restoredTarget.gapAfter = { ...cmd.targetGapBefore }
+        else delete restoredTarget.gapAfter
         return {
           order: nextOrder,
           segmentsById: {
             ...s.segmentsById,
-            [cmd.targetSegmentId]: {
-              ...target,
-              text: cmd.targetTextBefore,
-              takes: cmd.targetTakesBefore
-            },
+            [cmd.targetSegmentId]: restoredTarget,
             [cmd.mergedSegment.id]: cmd.mergedSegment
           },
           selectedSegmentId: cmd.prevSelectedSegmentId

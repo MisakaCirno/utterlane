@@ -912,11 +912,17 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const afterText = text.slice(splitAt).trimStart()
     if (beforeText.length === 0 || afterText.length === 0) return
 
+    // 记录拆分前 source 的 gapAfter——它是「source 与下一段之间的间隔」。
+    // 拆分后这个语义自然属于「后半段（新段）与原下一段之间」，所以转交给
+    // 新段；前半段的 gapAfter 清零（中间是新生成的内部边界，本不该有间隔）
+    const sourceGapBefore = seg.gapAfter ? { ...seg.gapAfter } : undefined
+
     useHistoryStore.getState().push(`splitSegment:${segmentId}`, 'history.split_segment', {
       type: 'splitSegment',
       sourceSegmentId: segmentId,
       sourceTextBefore: text,
       splitAt,
+      sourceGapBefore,
       newSegmentId,
       newSegmentIndex: sourceIdx + 1,
       prevSelectedSegmentId: prev.selectedSegmentId,
@@ -925,12 +931,16 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
     const nextOrder = prev.order.slice()
     nextOrder.splice(sourceIdx + 1, 0, newSegmentId)
+    const frontSegment = { ...seg, text: beforeText }
+    delete frontSegment.gapAfter
+    const newSegment: Segment = { id: newSegmentId, text: afterText, takes: [] }
+    if (sourceGapBefore) newSegment.gapAfter = sourceGapBefore
     set({
       order: nextOrder,
       segmentsById: {
         ...prev.segmentsById,
-        [segmentId]: { ...seg, text: beforeText },
-        [newSegmentId]: { id: newSegmentId, text: afterText, takes: [] }
+        [segmentId]: frontSegment,
+        [newSegmentId]: newSegment
       },
       ...markDirty()
     })
@@ -957,6 +967,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
     const targetTextBefore = target.text
     const targetTakesBefore = target.takes
+    const targetGapBefore = target.gapAfter ? { ...target.gapAfter } : undefined
     const mergedText = `${target.text.trim()} ${curr.text.trim()}`.trim()
 
     useHistoryStore.getState().push(`mergeSegment:${segmentId}`, 'history.merge_segment', {
@@ -965,6 +976,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       targetTextBefore,
       targetTextAfter: mergedText,
       targetTakesBefore,
+      targetGapBefore,
       mergedSegment: curr,
       mergedIndex: idx,
       prevSelectedSegmentId: prev.selectedSegmentId,
@@ -974,11 +986,16 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const nextOrder = prev.order.filter((id) => id !== segmentId)
     const nextById = { ...prev.segmentsById }
     delete nextById[segmentId]
-    nextById[targetId] = {
+    // merged 体的 gapAfter 接管 curr 的（= 合并体到下一段的间隔）；
+    // target 原来的 gapAfter（= target → curr 的内部边界）随合并消失
+    const mergedTarget = {
       ...target,
       text: mergedText,
       takes: [...targetTakesBefore, ...curr.takes]
     }
+    if (curr.gapAfter) mergedTarget.gapAfter = { ...curr.gapAfter }
+    else delete mergedTarget.gapAfter
+    nextById[targetId] = mergedTarget
     set({
       order: nextOrder,
       segmentsById: nextById,

@@ -69,6 +69,14 @@ export function installKeyboardShortcuts(): () => void {
       return
     }
 
+    // Ctrl/Cmd+F：切换 SegmentsView 的查找 / 替换悬浮面板。
+    // preventDefault 是为了覆盖 Electron / Chromium 默认的「页内查找」
+    if (mod && e.key.toLowerCase() === 'f' && !e.altKey && !e.shiftKey) {
+      e.preventDefault()
+      useDialogStore.getState().toggleFindReplace()
+      return
+    }
+
     // ----- 可自定义动作：按 preferences 里的绑定派发 -----
 
     // resolveBindings 拿到的是 actionId → KeyBinding | null。null 表示
