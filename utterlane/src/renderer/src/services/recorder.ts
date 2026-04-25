@@ -15,6 +15,20 @@ import { encodeWavFromPcm } from './wavEncoder'
  *     一套 worklet 路径不划算；miniaudio 方案会直接越过 Web Audio，
  *     AudioWorklet 的迁移就没意义了
  *
+ * === 后端切换路标 ===
+ *
+ * ScriptProcessorNode 的两条已知缺陷：
+ *   1. 跑在主线程，重 React 渲染时可能丢音频帧
+ *   2. bufferSize 4096 在 48kHz 下 ~85ms 延迟，电平表能感知到滞后
+ *
+ * 当前都未到「让用户感知到」的程度，所以保持 ScriptProcessor。如果发现：
+ *   - 明显的录音杂音 / 缺帧（issue 报告）
+ *   - 电平表对人声反应明显延后
+ *   - Chromium 升级移除 ScriptProcessor 兼容
+ * 任一条满足，就启动 miniaudio utility process 切换；不要回头切到
+ * AudioWorklet——那是中间方案，迁移 worklet 打包路径的成本和直接上 miniaudio
+ * 接近，但获得的稳定性提升不如后者。
+ *
  * 本模块提供一个简单的状态机：idle → recording → idle。
  * 同时只允许一个录音会话，开第二次会报错。
  */
