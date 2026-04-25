@@ -37,6 +37,14 @@ type EditorState = {
   segmentsById: Record<string, Segment>
 
   selectedSegmentId: string | undefined
+  /**
+   * 主选中之外的「副选中」集合，用于多选场景。
+   *
+   * 不变量：selectedSegmentId（主选中）永远不会出现在 extraSelectedSegmentIds
+   * 里——避免渲染时一行同时被两份样式覆盖。删除 / 主选中变化时由 store 自己
+   * 维护这个不变量
+   */
+  extraSelectedSegmentIds: ReadonlySet<string>
   lastPreviewedTakeId: string | undefined
   scriptListScrollTop: number
   timelineScrollLeft: number
@@ -92,6 +100,23 @@ type EditorState = {
 
   // 工作区（UI 上下文）
   selectSegment: (id: string | undefined) => void
+  /**
+   * 多选友好的版本：
+   *   - mode 'single'：清空副选中，把 id 设为主选（普通点击）
+   *   - mode 'toggle'：在副选中里切换 id（Ctrl/Cmd+Click）。被切到主选的
+   *     位置时如果 id 是当前主选，主选保留，副选切换 id；如果 id 不是主选，
+   *     id 加 / 减出副选集合
+   *   - mode 'range'：把当前主选与 id 之间所有 segments 全部加进副选
+   *     （Shift+Click），id 自身成为新的主选
+   */
+  selectSegmentExtended: (id: string, mode: 'single' | 'toggle' | 'range') => void
+  /** 清空副选中。Esc / 普通点击其他段时调 */
+  clearExtraSelection: () => void
+  /**
+   * 批量删除当前选中（主选 + 副选）的所有 Segment。空选时 no-op。
+   * 进 undo 栈（一条 deleteSegmentsBatch 命令），revert 时整批还原
+   */
+  deleteSelectedSegments: () => void
   setPlayback: (mode: PlaybackMode) => void
   setScriptListScrollTop: (top: number) => void
   setTimelineScroll: (left: number, zoom?: number) => void
@@ -306,6 +331,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   segmentsById: {},
 
   selectedSegmentId: undefined,
+  extraSelectedSegmentIds: new Set<string>(),
   lastPreviewedTakeId: undefined,
   scriptListScrollTop: 0,
   timelineScrollLeft: 0,
@@ -329,6 +355,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       order: bundle.segments.order,
       segmentsById: bundle.segments.segmentsById,
       selectedSegmentId: bundle.workspace.selectedSegmentId,
+      extraSelectedSegmentIds: new Set<string>(),
       lastPreviewedTakeId: bundle.workspace.lastPreviewedTakeId,
       scriptListScrollTop: bundle.workspace.scriptListScrollTop ?? 0,
       timelineScrollLeft: bundle.workspace.timelineScrollLeft ?? 0,
@@ -364,6 +391,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       order: [],
       segmentsById: {},
       selectedSegmentId: undefined,
+      extraSelectedSegmentIds: new Set<string>(),
       lastPreviewedTakeId: undefined,
       scriptListScrollTop: 0,
       timelineScrollLeft: 0,
@@ -436,7 +464,111 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   // -------- workspace --------
 
   selectSegment: (id) => {
-    set({ selectedSegmentId: id })
+    // 普通选中也清空副选——保持「主选变化时副选不孤立」的语义
+    set({ selectedSegmentId: id, extraSelectedSegmentIds: new Set() })
+    pushWorkspace(get())
+  },
+
+  selectSegmentExtended: (id, mode) => {
+    const state = get()
+    if (mode === 'single') {
+      set({ selectedSegmentId: id, extraSelectedSegmentIds: new Set() })
+      pushWorkspace(get())
+      return
+    }
+    if (mode === 'toggle') {
+      // Ctrl/Cmd+Click：在副选中里加 / 减，主选不变。但如果点的就是当前主选，
+      // 则保持主选不动（用户可能在矫正误操作）。如果之前没主选，把 id 设为主选
+      if (!state.selectedSegmentId) {
+        set({ selectedSegmentId: id })
+        pushWorkspace(get())
+        return
+      }
+      if (id === state.selectedSegmentId) return
+      const next = new Set(state.extraSelectedSegmentIds)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      set({ extraSelectedSegmentIds: next })
+      return
+    }
+    // mode === 'range'：从当前主选到 id 的连续区间全部进副选，id 成为新的主选。
+    // 没有主选时退化成 single
+    if (!state.selectedSegmentId) {
+      set({ selectedSegmentId: id, extraSelectedSegmentIds: new Set() })
+      pushWorkspace(get())
+      return
+    }
+    const fromIdx = state.order.indexOf(state.selectedSegmentId)
+    const toIdx = state.order.indexOf(id)
+    if (fromIdx < 0 || toIdx < 0) return
+    const [lo, hi] = fromIdx < toIdx ? [fromIdx, toIdx] : [toIdx, fromIdx]
+    const range = state.order.slice(lo, hi + 1)
+    const next = new Set(range)
+    next.delete(id) // id 是新主选，不进副选集合
+    set({ selectedSegmentId: id, extraSelectedSegmentIds: next })
+    pushWorkspace(get())
+  },
+
+  clearExtraSelection: () => {
+    if (get().extraSelectedSegmentIds.size === 0) return
+    set({ extraSelectedSegmentIds: new Set() })
+  },
+
+  deleteSelectedSegments: () => {
+    const prev = get()
+    // 主选 + 副选合并成完整的待删 ID 集合
+    const targetIds = new Set(prev.extraSelectedSegmentIds)
+    if (prev.selectedSegmentId) targetIds.add(prev.selectedSegmentId)
+    if (targetIds.size === 0) return
+
+    // 收集每个待删 Segment 在原 order 中的下标，排序后塞进命令的 removed
+    const removed: Array<{ index: number; segment: Segment }> = []
+    for (let i = 0; i < prev.order.length; i++) {
+      const id = prev.order[i]
+      if (targetIds.has(id)) {
+        const seg = prev.segmentsById[id]
+        if (seg) removed.push({ index: i, segment: seg })
+      }
+    }
+    if (removed.length === 0) return
+
+    // 计算删除后的主选：取被删除区域的下一个未删段；都没有就向前找
+    const firstRemovedIdx = removed[0].index
+    let nextSelected: string | undefined
+    for (let i = firstRemovedIdx; i < prev.order.length; i++) {
+      if (!targetIds.has(prev.order[i])) {
+        nextSelected = prev.order[i]
+        break
+      }
+    }
+    if (!nextSelected) {
+      for (let i = firstRemovedIdx - 1; i >= 0; i--) {
+        if (!targetIds.has(prev.order[i])) {
+          nextSelected = prev.order[i]
+          break
+        }
+      }
+    }
+
+    useHistoryStore
+      .getState()
+      .push(`deleteSegmentsBatch:${removed.length}`, 'history.delete_segments_batch', {
+        type: 'deleteSegmentsBatch',
+        removed,
+        prevSelectedSegmentId: prev.selectedSegmentId,
+        nextSelectedSegmentId: nextSelected
+      })
+
+    const nextById = { ...prev.segmentsById }
+    for (const { segment } of removed) delete nextById[segment.id]
+    set({
+      order: prev.order.filter((id) => !targetIds.has(id)),
+      segmentsById: nextById,
+      selectedSegmentId: nextSelected,
+      extraSelectedSegmentIds: new Set(),
+      ...markDirty()
+    })
+    scheduleSegmentsSave()
     pushWorkspace(get())
   },
   setPlayback: (mode) => set({ playback: mode }),

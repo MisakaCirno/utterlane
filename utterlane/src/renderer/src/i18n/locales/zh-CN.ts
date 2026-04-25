@@ -78,7 +78,12 @@ export const zhCN = {
     status_multi_take: '多 Take',
     empty_title: '还没有任何 Segment',
     empty_hint: '把文案粘贴进来，每一行会被拆成一个 Segment',
-    empty_action: '导入文案'
+    empty_action: '导入文案',
+    search: '搜索',
+    search_placeholder: '按文案内容过滤…',
+    search_match_count: '{{count}} / {{total}}',
+    batch_selected: '已选 {{count}} 条',
+    batch_delete: '批量删除'
   },
 
   inspector: {
@@ -181,6 +186,7 @@ export const zhCN = {
 
   confirm: {
     delete_segment_title: '删除这条 Segment？',
+    delete_segments_title: '删除选中的 {{count}} 条 Segment？',
     close_recording_title: '正在录音，确定关闭吗？',
     close_recording_description: '当前录音将被丢弃。',
     close_recording_btn: '关闭并丢弃',
@@ -244,7 +250,8 @@ export const zhCN = {
     set_selected_take: '切换当前 Take',
     import_script: '导入文案',
     split_segment: '拆分 Segment',
-    merge_segment: '合并 Segment'
+    merge_segment: '合并 Segment',
+    delete_segments_batch: '批量删除 Segment'
   },
 
   audit_dialog: {

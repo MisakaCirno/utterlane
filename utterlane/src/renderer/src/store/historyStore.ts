@@ -128,6 +128,13 @@ export type Command =
       nextSelectedSegmentId: string | undefined
     }
   | {
+      type: 'deleteSegmentsBatch'
+      /** 按删除前 order 中的位置 sort 好（小→大）的所有被删条目 */
+      removed: Array<{ index: number; segment: Segment }>
+      prevSelectedSegmentId: string | undefined
+      nextSelectedSegmentId: string | undefined
+    }
+  | {
       type: 'mergeSegment'
       /** 接收方 Segment ID（合并后留下的那个，一般是前一段） */
       targetSegmentId: string
@@ -353,6 +360,18 @@ function applyCommand(cmd: Command): void {
         }
       })
       return
+    case 'deleteSegmentsBatch':
+      editor.applyHistoryPatch((s) => {
+        const removedIds = new Set(cmd.removed.map((r) => r.segment.id))
+        const nextById = { ...s.segmentsById }
+        for (const id of removedIds) delete nextById[id]
+        return {
+          order: s.order.filter((id) => !removedIds.has(id)),
+          segmentsById: nextById,
+          selectedSegmentId: cmd.nextSelectedSegmentId
+        }
+      })
+      return
   }
 }
 
@@ -458,6 +477,36 @@ function revertCommand(cmd: Command): void {
             },
             [cmd.mergedSegment.id]: cmd.mergedSegment
           },
+          selectedSegmentId: cmd.prevSelectedSegmentId
+        }
+      })
+      return
+    case 'deleteSegmentsBatch':
+      editor.applyHistoryPatch((s) => {
+        // revert：按 index 升序逐个 splice 回 order，segmentsById 整体并入。
+        // index 是删除前的下标，按升序处理保证插入位置正确（每次插入会让后续
+        // entry 的 index 自然偏移，但 cmd.removed 的 index 是相对 beforeOrder
+        // 的——所以我们需要从 beforeOrder 重建顺序）
+        const orderSet = new Set(s.order)
+        const nextById = { ...s.segmentsById }
+        for (const r of cmd.removed) {
+          nextById[r.segment.id] = r.segment
+          orderSet.add(r.segment.id)
+        }
+        // 重建 order：按「removed 的 index 升序」决定插入位置。从 s.order
+        // 出发，逐条 splice 进对应位置
+        const nextOrder = s.order.slice()
+        const sorted = cmd.removed.slice().sort((a, b) => a.index - b.index)
+        for (const r of sorted) {
+          // 计算实际插入位置：r.index 是删除前的下标，但 nextOrder 此时
+          // 已经包含一些之前 splice 进去的条目，所以直接用 r.index 即可
+          // （前面 splice 的 index 都 ≤ 当前 r.index，且每 splice 一次
+          // 后续 r.index 都自然加 1）
+          nextOrder.splice(Math.min(r.index, nextOrder.length), 0, r.segment.id)
+        }
+        return {
+          order: nextOrder,
+          segmentsById: nextById,
           selectedSegmentId: cmd.prevSelectedSegmentId
         }
       })

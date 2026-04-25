@@ -76,7 +76,12 @@ export const enUS: TranslationSchema = {
     status_multi_take: 'Multi-take',
     empty_title: 'No segments yet',
     empty_hint: 'Paste your script; each line becomes a Segment',
-    empty_action: 'Import Script'
+    empty_action: 'Import Script',
+    search: 'Search',
+    search_placeholder: 'Filter by text…',
+    search_match_count: '{{count}} / {{total}}',
+    batch_selected: '{{count}} selected',
+    batch_delete: 'Delete selected'
   },
 
   inspector: {
@@ -180,6 +185,7 @@ export const enUS: TranslationSchema = {
 
   confirm: {
     delete_segment_title: 'Delete this segment?',
+    delete_segments_title: 'Delete {{count}} selected segments?',
     close_recording_title: 'Recording in progress. Close anyway?',
     close_recording_description: 'The current recording will be discarded.',
     close_recording_btn: 'Discard and close',
@@ -245,7 +251,8 @@ export const enUS: TranslationSchema = {
     set_selected_take: 'Switch Current Take',
     import_script: 'Import Script',
     split_segment: 'Split Segment',
-    merge_segment: 'Merge Segment'
+    merge_segment: 'Merge Segment',
+    delete_segments_batch: 'Batch Delete Segments'
   },
 
   audit_dialog: {

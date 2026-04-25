@@ -18,9 +18,19 @@ import { CSS } from '@dnd-kit/utilities'
 import { useEditorStore } from '@renderer/store/editorStore'
 import { usePreferencesStore } from '@renderer/store/preferencesStore'
 import { useDialogStore } from '@renderer/store/dialogStore'
+import { confirm } from '@renderer/store/confirmStore'
 import { cn } from '@renderer/lib/cn'
 import { formatDuration } from '@renderer/lib/format'
-import { Circle, CircleCheck, FileText, Layers, GripVertical } from 'lucide-react'
+import {
+  Circle,
+  CircleCheck,
+  FileText,
+  Layers,
+  GripVertical,
+  Search,
+  Trash2,
+  X
+} from 'lucide-react'
 
 function StatusCell({ count }: { count: number }): React.JSX.Element {
   const { t } = useTranslation()
@@ -132,7 +142,8 @@ function SegmentRow({
 }): React.JSX.Element | null {
   const seg = useEditorStore((s) => s.segmentsById[id])
   const selected = useEditorStore((s) => s.selectedSegmentId === id)
-  const selectSegment = useEditorStore((s) => s.selectSegment)
+  const extraSelected = useEditorStore((s) => s.extraSelectedSegmentIds.has(id))
+  const selectSegmentExtended = useEditorStore((s) => s.selectSegmentExtended)
 
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id
@@ -167,14 +178,27 @@ function SegmentRow({
     zIndex: isDragging ? 10 : undefined
   }
 
+  const onRowClick = (e: React.MouseEvent): void => {
+    // 修饰键映射：Shift = range；Ctrl/Cmd = toggle；其他 = single。
+    // metaKey 兼容 macOS 用 Cmd
+    if (e.shiftKey) selectSegmentExtended(id, 'range')
+    else if (e.ctrlKey || e.metaKey) selectSegmentExtended(id, 'toggle')
+    else selectSegmentExtended(id, 'single')
+  }
+
   return (
     <div
       ref={combinedRef}
-      onClick={() => selectSegment(id)}
+      onClick={onRowClick}
       style={style}
       className={cn(
         'group grid h-8 cursor-default items-center border-b border-border-subtle text-xs',
-        selected ? 'bg-accent-soft text-white' : 'hover:bg-bg-raised',
+        selected
+          ? 'bg-accent-soft text-white'
+          : extraSelected
+            ? // 副选中：用低饱和的 accent 让多选可见但又区别于主选
+              'bg-accent-soft/40 text-fg'
+            : 'hover:bg-bg-raised',
         isDragging && 'bg-bg-raised shadow-lg ring-1 ring-accent'
       )}
     >
@@ -219,7 +243,35 @@ function SegmentRow({
 export function SegmentsView(): React.JSX.Element {
   const { t } = useTranslation()
   const order = useEditorStore((s) => s.order)
+  const segmentsById = useEditorStore((s) => s.segmentsById)
   const reorderSegments = useEditorStore((s) => s.reorderSegments)
+  const extraSelectedCount = useEditorStore((s) => s.extraSelectedSegmentIds.size)
+  const selectedSegmentId = useEditorStore((s) => s.selectedSegmentId)
+  const deleteSelectedSegments = useEditorStore((s) => s.deleteSelectedSegments)
+  const playback = useEditorStore((s) => s.playback)
+
+  // 搜索仅作为前端过滤：不修改 order，只决定哪些行显示。
+  // 不持久化，刷新即清空——用户预期搜索是「临时聚焦」工具
+  const [search, setSearch] = useState('')
+  const [searchOpen, setSearchOpen] = useState(false)
+
+  const filteredOrder = (() => {
+    if (!search) return order
+    const q = search.toLowerCase()
+    return order.filter((id) => segmentsById[id]?.text.toLowerCase().includes(q))
+  })()
+
+  // 主选中存在时算入「已选总数」；副选不含主选（store 不变量）
+  const totalSelected = (selectedSegmentId ? 1 : 0) + extraSelectedCount
+
+  async function onBatchDelete(): Promise<void> {
+    const ok = await confirm({
+      title: t('confirm.delete_segments_title', { count: totalSelected }),
+      confirmLabel: t('common.delete'),
+      tone: 'danger'
+    })
+    if (ok) deleteSelectedSegments()
+  }
 
   // 初始列宽从 preferences 读，缺项回落默认。
   // 拖拽过程用本地 state 做流畅回显（不走 IPC 每帧往返），松手时再写回 preferences。
@@ -324,8 +376,82 @@ export function SegmentsView(): React.JSX.Element {
     reorderSegments(arrayMove(order, from, to))
   }
 
+  // 搜索栏 + 批量条只在「有内容可显示」或「有选中需要批量操作」时占空间，
+  // 避免新建工程时空状态被占据视觉重心
+  const showToolbar = order.length > 0
+  const showBatchActions = totalSelected > 1 && playback === 'idle'
+
   return (
     <div className="flex h-full flex-col bg-bg">
+      {showToolbar && (
+        <div className="flex h-7 shrink-0 items-center gap-2 border-b border-border bg-bg-panel px-2 text-2xs">
+          {/*
+            搜索折叠按钮：默认收起省空间，点击展开 input。展开后再点空 X 收起。
+            过滤是纯渲染层操作，不动 segments
+          */}
+          {searchOpen ? (
+            <div className="flex flex-1 items-center gap-1">
+              <Search size={11} className="text-fg-dim" />
+              <input
+                autoFocus
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder={t('segments.search_placeholder')}
+                className={cn(
+                  'h-5 flex-1 rounded-sm border border-border bg-bg-deep px-1.5 text-2xs text-fg',
+                  'outline-none focus:border-accent'
+                )}
+              />
+              <button
+                onClick={() => {
+                  setSearch('')
+                  setSearchOpen(false)
+                }}
+                className="rounded-sm p-0.5 text-fg-muted hover:bg-chrome-hover hover:text-fg"
+                aria-label={t('common.close')}
+              >
+                <X size={10} />
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setSearchOpen(true)}
+              className="flex items-center gap-1 rounded-sm px-1.5 py-0.5 text-fg-muted hover:bg-chrome-hover hover:text-fg"
+            >
+              <Search size={11} />
+              <span>{t('segments.search')}</span>
+            </button>
+          )}
+
+          <div className="ml-auto flex items-center gap-2">
+            {showBatchActions && (
+              <>
+                <span className="text-fg-muted">
+                  {t('segments.batch_selected', { count: totalSelected })}
+                </span>
+                <button
+                  onClick={() => void onBatchDelete()}
+                  className={cn(
+                    'flex items-center gap-1 rounded-sm border border-border bg-bg-raised px-2 py-0.5',
+                    'text-fg hover:border-rec hover:text-rec'
+                  )}
+                >
+                  <Trash2 size={10} />
+                  {t('segments.batch_delete')}
+                </button>
+              </>
+            )}
+            {search && (
+              <span className="text-fg-dim">
+                {t('segments.search_match_count', {
+                  count: filteredOrder.length,
+                  total: order.length
+                })}
+              </span>
+            )}
+          </div>
+        </div>
+      )}
       <div
         className="grid h-7 shrink-0 items-center border-b border-border bg-bg-panel text-2xs text-fg-muted"
         style={gridStyle}
@@ -352,10 +478,16 @@ export function SegmentsView(): React.JSX.Element {
 
       <div className="flex-1 overflow-y-auto">
         {order.length === 0 ? <EmptySegmentsHint /> : null}
+        {/*
+          搜索时禁用拖拽：filteredOrder 不包含被过滤掉的项，dnd-kit 的
+          SortableContext items 必须和实际渲染的 children 一致才行；
+          要支持过滤态拖拽得手动把过滤项的位置在 onDragEnd 里翻译回 order，
+          复杂度跳跃太大。先简化：搜索打开就只用作浏览，不拖
+        */}
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-          <SortableContext items={order} strategy={verticalListSortingStrategy}>
-            {order.map((id, idx) => (
-              <SegmentRow key={id} id={id} idx={idx} gridStyle={gridStyle} />
+          <SortableContext items={filteredOrder} strategy={verticalListSortingStrategy}>
+            {filteredOrder.map((id) => (
+              <SegmentRow key={id} id={id} idx={order.indexOf(id)} gridStyle={gridStyle} />
             ))}
           </SortableContext>
         </DndContext>

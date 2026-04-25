@@ -61,7 +61,9 @@ export function installKeyboardShortcuts(): () => void {
       return
     }
 
-    // Esc：倒计时中 → 取消倒计时；录音中 → 取消录音；播放中 → 停止；idle 时无操作
+    // Esc 优先级：倒计时 > 录音 > 播放 > 多选副选 > （idle 时无操作）。
+    // 多选副选清空放最后是因为它是「无副作用的视觉收敛」，应该让位给
+    // 录音播放这种「真要中止某个会话」的更高优先级动作
     if (e.key === 'Escape') {
       if (state.playback === 'countdown') {
         e.preventDefault()
@@ -72,6 +74,9 @@ export function installKeyboardShortcuts(): () => void {
       } else if (state.playback === 'segment' || state.playback === 'project') {
         e.preventDefault()
         state.stopPlayback()
+      } else if (state.extraSelectedSegmentIds.size > 0) {
+        e.preventDefault()
+        state.clearExtraSelection()
       }
       return
     }
