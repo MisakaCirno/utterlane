@@ -1,5 +1,6 @@
 import { useEditorStore } from '@renderer/store/editorStore'
 import { useDialogStore } from '@renderer/store/dialogStore'
+import { useHistoryStore } from '@renderer/store/historyStore'
 import { newProject, openProject } from '@renderer/actions/project'
 
 /**
@@ -41,6 +42,24 @@ export function installKeyboardShortcuts(): () => void {
     }
 
     if (!hasProject) return
+
+    // Ctrl/Cmd+Z: undo；Ctrl/Cmd+Shift+Z 或 Ctrl/Cmd+Y: redo。
+    // historyStore 的 undo / redo 内部会检查 playback === 'idle'，
+    // 录音 / 播放中按下会被 no-op 掉，但 preventDefault 仍然生效，
+    // 免得浏览器原生回退（例如某些控件的 Ctrl+Z）干扰用户。
+    // 焦点在 input / textarea 时上面的 isEditableTarget 已经直接 return，
+    // 所以文本框里的 Ctrl+Z 仍然走原生编辑历史
+    if (mod && e.key.toLowerCase() === 'z' && !e.altKey) {
+      e.preventDefault()
+      if (e.shiftKey) useHistoryStore.getState().redo()
+      else useHistoryStore.getState().undo()
+      return
+    }
+    if (mod && e.key.toLowerCase() === 'y' && !e.altKey && !e.shiftKey) {
+      e.preventDefault()
+      useHistoryStore.getState().redo()
+      return
+    }
 
     // Esc：录音中 → 取消；播放中 → 停止；idle 时无操作
     if (e.key === 'Escape') {

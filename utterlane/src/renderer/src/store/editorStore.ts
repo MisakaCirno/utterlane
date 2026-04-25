@@ -9,6 +9,7 @@ import type { PlaybackMode, Project, Segment } from '@renderer/types/project'
 import * as recorder from '@renderer/services/recorder'
 import * as player from '@renderer/services/player'
 import { showError } from '@renderer/store/toastStore'
+import { useHistoryStore } from '@renderer/store/historyStore'
 import i18n from '@renderer/i18n'
 
 /**
@@ -62,6 +63,15 @@ type EditorState = {
   // 生命周期
   applyBundle: (bundle: ProjectBundle) => void
   clear: () => void
+
+  /**
+   * 给 historyStore 用的专用通路：以 patch 函数形式替换若干字段，
+   * 统一处理 saved 标记、segments 落盘调度与 workspace 推送。
+   *
+   * patch 返回 null 表示放弃本次 undo / redo（比如命令引用的 Segment 已经不存在）。
+   * 不想让 historyStore 各分支各自 new 一份 IPC 调用，所以集中在这里转发。
+   */
+  applyHistoryPatch: (patch: (s: EditorState) => Partial<EditorState> | null) => void
 
   // 工作区（UI 上下文）
   selectSegment: (id: string | undefined) => void
@@ -195,7 +205,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   recordingSegmentId: null,
   recordingTakeId: null,
 
-  applyBundle: (bundle) =>
+  applyBundle: (bundle) => {
+    // 切换工程必须清空 undo / redo 栈，否则新工程头一次按 Ctrl+Z 会把上个工程
+    // 遗留的 deleteSegment 命令应用到当前 segmentsById 上，产生幽灵段
+    useHistoryStore.getState().clear()
     set({
       projectPath: bundle.path,
       project: bundle.project,
@@ -211,7 +224,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       saved: true,
       recordingSegmentId: null,
       recordingTakeId: null
-    }),
+    })
+  },
 
   clear: () => {
     // 切换工程时若 segments 还有 pending 保存，直接丢弃定时器——
@@ -220,6 +234,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       clearTimeout(segmentsSaveTimer)
       segmentsSaveTimer = null
     }
+    useHistoryStore.getState().clear()
     set({
       projectPath: null,
       project: null,
@@ -236,6 +251,21 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       recordingSegmentId: null,
       recordingTakeId: null
     })
+  },
+
+  applyHistoryPatch: (patch) => {
+    let dirty = false
+    set((state) => {
+      const delta = patch(state)
+      if (!delta) return state
+      dirty = true
+      return { ...delta, ...markDirty() }
+    })
+    if (dirty) {
+      scheduleSegmentsSave()
+      // selectedSegmentId 可能被 revert 改动，同步一份 workspace 到 main
+      pushWorkspace(get())
+    }
   },
 
   // -------- workspace --------
@@ -257,29 +287,53 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   // -------- segments --------
 
   importScript: (rawText) => {
+    const prev = get()
     const segments = splitScriptIntoSegments(rawText)
     const segmentsById: Record<string, Segment> = {}
     for (const s of segments) segmentsById[s.id] = s
+    const afterOrder = segments.map((s) => s.id)
+    const afterSelected = segments[0]?.id
+
+    // importScript 是覆盖式操作，before / after 都要完整记录；
+    // 未来改成追加式时只需换这一处的 before / after 构造方式，命令类型不用动
+    useHistoryStore.getState().push('importScript', 'history.import_script', {
+      type: 'importScript',
+      beforeOrder: prev.order.slice(),
+      beforeSegmentsById: { ...prev.segmentsById },
+      beforeSelectedSegmentId: prev.selectedSegmentId,
+      afterOrder: afterOrder.slice(),
+      afterSegmentsById: { ...segmentsById },
+      afterSelectedSegmentId: afterSelected
+    })
+
     set({
-      order: segments.map((s) => s.id),
+      order: afterOrder,
       segmentsById,
-      selectedSegmentId: segments[0]?.id,
+      selectedSegmentId: afterSelected,
       ...markDirty()
     })
     scheduleSegmentsSave()
   },
 
   editSegmentText: (id, text) => {
-    set((state) => {
-      const seg = state.segmentsById[id]
-      if (!seg || seg.text === text) return state
-      return {
-        segmentsById: {
-          ...state.segmentsById,
-          [id]: { ...seg, text }
-        },
-        ...markDirty()
-      }
+    const prev = get()
+    const seg = prev.segmentsById[id]
+    if (!seg || seg.text === text) return
+
+    // 同一 Segment 连续打字在 coalesce 窗内合并为一条，避免每个按键一格 undo
+    useHistoryStore.getState().push(`editText:${id}`, 'history.edit_text', {
+      type: 'editText',
+      segId: id,
+      before: seg.text,
+      after: text
+    })
+
+    set({
+      segmentsById: {
+        ...prev.segmentsById,
+        [id]: { ...seg, text }
+      },
+      ...markDirty()
     })
     scheduleSegmentsSave()
   },
@@ -290,55 +344,80 @@ export const useEditorStore = create<EditorState>((set, get) => ({
    * 我们只做长度和成员校验，防御 UI bug 把 order 污染掉。
    */
   reorderSegments: (nextOrder) => {
-    set((state) => {
-      if (nextOrder.length !== state.order.length) return state
-      // 成员必须和旧 order 完全一致，仅顺序不同
-      const currentSet = new Set(state.order)
-      for (const id of nextOrder) {
-        if (!currentSet.has(id)) return state
-      }
-      // 顺序未变则不写盘
-      const same = nextOrder.every((id, i) => id === state.order[i])
-      if (same) return state
-      return { order: nextOrder, ...markDirty() }
+    const prev = get()
+    if (nextOrder.length !== prev.order.length) return
+    // 成员必须和旧 order 完全一致，仅顺序不同
+    const currentSet = new Set(prev.order)
+    for (const id of nextOrder) {
+      if (!currentSet.has(id)) return
+    }
+    // 顺序未变则不写盘，也不入栈
+    const same = nextOrder.every((id, i) => id === prev.order[i])
+    if (same) return
+
+    useHistoryStore.getState().push('reorder', 'history.reorder', {
+      type: 'reorder',
+      before: prev.order.slice(),
+      after: nextOrder.slice()
     })
+
+    set({ order: nextOrder.slice(), ...markDirty() })
     scheduleSegmentsSave()
   },
 
   deleteSegment: (id) => {
-    set((state) => {
-      if (!state.segmentsById[id]) return state
-      const nextOrder = state.order.filter((oid) => oid !== id)
-      const nextById = { ...state.segmentsById }
-      delete nextById[id]
-      // 选中态跟随：若删除的是当前选中段，自动选相邻段（优先后一个，没有就前一个，都没有就清空）
-      let nextSelected = state.selectedSegmentId
-      if (nextSelected === id) {
-        const removedIdx = state.order.indexOf(id)
-        nextSelected = nextOrder[removedIdx] ?? nextOrder[removedIdx - 1]
-      }
-      return {
-        order: nextOrder,
-        segmentsById: nextById,
-        selectedSegmentId: nextSelected,
-        ...markDirty()
-      }
+    const prev = get()
+    const seg = prev.segmentsById[id]
+    if (!seg) return
+    const removedIdx = prev.order.indexOf(id)
+    const nextOrder = prev.order.filter((oid) => oid !== id)
+    const nextById = { ...prev.segmentsById }
+    delete nextById[id]
+    // 选中态跟随：若删除的是当前选中段，自动选相邻段（优先后一个，没有就前一个，都没有就清空）
+    let nextSelected = prev.selectedSegmentId
+    if (nextSelected === id) {
+      nextSelected = nextOrder[removedIdx] ?? nextOrder[removedIdx - 1]
+    }
+
+    // 保存完整 Segment（含所有 Takes），这样 undo 能原样还原；
+    // 即便之后 takes 被别的操作动过，这个 cmd 依然还原删除那一刻的状态
+    useHistoryStore.getState().push(`deleteSegment:${id}`, 'history.delete_segment', {
+      type: 'deleteSegment',
+      id,
+      index: removedIdx,
+      segment: seg,
+      prevSelectedSegmentId: prev.selectedSegmentId,
+      nextSelectedSegmentId: nextSelected
+    })
+
+    set({
+      order: nextOrder,
+      segmentsById: nextById,
+      selectedSegmentId: nextSelected,
+      ...markDirty()
     })
     scheduleSegmentsSave()
     pushWorkspace(get())
   },
 
   setSelectedTake: (segmentId, takeId) => {
-    set((state) => {
-      const seg = state.segmentsById[segmentId]
-      if (!seg || seg.selectedTakeId === takeId) return state
-      return {
-        segmentsById: {
-          ...state.segmentsById,
-          [segmentId]: { ...seg, selectedTakeId: takeId }
-        },
-        ...markDirty()
-      }
+    const prev = get()
+    const seg = prev.segmentsById[segmentId]
+    if (!seg || seg.selectedTakeId === takeId) return
+
+    useHistoryStore.getState().push(`setSelectedTake:${segmentId}`, 'history.set_selected_take', {
+      type: 'setSelectedTake',
+      segId: segmentId,
+      before: seg.selectedTakeId,
+      after: takeId
+    })
+
+    set({
+      segmentsById: {
+        ...prev.segmentsById,
+        [segmentId]: { ...seg, selectedTakeId: takeId }
+      },
+      ...markDirty()
     })
     scheduleSegmentsSave()
   },
@@ -350,29 +429,42 @@ export const useEditorStore = create<EditorState>((set, get) => ({
    *     无剩余时置空
    */
   deleteTake: (segmentId, takeId) => {
-    set((state) => {
-      const seg = state.segmentsById[segmentId]
-      if (!seg) return state
-      const removedIdx = seg.takes.findIndex((t) => t.id === takeId)
-      if (removedIdx < 0) return state
+    const prev = get()
+    const seg = prev.segmentsById[segmentId]
+    if (!seg) return
+    const removedIdx = seg.takes.findIndex((t) => t.id === takeId)
+    if (removedIdx < 0) return
+    const removedTake = seg.takes[removedIdx]
 
-      const nextTakes = seg.takes.filter((t) => t.id !== takeId)
-      let nextSelectedTakeId = seg.selectedTakeId
-      if (nextSelectedTakeId === takeId) {
-        const neighbor = nextTakes[removedIdx] ?? nextTakes[removedIdx - 1]
-        nextSelectedTakeId = neighbor?.id
-      }
-      return {
-        segmentsById: {
-          ...state.segmentsById,
-          [segmentId]: {
-            ...seg,
-            takes: nextTakes,
-            selectedTakeId: nextSelectedTakeId
-          }
-        },
-        ...markDirty()
-      }
+    const nextTakes = seg.takes.filter((t) => t.id !== takeId)
+    let nextSelectedTakeId = seg.selectedTakeId
+    if (nextSelectedTakeId === takeId) {
+      const neighbor = nextTakes[removedIdx] ?? nextTakes[removedIdx - 1]
+      nextSelectedTakeId = neighbor?.id
+    }
+
+    // deleteTake 只改 segments.json，不删 WAV 文件（孤儿由专用清理工具处理）。
+    // 这个设计让 undo 变得简单：revert 时 Take 引用恢复，磁盘文件原本就还在，
+    // 不需要做任何 IO
+    useHistoryStore.getState().push(`deleteTake:${segmentId}:${takeId}`, 'history.delete_take', {
+      type: 'deleteTake',
+      segId: segmentId,
+      takeIndex: removedIdx,
+      take: removedTake,
+      prevSelectedTakeId: seg.selectedTakeId,
+      nextSelectedTakeId
+    })
+
+    set({
+      segmentsById: {
+        ...prev.segmentsById,
+        [segmentId]: {
+          ...seg,
+          takes: nextTakes,
+          selectedTakeId: nextSelectedTakeId
+        }
+      },
+      ...markDirty()
     })
     scheduleSegmentsSave()
   },

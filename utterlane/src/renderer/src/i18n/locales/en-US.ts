@@ -32,6 +32,8 @@ export const enUS: TranslationSchema = {
     edit: 'Edit',
     edit_undo: 'Undo',
     edit_redo: 'Redo',
+    edit_undo_labeled: 'Undo: {{label}}',
+    edit_redo_labeled: 'Redo: {{label}}',
     edit_delete: 'Delete',
     view: 'View',
     view_reset_layout: 'Reset Layout',
@@ -224,6 +226,15 @@ export const enUS: TranslationSchema = {
 
   level_meter: {
     title: 'Level'
+  },
+
+  history: {
+    edit_text: 'Edit Text',
+    reorder: 'Reorder Segments',
+    delete_segment: 'Delete Segment',
+    delete_take: 'Delete Take',
+    set_selected_take: 'Switch Current Take',
+    import_script: 'Import Script'
   },
 
   tab_menu: {

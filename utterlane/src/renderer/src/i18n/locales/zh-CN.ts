@@ -34,6 +34,8 @@ export const zhCN = {
     edit: 'Edit',
     edit_undo: '撤销',
     edit_redo: '重做',
+    edit_undo_labeled: '撤销：{{label}}',
+    edit_redo_labeled: '重做：{{label}}',
     edit_delete: '删除',
     view: 'View',
     view_reset_layout: '重置布局',
@@ -223,6 +225,15 @@ export const zhCN = {
 
   level_meter: {
     title: '电平'
+  },
+
+  history: {
+    edit_text: '编辑文案',
+    reorder: '调整 Segment 顺序',
+    delete_segment: '删除 Segment',
+    delete_take: '删除 Take',
+    set_selected_take: '切换当前 Take',
+    import_script: '导入文案'
   },
 
   tab_menu: {

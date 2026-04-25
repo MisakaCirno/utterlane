@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
 import { cn } from '@renderer/lib/cn'
 import { useEditorStore } from '@renderer/store/editorStore'
+import { useHistoryStore } from '@renderer/store/historyStore'
 import { closeCurrentProject, newProject, openProject } from '@renderer/actions/project'
 import { exportAudioWav, exportSubtitlesSrt } from '@renderer/actions/export'
 import { useDialogStore } from '@renderer/store/dialogStore'
@@ -23,13 +24,32 @@ type MenuItem =
 
 type MenuDef = { label: string; items: MenuItem[] }
 
+type HistoryMenuCtx = {
+  canUndo: boolean
+  canRedo: boolean
+  /** 栈顶命令的 i18n key；null 表示栈空或播放中禁用 */
+  undoLabelKey: string | null
+  redoLabelKey: string | null
+}
+
 function buildMenus(
   t: TFunction,
   hasProject: boolean,
   openImportScript: () => void,
   openPreferences: () => void,
-  openAbout: () => void
+  openAbout: () => void,
+  history: HistoryMenuCtx
 ): MenuDef[] {
+  // undo / redo 动态标签：可用时显示「撤销：编辑文案」让用户知道会撤销什么；
+  // 不可用时退回纯标签（也不显示 label 后缀，避免视觉上像可点击）
+  const undoLabel =
+    history.canUndo && history.undoLabelKey
+      ? t('menu.edit_undo_labeled', { label: t(history.undoLabelKey) })
+      : t('menu.edit_undo')
+  const redoLabel =
+    history.canRedo && history.redoLabelKey
+      ? t('menu.edit_redo_labeled', { label: t(history.redoLabelKey) })
+      : t('menu.edit_redo')
   return [
     {
       label: t('menu.file'),
@@ -81,8 +101,20 @@ function buildMenus(
     {
       label: t('menu.edit'),
       items: [
-        { kind: 'item', label: t('menu.edit_undo'), shortcut: 'Ctrl+Z', disabled: true },
-        { kind: 'item', label: t('menu.edit_redo'), shortcut: 'Ctrl+Y', disabled: true },
+        {
+          kind: 'item',
+          label: undoLabel,
+          shortcut: 'Ctrl+Z',
+          disabled: !history.canUndo,
+          onSelect: () => useHistoryStore.getState().undo()
+        },
+        {
+          kind: 'item',
+          label: redoLabel,
+          shortcut: 'Ctrl+Y',
+          disabled: !history.canRedo,
+          onSelect: () => useHistoryStore.getState().redo()
+        },
         { kind: 'separator' },
         { kind: 'item', label: t('menu.edit_delete'), shortcut: 'Delete' },
         { kind: 'separator' },
@@ -243,18 +275,45 @@ export function Titlebar(): React.JSX.Element {
   const { t, i18n } = useTranslation()
   const project = useEditorStore((s) => s.project)
   const saved = useEditorStore((s) => s.saved)
+  const playback = useEditorStore((s) => s.playback)
   const openImportScript = useDialogStore((s) => s.openImportScript)
   const openPreferences = useDialogStore((s) => s.openPreferences)
   const openAbout = useDialogStore((s) => s.openAbout)
+
+  // 订阅历史栈长度与栈顶 labelKey：两者变化时菜单应重新计算。
+  // 只取我们需要的标量 / 字符串，避免订阅整条 entry 对象引发不必要的重渲染
+  const pastLen = useHistoryStore((s) => s.past.length)
+  const futureLen = useHistoryStore((s) => s.future.length)
+  const undoLabelKey = useHistoryStore((s) => s.past[s.past.length - 1]?.labelKey ?? null)
+  const redoLabelKey = useHistoryStore((s) => s.future[s.future.length - 1]?.labelKey ?? null)
+
   const [maximized, setMaximized] = useState(false)
 
   const hasProject = project !== null
+  // 录音 / 播放期间禁用 undo / redo，和 historyStore 内部的守卫一致
+  const historyCtx: HistoryMenuCtx = {
+    canUndo: hasProject && playback === 'idle' && pastLen > 0,
+    canRedo: hasProject && playback === 'idle' && futureLen > 0,
+    undoLabelKey,
+    redoLabelKey
+  }
 
   // 依赖 i18n.language 而不是 t：t 引用在语言切换时也会变，但 language 更明确
   const menus = useMemo(
-    () => buildMenus(t, hasProject, openImportScript, openPreferences, openAbout),
+    () => buildMenus(t, hasProject, openImportScript, openPreferences, openAbout, historyCtx),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [t, i18n.language, hasProject, openImportScript, openPreferences, openAbout]
+    [
+      t,
+      i18n.language,
+      hasProject,
+      openImportScript,
+      openPreferences,
+      openAbout,
+      historyCtx.canUndo,
+      historyCtx.canRedo,
+      historyCtx.undoLabelKey,
+      historyCtx.redoLabelKey
+    ]
   )
 
   useEffect(() => {
