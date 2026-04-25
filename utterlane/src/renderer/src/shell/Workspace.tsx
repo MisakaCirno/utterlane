@@ -18,24 +18,34 @@ import { devWarn } from '@renderer/lib/devLog'
 
 /**
  * 所有 panel 内容的统一外壳：强制尺寸严格等于 dockview panel content
- * container，不被内部「max-content 宽度」的子项撑出。
+ * container，不被内部「max-content 宽度」的子项反向撑出。
  *
- * 背景：dockview 的 panel content container 通常用 absolute 定位 + 显式
- * 尺寸控制 panel 可见区。在 absolute 父级里，普通 block / flex 元素的
- * `width: auto` 行为是 **shrink-to-fit = max-content**，而不是 stretch
- * 占满父级。如果面板内部有 `min-w-max` 之类的 max-content 子项（比如
- * ProjectTimeline 的 toolbar、SegmentsView 的 grid 列宽），整个 view
- * root 会被撑成超过 panel 可见宽度，导致：
- *   - 超出部分被 dockview 裁掉，按钮 / 内容看不见
- *   - 内层 scroll 容器拿到的 clientWidth 是过宽尺寸，scrollbar 长度
- *     大于 panel 可见宽度
+ * 关键 CSS：
+ *   - `contain: strict` = size + layout + style + paint containment。
+ *     **size containment 让 element 的 size 完全由 width/height 决定，
+ *     不被内容影响**。children 用 min-w-max / 固定 width 撑出多大都
+ *     不会反向传播到 PanelShell 自己——这是问题的真正根治。
+ *   - h-full + w-full 给 size containment 提供显式尺寸（contain:strict
+ *     要求两个轴都显式，否则 layout 异常）。
+ *   - overflow-hidden 兜底，防 children 视觉上溢出（虽然 size containment
+ *     已保证 PanelShell 不被撑大）。
  *
- * w-full + h-full 强制 stretch；overflow-hidden 兜底防 view 自身溢出；
- * min-w-0 让 view root 在 PanelShell 的 flex 上下文里能收缩。view 自己
- * 不需要再操心这层约束
+ * 背景：之前的版本仅靠 w-full + flex 行为约束子项尺寸。但在 dockview 的
+ * 垂直 tab 模式下（tab 切到面板左/右），panel content container 的 layout
+ * 与默认顶部 tab 不同，「width:100%」的传播链被打破——内部 view（如
+ * ProjectTimeline 的 toolbar 用了 min-w-max）的 max-content 反向撑大整
+ * 个层级。contain: strict 强制截断这条反向传播
  */
 function PanelShell({ children }: { children: React.ReactNode }): React.JSX.Element {
-  return <div className="flex h-full w-full min-w-0 flex-col overflow-hidden">{children}</div>
+  return (
+    <div
+      className="h-full w-full overflow-hidden"
+      // contain: strict 不在 Tailwind 默认配置里，用 inline style
+      style={{ contain: 'strict' }}
+    >
+      <div className="flex h-full w-full flex-col">{children}</div>
+    </div>
+  )
 }
 
 const components: Record<string, React.FunctionComponent<IDockviewPanelProps>> = {
