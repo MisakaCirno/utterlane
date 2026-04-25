@@ -1496,6 +1496,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
    * 播放当前选中 Segment 的当前 Take。
    * 要求：idle + 有 selectedTakeId。
    * 播完 / 被中断后 playback 回 idle（不留 ghost 状态）。
+   *
+   * 缺失文件守卫：missingTakeIds 由 audit 扫描填充，命中时直接弹错——
+   * 否则 player 会调 readTakeFile，main 抛 ENOENT，最终 audio 元素吐
+   * 一个不显眼的 console.error，用户看不到反馈
    */
   playCurrentSegment: async () => {
     const state = get()
@@ -1504,6 +1508,13 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const seg = state.segmentsById[state.selectedSegmentId]
     const take = seg?.takes.find((t) => t.id === seg.selectedTakeId)
     if (!take) return
+    if (state.missingTakeIds.has(take.id)) {
+      showError(
+        i18n.t('errors.play_missing_take_title'),
+        i18n.t('errors.play_missing_take_description')
+      )
+      return
+    }
 
     set({ playback: 'segment', paused: false })
     try {
@@ -1525,11 +1536,15 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   playProject: async () => {
     const state = get()
     if (state.playback !== 'idle') return
+    // 跳过缺失文件的 take：和导出的「跳过未录段」语义一致——连读不应被
+    // 一个丢失文件中断，整体仍能播完
     const items: Array<{ segmentId: string; filePath: string }> = []
     for (const id of state.order) {
       const seg = state.segmentsById[id]
       const take = seg?.takes.find((t) => t.id === seg.selectedTakeId)
-      if (take) items.push({ segmentId: id, filePath: take.filePath })
+      if (take && !state.missingTakeIds.has(take.id)) {
+        items.push({ segmentId: id, filePath: take.filePath })
+      }
     }
     if (items.length === 0) return
 
