@@ -41,6 +41,9 @@ const positionListeners = new Set<PositionListener>()
 
 async function loadBlobUrl(relativePath: string): Promise<string> {
   const buffer = await window.api.project.readTakeFile(relativePath)
+  // 诊断：buffer 长度是否符合预期。3 秒 48kHz mono 16-bit ≈ 288KB；
+  // 如果显示几百字节甚至 0，说明 IPC / 文件读取有问题
+  console.log(`[player] readTakeFile ${relativePath} → ${buffer.byteLength} bytes`)
   const blob = new Blob([buffer], { type: 'audio/wav' })
   return URL.createObjectURL(blob)
 }
@@ -135,6 +138,7 @@ export function stop(): void {
  * 不区分「是否被打断」——调用方通过 stop() 之后的状态自己感知。
  */
 export async function playFile(relativePath: string): Promise<void> {
+  console.log(`[player] playFile START ${relativePath}`)
   stop()
   sequenceAborted = false
 
@@ -142,6 +146,7 @@ export async function playFile(relativePath: string): Promise<void> {
   // 窄口竞态守卫：用户在 IPC 读文件期间又点了 stop，这里直接丢弃本次播放
   if (sequenceAborted) {
     URL.revokeObjectURL(url)
+    console.log(`[player] aborted before play() ${relativePath}`)
     return
   }
   const audio = new Audio(url)
@@ -152,14 +157,23 @@ export async function playFile(relativePath: string): Promise<void> {
   // 创建于首次 play 之前（不然会警告 CORS / already-connected 之类）
   startAnalysis(audio, relativePath)
 
+  // 诊断：duration 何时拿到、是不是 NaN / 0。正常情况下 play() 之前不一定
+  // 有 duration（metadata 可能还没加载），但 loadedmetadata 触发后必有
+  audio.addEventListener('loadedmetadata', () => {
+    console.log(`[player] loadedmetadata ${relativePath} duration=${audio.duration}s`)
+  })
+
   return new Promise<void>((resolve) => {
-    const done = (): void => {
+    const done = (reason: string): void => {
+      console.log(
+        `[player] done(${reason}) ${relativePath} currentTime=${audio.currentTime}s duration=${audio.duration}s`
+      )
       // 只有当前这个 audio 还是活跃会话时才清理——
       // 避免「新的 playFile 已经启动但旧 audio 的 ended 晚到」引发的误清理
       if (currentAudio === audio) teardown()
       resolve()
     }
-    audio.addEventListener('ended', done, { once: true })
+    audio.addEventListener('ended', () => done('ended'), { once: true })
     // 错误日志：方便用户报告播放失败时定位是哪种原因。MEDIA_ERR_DECODE
     // 常见于源损坏；MEDIA_ERR_SRC_NOT_SUPPORTED 是格式不被 Chromium 接受
     audio.addEventListener(
@@ -169,14 +183,17 @@ export async function playFile(relativePath: string): Promise<void> {
         console.error(
           `[player] audio element error for ${relativePath}: code=${err?.code} message=${err?.message ?? '(none)'}`
         )
-        done()
+        done('error-event')
       },
       { once: true }
     )
-    void audio.play().catch((err) => {
-      console.error(`[player] play() rejected for ${relativePath}:`, err)
-      done()
-    })
+    void audio
+      .play()
+      .then(() => console.log(`[player] play() resolved ${relativePath}`))
+      .catch((err) => {
+        console.error(`[player] play() rejected for ${relativePath}:`, err)
+        done('play-reject')
+      })
   })
 }
 
