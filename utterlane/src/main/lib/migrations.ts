@@ -62,9 +62,7 @@ export function runMigrations(
     if (m.to !== m.from + 1) {
       // 迁移必须 to === from + 1。跳跃式声明（比如 from:1, to:3）会导致
       // v2 永远跑不到、字段差异被默默吞掉。在跑前显式拒绝
-      throw new Error(
-        `Migration v${m.from} → v${m.to} is not adjacent. Migrations must step by 1.`
-      )
+      throw new Error(`Migration v${m.from} → v${m.to} is not adjacent. Migrations must step by 1.`)
     }
     current = m.migrate(current)
     currentVersion = m.to

@@ -6,7 +6,4 @@
  * 这个路径。一次性改全所有 import 风险大、diff 噪声大；保留这一行 re-export
  * 让旧路径继续工作，新代码可以直接从 './editor' import。
  */
-export {
-  useEditorStore,
-  sanitizeSegmentText
-} from './editor'
+export { useEditorStore, sanitizeSegmentText } from './editor'

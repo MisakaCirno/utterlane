@@ -109,8 +109,7 @@ const api = {
     getCurrent: (): Promise<string | null> => ipcRenderer.invoke(PROJECT_IPC.current),
 
     /** 上报整份 workspace 状态给 main 做 debounce 保存 */
-    saveWorkspace: (next: WorkspaceFile): void =>
-      ipcRenderer.send(PROJECT_IPC.saveWorkspace, next),
+    saveWorkspace: (next: WorkspaceFile): void => ipcRenderer.send(PROJECT_IPC.saveWorkspace, next),
 
     /**
      * 立即保存 segments.json。等 main 写盘成功 / 失败后才返回，
@@ -138,11 +137,7 @@ const api = {
      * 走 temp/<takeId>.wav → rename 到 audios/<segmentId>/<takeId>.wav，
      * 返回相对路径方便直接塞进 Take.filePath。
      */
-    writeTake: (
-      segmentId: string,
-      takeId: string,
-      buffer: ArrayBuffer
-    ): Promise<WriteTakeResult> =>
+    writeTake: (segmentId: string, takeId: string, buffer: ArrayBuffer): Promise<WriteTakeResult> =>
       ipcRenderer.invoke(RECORDING_IPC.writeTake, { segmentId, takeId, buffer })
   },
 

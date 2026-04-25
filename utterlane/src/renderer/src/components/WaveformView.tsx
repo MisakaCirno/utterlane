@@ -185,10 +185,7 @@ export function WaveformView({ filePath }: { filePath: string | null }): React.J
       {filePath && !errorMessage && (
         <>
           <canvas ref={waveCanvasRef} className="absolute inset-0" />
-          <canvas
-            ref={playheadCanvasRef}
-            className="pointer-events-none absolute inset-0"
-          />
+          <canvas ref={playheadCanvasRef} className="pointer-events-none absolute inset-0" />
         </>
       )}
     </div>

@@ -2,18 +2,8 @@ import type { Project } from '@renderer/types/project'
 import { showError } from '@renderer/store/toastStore'
 import { useHistoryStore } from '@renderer/store/historyStore'
 import i18n from '@renderer/i18n'
-import {
-  INITIAL_DATA,
-  type EditorActions,
-  type EditorState,
-  type SliceCreator
-} from './types'
-import {
-  cancelPendingSegmentsSave,
-  markDirty,
-  pushWorkspace,
-  scheduleSegmentsSave
-} from './save'
+import { INITIAL_DATA, type EditorActions, type EditorState, type SliceCreator } from './types'
+import { cancelPendingSegmentsSave, markDirty, pushWorkspace, scheduleSegmentsSave } from './save'
 
 /**
  * 生命周期 + 工程元 + 审计回调 slice。

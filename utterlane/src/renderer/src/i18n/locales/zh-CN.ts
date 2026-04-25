@@ -257,7 +257,8 @@ export const zhCN = {
       '录音音频写入工程目录失败：{{message}}\n\n常见原因：磁盘空间不足、工程目录不可写、被杀毒软件 / OneDrive 等同步工具锁定。请检查工程目录权限后重试。',
     recording_device_missing: '录音设备已不可用，请在偏好设置里重新选择输入设备',
     play_missing_take_title: '无法播放',
-    play_missing_take_description: '当前 Take 的音频文件已丢失，请打开「音频文件审计」修复或选择其他 Take。'
+    play_missing_take_description:
+      '当前 Take 的音频文件已丢失，请打开「音频文件审计」修复或选择其他 Take。'
   },
 
   export: {

@@ -258,7 +258,8 @@ export const enUS: TranslationSchema = {
     recording_persist_title: 'Failed to save recording',
     recording_persist_description:
       'Could not write the recorded audio to the project: {{message}}\n\nCommon causes: disk full, project folder not writable, locked by antivirus / OneDrive sync. Check folder permissions and retry.',
-    recording_device_missing: 'Recording device unavailable. Pick a different input in Preferences.',
+    recording_device_missing:
+      'Recording device unavailable. Pick a different input in Preferences.',
     play_missing_take_title: 'Cannot play',
     play_missing_take_description:
       'The audio file for this Take is missing. Open Audio Audit to remap, or pick a different Take.'

@@ -1,8 +1,4 @@
-import {
-  SEGMENTS_SCHEMA_VERSION,
-  type SegmentsFile,
-  type WorkspaceFile
-} from '@shared/project'
+import { SEGMENTS_SCHEMA_VERSION, type SegmentsFile, type WorkspaceFile } from '@shared/project'
 import { showError } from '@renderer/store/toastStore'
 import i18n from '@renderer/i18n'
 import type { EditorState } from './types'

@@ -197,10 +197,7 @@ function SegmentControlRow(): React.JSX.Element {
           // 「停止并取消」（下面的 X 按钮）。重录按钮在录音 / 倒计时中
           // disabled，避免「按重录的瞬间隐式提交并立刻又开一段」这种语义不
           // 清的复合操作
-          <IconButton
-            title={t('inspector.btn_cancel')}
-            onClick={() => void cancelRecording()}
-          >
+          <IconButton title={t('inspector.btn_cancel')} onClick={() => void cancelRecording()}>
             <X size={12} />
           </IconButton>
         ) : (
