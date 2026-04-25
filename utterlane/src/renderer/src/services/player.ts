@@ -186,14 +186,9 @@ export type PlayFileOptions = {
  * 播放一个 Take 文件。Promise 在自然播完 / 被 stop / 出错时 resolve。
  * 不区分「是否被打断」——调用方通过 stop() 之后的状态自己感知。
  */
-export async function playFile(
-  relativePath: string,
-  options: PlayFileOptions = {}
-): Promise<void> {
+export async function playFile(relativePath: string, options: PlayFileOptions = {}): Promise<void> {
   const { startMs, endMs } = options
-  devLog(
-    `[player] playFile START ${relativePath} startMs=${startMs ?? 0} endMs=${endMs ?? 'eof'}`
-  )
+  devLog(`[player] playFile START ${relativePath} startMs=${startMs ?? 0} endMs=${endMs ?? 'eof'}`)
   stop()
   sequenceAborted = false
 

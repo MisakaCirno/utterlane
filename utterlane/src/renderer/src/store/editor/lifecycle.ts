@@ -42,7 +42,8 @@ export const createLifecycleSlice: SliceCreator<
       lastPreviewedTakeId: bundle.workspace.lastPreviewedTakeId,
       scriptListScrollTop: bundle.workspace.scriptListScrollTop ?? 0,
       timelineScrollLeft: bundle.workspace.timelineScrollLeft ?? 0,
-      timelineZoom: bundle.workspace.timelineZoom ?? 1
+      timelineZoom: bundle.workspace.timelineZoom ?? 1,
+      timelinePlayheadMs: bundle.workspace.timelinePlayheadMs ?? 0
     })
     // 后台扫一次缺失文件，不阻塞 UI。结果回填 missingTakeIds 让 Inspector 标徽
     void window.api.audioAudit.scan().then((result) => {

@@ -40,7 +40,8 @@ export function snapshotWorkspace(state: EditorState): WorkspaceFile {
     lastPreviewedTakeId: state.lastPreviewedTakeId,
     scriptListScrollTop: state.scriptListScrollTop,
     timelineScrollLeft: state.timelineScrollLeft,
-    timelineZoom: state.timelineZoom
+    timelineZoom: state.timelineZoom,
+    timelinePlayheadMs: state.timelinePlayheadMs
   }
 }
 

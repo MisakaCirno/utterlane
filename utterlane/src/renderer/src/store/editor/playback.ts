@@ -57,30 +57,68 @@ export const createPlaybackSlice: SliceCreator<
    * 和 Slice D1 的实现不同：这里不再走 player.playSequence，而是把顺序循环
    * 放在 store 里，每段开始前同步 selectedSegmentId。这样 UI 可以跟随
    * 当前播放段高亮 + 自动滚动，也避免 player 层需要理解 segment 语义。
+   *
+   * === 从游标位置起播 ===
+   *
+   * 读 timelinePlayheadMs，找到游标落在哪个 take 内，从该段以 startMs
+   * 偏移播放，后续段从头播。空白间隔区间（gap 内）也归到「下一段从头
+   * 播」——用户在间隔区域点游标后想要的是「下一段从头开始」而非「等
+   * 完间隔再播」
    */
   playProject: async () => {
     const state = get()
     if (state.playback !== 'idle') return
-    // 跳过缺失文件的 take：和导出的「跳过未录段」语义一致——连读不应被
-    // 一个丢失文件中断，整体仍能播完
-    const items: Array<{ segmentId: string; filePath: string }> = []
+
+    // 收集可播 items + 累计起点：跳过缺失文件的 take（与导出「跳过未录段」
+    // 语义一致），同时算出每段在工程时间轴上的起点 ms 与本段长度
+    type PlayableItem = {
+      segmentId: string
+      filePath: string
+      startMs: number
+      durationMs: number
+    }
+    const items: PlayableItem[] = []
+    let cursor = 0
     for (const id of state.order) {
       const seg = state.segmentsById[id]
       const take = seg?.takes.find((t) => t.id === seg.selectedTakeId)
       if (take && !state.missingTakeIds.has(take.id)) {
-        items.push({ segmentId: id, filePath: take.filePath })
+        items.push({
+          segmentId: id,
+          filePath: take.filePath,
+          startMs: cursor,
+          durationMs: take.durationMs
+        })
+        cursor += take.durationMs
       }
+      cursor += seg?.gapAfter?.ms ?? 0
     }
     if (items.length === 0) return
 
+    // 找游标对应的起播位置：第一个「结束 ms 大于 playhead」的段。如果
+    // playhead 落在 gap 区间，会找到 gap 之后的下一段；如果 playhead
+    // 超过总时长，回退到从头播
+    const playhead = state.timelinePlayheadMs
+    let startIdx = items.findIndex((it) => playhead < it.startMs + it.durationMs)
+    if (startIdx < 0) startIdx = 0
+    const offsetWithinFirst = Math.max(0, playhead - items[startIdx].startMs)
+
     set({ playback: 'project', paused: false })
     try {
-      for (const item of items) {
+      for (let i = startIdx; i < items.length; i++) {
+        const item = items[i]
         // stopPlayback 会立刻把 playback 切到 idle，循环这里读一次就退出
         if (get().playback !== 'project') break
         set({ selectedSegmentId: item.segmentId })
         pushWorkspace(get())
-        await player.playFile(item.filePath)
+        // 仅第一段以游标偏移起播，后续段都从头
+        const playStartMs = i === startIdx ? offsetWithinFirst : 0
+        await player.playFile(item.filePath, playStartMs > 0 ? { startMs: playStartMs } : {})
+      }
+      // 自然播完：把游标停在工程末尾，便于用户看到「播到哪了」
+      if (get().playback === 'project') {
+        set({ timelinePlayheadMs: cursor })
+        pushWorkspace(get())
       }
     } finally {
       if (get().playback === 'project') set({ playback: 'idle', paused: false })

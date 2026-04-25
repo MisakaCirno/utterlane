@@ -27,6 +27,7 @@ export const createWorkspaceSlice: SliceCreator<
     | 'setPlayback'
     | 'setScriptListScrollTop'
     | 'setTimelineScroll'
+    | 'setTimelinePlayhead'
   >
 > = (set, get) => ({
   selectSegment: (id) => {
@@ -176,6 +177,13 @@ export const createWorkspaceSlice: SliceCreator<
 
   setTimelineScroll: (left, zoom) => {
     set({ timelineScrollLeft: left, ...(zoom !== undefined && { timelineZoom: zoom }) })
+    pushWorkspace(get())
+  },
+
+  setTimelinePlayhead: (ms) => {
+    const next = Math.max(0, ms)
+    if (get().timelinePlayheadMs === next) return
+    set({ timelinePlayheadMs: next })
     pushWorkspace(get())
   }
 })

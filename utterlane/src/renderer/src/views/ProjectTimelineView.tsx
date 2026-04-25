@@ -33,6 +33,7 @@ import { CSS } from '@dnd-kit/utilities'
 import { cn } from '@renderer/lib/cn'
 import { useEditorStore } from '@renderer/store/editorStore'
 import { formatDuration } from '@renderer/lib/format'
+import { subscribePosition } from '@renderer/services/player'
 
 /**
  * ProjectTimelineView — 整个项目的横向时间轴。
@@ -496,22 +497,54 @@ function TimelineContent({ pxPerMs }: { pxPerMs: number }): React.JSX.Element {
   const reorderSegments = useEditorStore((s) => s.reorderSegments)
   const setTimelineScroll = useEditorStore((s) => s.setTimelineScroll)
   const timelineZoom = useEditorStore((s) => s.timelineZoom)
+  const playback = useEditorStore((s) => s.playback)
+  const storedPlayheadMs = useEditorStore((s) => s.timelinePlayheadMs)
+  const setTimelinePlayhead = useEditorStore((s) => s.setTimelinePlayhead)
   const persistedScrollLeft = useEditorStore.getState().timelineScrollLeft
 
   // 每个 clip 的起点时间戳：累积「前序 clip 的 take 时长 + gapAfter 时长」。
-  // 用 useMemo 避免 timelineScrollLeft 变化重渲染时反复重算 O(N)
-  const { startMsById, totalMs } = useMemo(() => {
-    const map = new Map<string, number>()
+  // 顺手建一个 filePath → startMs 的反查表，给播放游标用：subscribePosition
+  // 给的是文件相对路径，需要映射回工程时间轴上的起点
+  const { startMsById, totalMs, startMsByFilePath } = useMemo(() => {
+    const idMap = new Map<string, number>()
+    const pathMap = new Map<string, number>()
     let acc = 0
     for (const id of order) {
-      map.set(id, acc)
+      idMap.set(id, acc)
       const seg = segmentsById[id]
       const take = seg?.takes.find((t) => t.id === seg.selectedTakeId)
+      if (take) pathMap.set(take.filePath, acc)
       acc += take?.durationMs ?? 0
       acc += seg?.gapAfter?.ms ?? 0
     }
-    return { startMsById: map, totalMs: acc }
+    return { startMsById: idMap, totalMs: acc, startMsByFilePath: pathMap }
   }, [order, segmentsById])
+
+  // 播放期间订阅 player 的位置事件，把「文件相对位置」映射成「工程时间轴
+  // 全局位置」用于显示游标。空闲时不挂订阅，避免无意义的 RAF 唤醒
+  const [livePlayheadMs, setLivePlayheadMs] = useState<number | null>(null)
+  useEffect(() => {
+    if (playback !== 'project' && playback !== 'segment') {
+      setLivePlayheadMs(null)
+      return
+    }
+    return subscribePosition((path, ms) => {
+      if (!path) {
+        setLivePlayheadMs(null)
+        return
+      }
+      const segStart = startMsByFilePath.get(path)
+      if (segStart === undefined) return
+      setLivePlayheadMs(segStart + ms)
+    })
+  }, [playback, startMsByFilePath])
+
+  // 游标显示的最终 ms：播放中跟随实际进度，空闲时显示存储的 playhead
+  const cursorMs =
+    livePlayheadMs !== null && (playback === 'project' || playback === 'segment')
+      ? livePlayheadMs
+      : storedPlayheadMs
+  const cursorPx = cursorMs * pxPerMs
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }))
 
@@ -563,47 +596,74 @@ function TimelineContent({ pxPerMs }: { pxPerMs: number }): React.JSX.Element {
   // 让滚动条容纳尾部那一两个像素的舍入误差
   const contentWidthPx = Math.ceil(totalMs * pxPerMs) + 32 // 32 = 内边距与缓冲
 
+  // 用户点击 ruler → 把游标设到点击位置。仅 idle 时响应：播放期间游标
+  // 跟随实际进度，点击设位置语义会和正在播的 take 起冲突；要 seek 先停
+  const onRulerClick = (e: React.MouseEvent<HTMLDivElement>): void => {
+    if (playback !== 'idle') return
+    const rect = e.currentTarget.getBoundingClientRect()
+    const clickX = e.clientX - rect.left
+    const ms = Math.max(0, Math.round(clickX / pxPerMs))
+    setTimelinePlayhead(ms)
+  }
+
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
       <div ref={scrollerRef} onScroll={onScroll} className="flex-1 overflow-auto">
-        <TimeRuler
-          pxPerMs={pxPerMs}
-          scrollLeft={scrollLeft}
-          viewportWidth={viewportWidth}
-          contentWidthPx={contentWidthPx}
-        />
-        <div className="relative h-24 min-w-max p-2">
-          <DndContext
-            sensors={sensors}
-            collisionDetection={closestCenter}
-            onDragEnd={handleDragEnd}
-          >
-            <SortableContext items={order} strategy={horizontalListSortingStrategy}>
-              <div className="flex h-full items-stretch">
-                {order.map((id, idx) => {
-                  const seg = segmentsById[id]
-                  const gap = seg?.gapAfter
-                  const isLast = idx === order.length - 1
-                  return (
-                    <Fragment key={id}>
-                      <TimelineClip
-                        id={id}
-                        idx={idx}
-                        startMs={startMsById.get(id) ?? 0}
-                        pxPerMs={pxPerMs}
-                        prevSegId={idx > 0 ? order[idx - 1] : undefined}
-                        hasFollowingClip={!isLast}
-                      />
-                      {/* 最后一段后面没有间隔；中间段渲染 ms × pxPerMs 宽度的填充 */}
-                      {!isLast && (
-                        <GapFiller ms={gap?.ms ?? 0} manual={!!gap?.manual} pxPerMs={pxPerMs} />
-                      )}
-                    </Fragment>
-                  )
-                })}
-              </div>
-            </SortableContext>
-          </DndContext>
+        {/* 整条时间轴的内容容器：ruler / clip 区 / 游标都是它的子元素，
+            统一 width 与 relative 上下文。游标 absolute 起来才能正确跨高度 */}
+        <div className="relative min-w-max" style={{ width: contentWidthPx }}>
+          <TimeRuler
+            pxPerMs={pxPerMs}
+            scrollLeft={scrollLeft}
+            viewportWidth={viewportWidth}
+            contentWidthPx={contentWidthPx}
+            onClick={onRulerClick}
+            clickable={playback === 'idle'}
+          />
+          <div className="relative h-24 p-2">
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragEnd={handleDragEnd}
+            >
+              <SortableContext items={order} strategy={horizontalListSortingStrategy}>
+                <div className="flex h-full items-stretch">
+                  {order.map((id, idx) => {
+                    const seg = segmentsById[id]
+                    const gap = seg?.gapAfter
+                    const isLast = idx === order.length - 1
+                    return (
+                      <Fragment key={id}>
+                        <TimelineClip
+                          id={id}
+                          idx={idx}
+                          startMs={startMsById.get(id) ?? 0}
+                          pxPerMs={pxPerMs}
+                          prevSegId={idx > 0 ? order[idx - 1] : undefined}
+                          hasFollowingClip={!isLast}
+                        />
+                        {/* 最后一段后面没有间隔；中间段渲染 ms × pxPerMs 宽度的填充 */}
+                        {!isLast && (
+                          <GapFiller ms={gap?.ms ?? 0} manual={!!gap?.manual} pxPerMs={pxPerMs} />
+                        )}
+                      </Fragment>
+                    )
+                  })}
+                </div>
+              </SortableContext>
+            </DndContext>
+          </div>
+          {/* 时间游标：单 1px 竖线，pointer-events-none 避免阻断 clip 点击。
+              z-index 高于 clip（z-10）但低于 ruler 的 sticky-ish 层级，让标尺
+              数字能盖在游标上方仍然可读 */}
+          <div
+            aria-hidden
+            className={cn(
+              'pointer-events-none absolute top-0 bottom-0 z-20 w-px',
+              livePlayheadMs !== null ? 'bg-rec' : 'bg-accent'
+            )}
+            style={{ left: cursorPx }}
+          />
         </div>
       </div>
     </div>
@@ -627,12 +687,16 @@ function TimeRuler({
   pxPerMs,
   scrollLeft,
   viewportWidth,
-  contentWidthPx
+  contentWidthPx,
+  onClick,
+  clickable
 }: {
   pxPerMs: number
   scrollLeft: number
   viewportWidth: number
   contentWidthPx: number
+  onClick: (e: React.MouseEvent<HTMLDivElement>) => void
+  clickable: boolean
 }): React.JSX.Element {
   const tickIntervalMs = pickTickInterval(pxPerMs)
   const tickPx = tickIntervalMs * pxPerMs
@@ -656,9 +720,16 @@ function TimeRuler({
     )
   }
 
+  // ruler 自身处理点击 → 把屏幕坐标转换成时间轴 ms 的工作放在父级
+  // onRulerClick 里。这里只负责挂事件 + 视觉上提示「可点」（idle 时
+  // 用 cursor-pointer，播放中改成 default 暗示不接受 seek）
   return (
     <div
-      className="sticky top-0 z-10 h-6 border-b border-border bg-bg-deep"
+      onClick={onClick}
+      className={cn(
+        'sticky top-0 z-30 h-6 border-b border-border bg-bg-deep select-none',
+        clickable ? 'cursor-pointer' : 'cursor-default'
+      )}
       style={{ width: contentWidthPx }}
     >
       <div className="relative h-full" style={{ width: contentWidthPx }}>

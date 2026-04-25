@@ -26,6 +26,15 @@ export type EditorData = {
 
   selectedSegmentId: string | undefined
   /**
+   * 项目时间轴游标位置（毫秒）。
+   *
+   * 语义：「下一次播放将从这里起播」+「最近一次空闲态时游标停在哪」。
+   * 与 selectedSegmentId 解耦——前者是「时间维度上的位置」，后者是「文档
+   * 维度上的选中」。播放期间 UI 显示的是实际播放进度（不更新这里），停止
+   * 或自然结束后游标停留在最终位置
+   */
+  timelinePlayheadMs: number
+  /**
    * 主选中之外的「副选中」集合，用于多选场景。
    *
    * 不变量：selectedSegmentId（主选中）永远不会出现在 extraSelectedSegmentIds
@@ -121,6 +130,8 @@ export type EditorActions = {
   setPlayback: (mode: PlaybackMode) => void
   setScriptListScrollTop: (top: number) => void
   setTimelineScroll: (left: number, zoom?: number) => void
+  /** 设置时间轴游标位置（毫秒）。会被 clamp 到 [0, +∞)；超过项目总时长由 UI 自行处理 */
+  setTimelinePlayhead: (ms: number) => void
 
   // Segment / Take 编辑
   importScript: (rawText: string) => void
@@ -256,6 +267,7 @@ export const INITIAL_DATA: EditorData = {
   order: [],
   segmentsById: {},
   selectedSegmentId: undefined,
+  timelinePlayheadMs: 0,
   extraSelectedSegmentIds: new Set<string>(),
   lastPreviewedTakeId: undefined,
   scriptListScrollTop: 0,
