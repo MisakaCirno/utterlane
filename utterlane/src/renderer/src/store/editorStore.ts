@@ -140,6 +140,26 @@ type EditorState = {
    * 当前段不存在前一段（已经是首段）时 no-op
    */
   mergeSegmentWithPrevious: (segmentId: string) => void
+  /**
+   * 末尾追加一个空白 Segment。返回新 Segment 的 id 让调用方继续自动选中 / 滚动
+   */
+  newSegment: (text?: string) => string
+  /** 在指定 Segment 之前插入一个空白 Segment，自动选中新段。无引用时 no-op */
+  insertSegmentBefore: (refId: string, text?: string) => string | null
+  /** 在指定 Segment 之后插入一个空白 Segment，自动选中新段。无引用时 no-op */
+  insertSegmentAfter: (refId: string, text?: string) => string | null
+  /** 清空所有 Segment（进 undo 栈，可还原） */
+  clearAllSegments: () => void
+  /**
+   * 设置 / 取消某个 Segment 的「段首」标记。值为 false 时把字段置 undefined，
+   * 节省存储 + 让「无段落信息」与「显式非段首」语义一致
+   */
+  setParagraphStart: (segmentId: string, value: boolean) => void
+  /**
+   * 全局文本替换：把所有 Segment text 中出现的 find 全部换成 replaceWith。
+   * 大小写敏感、子串匹配。返回实际改动的 Segment 数量供 UI 反馈
+   */
+  replaceAllInSegments: (find: string, replaceWith: string) => number
 
   // 音频文件审计
   /** 用 audit 扫描结果覆盖 missingTakeIds，集合会被 UI 用作缺失徽标的依据 */
@@ -246,7 +266,14 @@ function markDirty(): { saved: false } {
 
 // ---------------------------------------------------------------------------
 // 文案导入：按行切分成 Segment。
-// 规则：去除行首尾空白，忽略空行；Segment id 用 crypto.randomUUID。
+//
+// 规则：
+//   - 去除行首尾空白
+//   - 单个空行视为段落边界：下一个非空行的 Segment 标记 paragraphStart = true
+//   - 连续多个空行折叠成一次段落边界（不会产生空段）
+//   - 第一段第一句默认 paragraphStart = true
+//
+// Segment id 用 crypto.randomUUID。
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
@@ -316,15 +343,27 @@ async function beginRecordingFlow(
 }
 
 function splitScriptIntoSegments(rawText: string): Segment[] {
-  return rawText
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0)
-    .map((text) => ({
+  const lines = rawText.split(/\r?\n/)
+  const segments: Segment[] = []
+  // 第一段段首：首次进循环时 nextIsParagraphStart 为 true，遇到空行后再次置 true
+  let nextIsParagraphStart = true
+  for (const rawLine of lines) {
+    const line = rawLine.trim()
+    if (line.length === 0) {
+      nextIsParagraphStart = true
+      continue
+    }
+    const seg: Segment = {
       id: crypto.randomUUID(),
-      text,
+      text: line,
       takes: []
-    }))
+    }
+    // paragraphStart 仅在 true 时落字段，false 用 undefined 表达更省字节
+    if (nextIsParagraphStart) seg.paragraphStart = true
+    segments.push(seg)
+    nextIsParagraphStart = false
+  }
+  return segments
 }
 
 // ---------------------------------------------------------------------------
@@ -892,6 +931,161 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       ...markDirty()
     })
     scheduleSegmentsSave()
+  },
+
+  newSegment: (text) => {
+    const prev = get()
+    const newId = crypto.randomUUID()
+    const seg: Segment = { id: newId, text: text ?? '', takes: [] }
+    const insertIdx = prev.order.length
+    useHistoryStore.getState().push(`insertSegment:${newId}`, 'history.insert_segment', {
+      type: 'insertSegment',
+      index: insertIdx,
+      segment: seg,
+      prevSelectedSegmentId: prev.selectedSegmentId,
+      nextSelectedSegmentId: newId
+    })
+    set({
+      order: [...prev.order, newId],
+      segmentsById: { ...prev.segmentsById, [newId]: seg },
+      selectedSegmentId: newId,
+      extraSelectedSegmentIds: new Set(),
+      ...markDirty()
+    })
+    scheduleSegmentsSave()
+    pushWorkspace(get())
+    return newId
+  },
+
+  insertSegmentBefore: (refId, text) => {
+    const prev = get()
+    const refIdx = prev.order.indexOf(refId)
+    if (refIdx < 0) return null
+    const newId = crypto.randomUUID()
+    const seg: Segment = { id: newId, text: text ?? '', takes: [] }
+    useHistoryStore.getState().push(`insertSegment:${newId}`, 'history.insert_segment_before', {
+      type: 'insertSegment',
+      index: refIdx,
+      segment: seg,
+      prevSelectedSegmentId: prev.selectedSegmentId,
+      nextSelectedSegmentId: newId
+    })
+    const nextOrder = prev.order.slice()
+    nextOrder.splice(refIdx, 0, newId)
+    set({
+      order: nextOrder,
+      segmentsById: { ...prev.segmentsById, [newId]: seg },
+      selectedSegmentId: newId,
+      extraSelectedSegmentIds: new Set(),
+      ...markDirty()
+    })
+    scheduleSegmentsSave()
+    pushWorkspace(get())
+    return newId
+  },
+
+  insertSegmentAfter: (refId, text) => {
+    const prev = get()
+    const refIdx = prev.order.indexOf(refId)
+    if (refIdx < 0) return null
+    const newId = crypto.randomUUID()
+    const seg: Segment = { id: newId, text: text ?? '', takes: [] }
+    useHistoryStore.getState().push(`insertSegment:${newId}`, 'history.insert_segment_after', {
+      type: 'insertSegment',
+      index: refIdx + 1,
+      segment: seg,
+      prevSelectedSegmentId: prev.selectedSegmentId,
+      nextSelectedSegmentId: newId
+    })
+    const nextOrder = prev.order.slice()
+    nextOrder.splice(refIdx + 1, 0, newId)
+    set({
+      order: nextOrder,
+      segmentsById: { ...prev.segmentsById, [newId]: seg },
+      selectedSegmentId: newId,
+      extraSelectedSegmentIds: new Set(),
+      ...markDirty()
+    })
+    scheduleSegmentsSave()
+    pushWorkspace(get())
+    return newId
+  },
+
+  clearAllSegments: () => {
+    const prev = get()
+    if (prev.order.length === 0) return
+    useHistoryStore.getState().push('clearSegments', 'history.clear_segments', {
+      type: 'clearSegments',
+      beforeOrder: prev.order.slice(),
+      beforeSegmentsById: { ...prev.segmentsById },
+      beforeSelectedSegmentId: prev.selectedSegmentId
+    })
+    set({
+      order: [],
+      segmentsById: {},
+      selectedSegmentId: undefined,
+      extraSelectedSegmentIds: new Set(),
+      ...markDirty()
+    })
+    scheduleSegmentsSave()
+    pushWorkspace(get())
+  },
+
+  setParagraphStart: (segmentId, value) => {
+    const prev = get()
+    const seg = prev.segmentsById[segmentId]
+    if (!seg) return
+    const before = seg.paragraphStart
+    // before 实际是 boolean | undefined；和目标值都规范成 boolean 再比较
+    if (!!before === value) return
+    useHistoryStore
+      .getState()
+      .push(`setParagraphStart:${segmentId}`, 'history.set_paragraph_start', {
+        type: 'setParagraphStart',
+        segId: segmentId,
+        before,
+        after: value
+      })
+    const nextSeg = { ...seg }
+    if (value) nextSeg.paragraphStart = true
+    else delete nextSeg.paragraphStart
+    set({
+      segmentsById: { ...prev.segmentsById, [segmentId]: nextSeg },
+      ...markDirty()
+    })
+    scheduleSegmentsSave()
+  },
+
+  replaceAllInSegments: (find, replaceWith) => {
+    if (find.length === 0) return 0
+    const prev = get()
+    const edits: Array<{ segId: string; before: string; after: string }> = []
+    for (const id of prev.order) {
+      const seg = prev.segmentsById[id]
+      if (!seg) continue
+      if (!seg.text.includes(find)) continue
+      // split + join 比 replaceAll 快，且不依赖 RegExp 转义
+      const after = seg.text.split(find).join(replaceWith)
+      if (after === seg.text) continue
+      edits.push({ segId: id, before: seg.text, after })
+    }
+    if (edits.length === 0) return 0
+
+    useHistoryStore.getState().push('replaceAll', 'history.replace_all', {
+      type: 'replaceAll',
+      find,
+      replaceWith,
+      edits
+    })
+
+    const nextById = { ...prev.segmentsById }
+    for (const e of edits) {
+      const seg = nextById[e.segId]
+      if (seg) nextById[e.segId] = { ...seg, text: e.after }
+    }
+    set({ segmentsById: nextById, ...markDirty() })
+    scheduleSegmentsSave()
+    return edits.length
   },
 
   // -------- 录音 --------

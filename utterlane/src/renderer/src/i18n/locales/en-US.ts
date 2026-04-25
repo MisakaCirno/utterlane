@@ -81,7 +81,21 @@ export const enUS: TranslationSchema = {
     search_placeholder: 'Filter by text…',
     search_match_count: '{{count}} / {{total}}',
     batch_selected: '{{count}} selected',
-    batch_delete: 'Delete selected'
+    batch_delete: 'Delete selected',
+    tb_new: 'New Segment (append)',
+    tb_insert_before: 'Insert before selected',
+    tb_insert_after: 'Insert after selected',
+    tb_delete_selected: 'Delete selected (incl. batch)',
+    tb_clear_all: 'Clear all Segments',
+    tb_import_script: 'Import script…',
+    tb_find_replace: 'Find / Replace (Ctrl+F)',
+    find_placeholder: 'Find…',
+    replace_placeholder: 'Replace with…',
+    replace_all: 'Replace All',
+    replace_done_title: 'Replace done',
+    replace_done_desc: 'Replaced text in {{count}} segment(s)',
+    replace_none_title: 'No matches',
+    replace_none_desc: 'No segment contains the search text'
   },
 
   inspector: {
@@ -98,6 +112,8 @@ export const enUS: TranslationSchema = {
     btn_split: 'Split',
     btn_split_hint: 'Place the cursor inside the text where to split, then click here',
     btn_merge_prev: 'Merge into previous',
+    btn_paragraph_head: 'Paragraph head',
+    btn_paragraph_head_locked: 'First segment is always a paragraph head',
     takes_label: 'Takes',
     takes_count: '{{count}}',
     takes_empty: 'No recordings yet',
@@ -186,6 +202,9 @@ export const enUS: TranslationSchema = {
   confirm: {
     delete_segment_title: 'Delete this segment?',
     delete_segments_title: 'Delete {{count}} selected segments?',
+    clear_all_segments_title: 'Clear all {{count}} segments?',
+    clear_all_segments_description:
+      'You can undo with Ctrl+Z, but all Take references will be lost.',
     close_recording_title: 'Recording in progress. Close anyway?',
     close_recording_description: 'The current recording will be discarded.',
     close_recording_btn: 'Discard and close',
@@ -252,7 +271,13 @@ export const enUS: TranslationSchema = {
     import_script: 'Import Script',
     split_segment: 'Split Segment',
     merge_segment: 'Merge Segment',
-    delete_segments_batch: 'Batch Delete Segments'
+    delete_segments_batch: 'Batch Delete Segments',
+    insert_segment: 'New Segment',
+    insert_segment_before: 'Insert Segment Before',
+    insert_segment_after: 'Insert Segment After',
+    clear_segments: 'Clear Segments',
+    set_paragraph_start: 'Toggle Paragraph Head',
+    replace_all: 'Replace All'
   },
 
   audit_dialog: {

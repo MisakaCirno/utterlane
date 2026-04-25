@@ -19,6 +19,7 @@ import { useEditorStore } from '@renderer/store/editorStore'
 import { usePreferencesStore } from '@renderer/store/preferencesStore'
 import { useDialogStore } from '@renderer/store/dialogStore'
 import { confirm } from '@renderer/store/confirmStore'
+import { showError, showSuccess } from '@renderer/store/toastStore'
 import { cn } from '@renderer/lib/cn'
 import { formatDuration } from '@renderer/lib/format'
 import {
@@ -29,7 +30,14 @@ import {
   GripVertical,
   Search,
   Trash2,
-  X
+  X,
+  Plus,
+  ArrowUpFromLine,
+  ArrowDownFromLine,
+  Eraser,
+  FileInput,
+  Pilcrow,
+  Replace
 } from 'lucide-react'
 
 function StatusCell({ count }: { count: number }): React.JSX.Element {
@@ -146,16 +154,27 @@ function ResizeHandle({
 function SegmentRow({
   id,
   idx,
+  highlight,
   gridStyle
 }: {
   id: string
   idx: number
+  /**
+   * 当前查找关键字。非空时，行文本里的所有匹配段会被高亮成 mark 风格。
+   * 空字符串 / undefined 不高亮（避免空字符串走 split 的边界 case）
+   */
+  highlight: string
   gridStyle: React.CSSProperties
 }): React.JSX.Element | null {
   const seg = useEditorStore((s) => s.segmentsById[id])
   const selected = useEditorStore((s) => s.selectedSegmentId === id)
   const extraSelected = useEditorStore((s) => s.extraSelectedSegmentIds.has(id))
   const selectSegmentExtended = useEditorStore((s) => s.selectSegmentExtended)
+  const editSegmentText = useEditorStore((s) => s.editSegmentText)
+  // 段首推导：order 中的第 0 个或显式 paragraphStart === true。
+  // useEditorStore 直接订阅 idx === 0 的衍生量需要 order 的引用；用 idx 参数
+  // 已经传进来，此处只看 paragraphStart 一项即可
+  const isParagraphHead = idx === 0 || !!seg?.paragraphStart
 
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id
@@ -177,6 +196,15 @@ function SegmentRow({
     }
   }, [selected])
 
+  // 内联编辑：双击文本格进入。draft 跟踪编辑中文本，提交时统一调
+  // editSegmentText（自动并入 undo coalesce 窗）
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState('')
+  const inputRef = useRef<HTMLInputElement | null>(null)
+  useEffect(() => {
+    if (editing) inputRef.current?.select()
+  }, [editing])
+
   if (!seg) return null
   const current = seg.takes.find((t) => t.id === seg.selectedTakeId)
   const duration = current?.durationMs ?? 0
@@ -191,11 +219,25 @@ function SegmentRow({
   }
 
   const onRowClick = (e: React.MouseEvent): void => {
-    // 修饰键映射：Shift = range；Ctrl/Cmd = toggle；其他 = single。
-    // metaKey 兼容 macOS 用 Cmd
+    // 内联编辑中点击文本格已经被 stopPropagation 拦下，这里只处理非编辑态
+    // 修饰键映射：Shift = range；Ctrl/Cmd = toggle；其他 = single
     if (e.shiftKey) selectSegmentExtended(id, 'range')
     else if (e.ctrlKey || e.metaKey) selectSegmentExtended(id, 'toggle')
     else selectSegmentExtended(id, 'single')
+  }
+
+  function startEditing(e: React.MouseEvent): void {
+    e.stopPropagation()
+    setDraft(seg!.text)
+    setEditing(true)
+  }
+  function commit(): void {
+    if (!editing) return
+    setEditing(false)
+    if (draft !== seg!.text) editSegmentText(id, draft)
+  }
+  function cancel(): void {
+    setEditing(false)
   }
 
   return (
@@ -204,7 +246,12 @@ function SegmentRow({
       onClick={onRowClick}
       style={style}
       className={cn(
-        'group grid h-8 cursor-default items-center border-b border-border-subtle text-xs',
+        'group grid h-8 cursor-default items-center text-xs',
+        // 段首行：上方加一道实线，让段落分组视觉清晰；首段（idx === 0）不加，
+        // 否则会顶到 header 边界看着糊
+        isParagraphHead && idx > 0
+          ? 'border-t-2 border-t-border border-b border-b-border-subtle'
+          : 'border-b border-border-subtle',
         selected
           ? 'bg-accent-soft text-white'
           : extraSelected
@@ -227,11 +274,50 @@ function SegmentRow({
         <GripVertical size={12} />
       </div>
       <div
-        className={cn('px-2 text-right tabular-nums', selected ? 'text-white/80' : 'text-fg-dim')}
+        className={cn(
+          'flex items-center justify-end gap-1 px-2 tabular-nums',
+          selected ? 'text-white/80' : 'text-fg-dim'
+        )}
       >
-        {idx + 1}
+        {/*
+          段首标记 ¶（Pilcrow）。tooltip 提示这是段首；视觉上不抢序号的位置，
+          用低强度图标即可
+        */}
+        {isParagraphHead && (
+          <Pilcrow
+            size={10}
+            className={selected ? 'text-white/70' : 'text-accent'}
+            aria-label="paragraph start"
+          />
+        )}
+        <span>{idx + 1}</span>
       </div>
-      <div className="min-w-0 truncate px-2">{seg.text}</div>
+      {editing ? (
+        <input
+          ref={inputRef}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault()
+              commit()
+            } else if (e.key === 'Escape') {
+              e.preventDefault()
+              cancel()
+            }
+          }}
+          className={cn(
+            'mx-1 h-6 min-w-0 rounded-sm border border-accent bg-bg-deep px-1.5 text-xs',
+            'text-fg outline-none'
+          )}
+        />
+      ) : (
+        <div onDoubleClick={startEditing} title={seg.text} className="min-w-0 truncate px-2">
+          <HighlightedText text={seg.text} highlight={highlight} dim={selected} />
+        </div>
+      )}
       <div className="px-2">
         <StatusCell count={seg.takes.length} />
       </div>
@@ -252,6 +338,191 @@ function SegmentRow({
   )
 }
 
+/**
+ * 顶部工具栏的 26x26 图标按钮。带 active / danger / disabled 三种态
+ */
+function ToolbarIconButton({
+  children,
+  onClick,
+  disabled,
+  active,
+  danger,
+  title
+}: {
+  children: React.ReactNode
+  onClick?: () => void
+  disabled?: boolean
+  active?: boolean
+  danger?: boolean
+  title: string
+}): React.JSX.Element {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      aria-label={title}
+      className={cn(
+        'flex h-6 w-6 shrink-0 items-center justify-center rounded-sm border',
+        'disabled:cursor-not-allowed disabled:opacity-40',
+        active
+          ? 'border-accent bg-accent text-white'
+          : danger
+            ? 'border-border bg-bg-raised text-fg-muted hover:border-rec hover:text-rec'
+            : 'border-border bg-bg-raised text-fg-muted hover:border-border-strong hover:text-fg'
+      )}
+    >
+      {children}
+    </button>
+  )
+}
+
+/**
+ * VSCode 风格的悬浮查找 / 替换小窗口。
+ *
+ * 覆盖在 SegmentsView 右上角（z-30 高于行但低于 dialog），不挤占工具栏空间。
+ * Find 输入实时过滤行；Replace 按钮一次替换全部出现的子串。
+ *
+ * 不做「逐个替换 + 当前匹配位置」的 VSCode 完整模式——文本编辑场景下
+ * Replace All 已经覆盖大部分需求，逐个替换可以用内联编辑加 undo 替代
+ */
+function FindReplacePanel({
+  findText,
+  replaceText,
+  onFindChange,
+  onReplaceChange,
+  onReplaceAll,
+  onClose,
+  matchCount,
+  disabled
+}: {
+  findText: string
+  replaceText: string
+  onFindChange: (v: string) => void
+  onReplaceChange: (v: string) => void
+  onReplaceAll: () => void
+  onClose: () => void
+  matchCount: number
+  disabled: boolean
+}): React.JSX.Element {
+  const { t } = useTranslation()
+  const findInputRef = useRef<HTMLInputElement | null>(null)
+
+  // 面板打开时自动聚焦 find 框；用户能立刻输入查找词
+  useEffect(() => {
+    findInputRef.current?.focus()
+    findInputRef.current?.select()
+  }, [])
+
+  function onKeyDown(e: React.KeyboardEvent): void {
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      e.stopPropagation()
+      onClose()
+    } else if (e.key === 'Enter' && !e.shiftKey) {
+      // 在 replace 框按 Enter 触发 Replace All；在 find 框按 Enter 当前不动
+      // （findText 已经实时同步了过滤结果）
+      e.preventDefault()
+      if ((e.target as HTMLElement).getAttribute('data-role') === 'replace') {
+        onReplaceAll()
+      }
+    }
+  }
+
+  return (
+    <div
+      onKeyDown={onKeyDown}
+      className={cn(
+        'absolute right-2 top-10 z-30 flex flex-col gap-1 rounded-sm border border-border',
+        'bg-bg-panel p-1.5 shadow-xl text-2xs'
+      )}
+      style={{ width: 280 }}
+    >
+      <div className="flex items-center gap-1">
+        <Search size={10} className="shrink-0 text-fg-dim" />
+        <input
+          ref={findInputRef}
+          value={findText}
+          onChange={(e) => onFindChange(e.target.value)}
+          placeholder={t('segments.find_placeholder')}
+          className={cn(
+            'h-5 flex-1 rounded-sm border border-border bg-bg-deep px-1.5 text-fg',
+            'outline-none focus:border-accent'
+          )}
+        />
+        <span className="w-12 shrink-0 text-right text-fg-dim">{findText ? matchCount : ''}</span>
+        <button
+          onClick={onClose}
+          className="rounded-sm p-0.5 text-fg-muted hover:bg-chrome-hover hover:text-fg"
+          aria-label={t('common.close')}
+        >
+          <X size={10} />
+        </button>
+      </div>
+      <div className="flex items-center gap-1">
+        <Replace size={10} className="shrink-0 text-fg-dim" />
+        <input
+          data-role="replace"
+          value={replaceText}
+          onChange={(e) => onReplaceChange(e.target.value)}
+          placeholder={t('segments.replace_placeholder')}
+          className={cn(
+            'h-5 flex-1 rounded-sm border border-border bg-bg-deep px-1.5 text-fg',
+            'outline-none focus:border-accent'
+          )}
+        />
+        <button
+          onClick={onReplaceAll}
+          disabled={disabled || !findText}
+          className={cn(
+            'h-5 rounded-sm border border-accent bg-accent px-2 text-white',
+            'disabled:cursor-not-allowed disabled:opacity-40 hover:opacity-90'
+          )}
+        >
+          {t('segments.replace_all')}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * 把 highlight 子串在 text 里的所有出现都包成 <mark>。dim 模式下高亮色
+ * 调暗，避免在选中行（accent 底色）上撞色
+ */
+function HighlightedText({
+  text,
+  highlight,
+  dim
+}: {
+  text: string
+  highlight: string
+  dim: boolean
+}): React.JSX.Element {
+  if (!highlight) return <>{text}</>
+  const parts = text.split(highlight)
+  if (parts.length === 1) return <>{text}</>
+  return (
+    <>
+      {parts.map((part, i) => (
+        <span key={i}>
+          {part}
+          {i < parts.length - 1 && (
+            <mark
+              className={cn(
+                'rounded-sm px-0.5',
+                dim ? 'bg-yellow-500/40 text-white' : 'bg-yellow-500/60 text-bg'
+              )}
+            >
+              {highlight}
+            </mark>
+          )}
+        </span>
+      ))}
+    </>
+  )
+}
+
 export function SegmentsView(): React.JSX.Element {
   const { t } = useTranslation()
   const order = useEditorStore((s) => s.order)
@@ -260,17 +531,23 @@ export function SegmentsView(): React.JSX.Element {
   const extraSelectedCount = useEditorStore((s) => s.extraSelectedSegmentIds.size)
   const selectedSegmentId = useEditorStore((s) => s.selectedSegmentId)
   const deleteSelectedSegments = useEditorStore((s) => s.deleteSelectedSegments)
+  const newSegment = useEditorStore((s) => s.newSegment)
+  const insertSegmentBefore = useEditorStore((s) => s.insertSegmentBefore)
+  const insertSegmentAfter = useEditorStore((s) => s.insertSegmentAfter)
+  const clearAllSegments = useEditorStore((s) => s.clearAllSegments)
+  const replaceAllInSegments = useEditorStore((s) => s.replaceAllInSegments)
   const playback = useEditorStore((s) => s.playback)
+  const openImportScript = useDialogStore((s) => s.openImportScript)
 
-  // 搜索仅作为前端过滤：不修改 order，只决定哪些行显示。
-  // 不持久化，刷新即清空——用户预期搜索是「临时聚焦」工具
-  const [search, setSearch] = useState('')
-  const [searchOpen, setSearchOpen] = useState(false)
+  // 查找 / 替换：唯一的「过滤 + 文字操作」入口。
+  // findText 为空时不过滤；非空时按子串匹配（大小写敏感，简化版）
+  const [findOpen, setFindOpen] = useState(false)
+  const [findText, setFindText] = useState('')
+  const [replaceText, setReplaceText] = useState('')
 
   const filteredOrder = (() => {
-    if (!search) return order
-    const q = search.toLowerCase()
-    return order.filter((id) => segmentsById[id]?.text.toLowerCase().includes(q))
+    if (!findText) return order
+    return order.filter((id) => segmentsById[id]?.text.includes(findText))
   })()
 
   // 主选中存在时算入「已选总数」；副选不含主选（store 不变量）
@@ -283,6 +560,26 @@ export function SegmentsView(): React.JSX.Element {
       tone: 'danger'
     })
     if (ok) deleteSelectedSegments()
+  }
+
+  async function onClearAll(): Promise<void> {
+    const ok = await confirm({
+      title: t('confirm.clear_all_segments_title', { count: order.length }),
+      description: t('confirm.clear_all_segments_description'),
+      confirmLabel: t('common.delete'),
+      tone: 'danger'
+    })
+    if (ok) clearAllSegments()
+  }
+
+  function handleReplaceAll(): void {
+    if (!findText) return
+    const n = replaceAllInSegments(findText, replaceText)
+    if (n === 0) {
+      showError(t('segments.replace_none_title'), t('segments.replace_none_desc'))
+    } else {
+      showSuccess(t('segments.replace_done_title'), t('segments.replace_done_desc', { count: n }))
+    }
   }
 
   // 初始列宽从 preferences 读，缺项回落默认。
@@ -388,81 +685,108 @@ export function SegmentsView(): React.JSX.Element {
     reorderSegments(arrayMove(order, from, to))
   }
 
-  // 搜索栏 + 批量条只在「有内容可显示」或「有选中需要批量操作」时占空间，
-  // 避免新建工程时空状态被占据视觉重心
-  const showToolbar = order.length > 0
-  const showBatchActions = totalSelected > 1 && playback === 'idle'
+  const isIdle = playback === 'idle'
+  const showBatchActions = totalSelected > 1 && isIdle
+  const hasSelection = !!selectedSegmentId
 
   return (
-    <div className="flex h-full flex-col bg-bg">
-      {showToolbar && (
-        <div className="flex h-7 shrink-0 items-center gap-2 border-b border-border bg-bg-panel px-2 text-2xs">
-          {/*
-            搜索折叠按钮：默认收起省空间，点击展开 input。展开后再点空 X 收起。
-            过滤是纯渲染层操作，不动 segments
-          */}
-          {searchOpen ? (
-            <div className="flex flex-1 items-center gap-1">
-              <Search size={11} className="text-fg-dim" />
-              <input
-                autoFocus
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder={t('segments.search_placeholder')}
-                className={cn(
-                  'h-5 flex-1 rounded-sm border border-border bg-bg-deep px-1.5 text-2xs text-fg',
-                  'outline-none focus:border-accent'
-                )}
-              />
-              <button
-                onClick={() => {
-                  setSearch('')
-                  setSearchOpen(false)
-                }}
-                className="rounded-sm p-0.5 text-fg-muted hover:bg-chrome-hover hover:text-fg"
-                aria-label={t('common.close')}
-              >
-                <X size={10} />
-              </button>
-            </div>
-          ) : (
-            <button
-              onClick={() => setSearchOpen(true)}
-              className="flex items-center gap-1 rounded-sm px-1.5 py-0.5 text-fg-muted hover:bg-chrome-hover hover:text-fg"
-            >
-              <Search size={11} />
-              <span>{t('segments.search')}</span>
-            </button>
-          )}
+    <div className="relative flex h-full flex-col bg-bg">
+      {/*
+        顶部动作工具栏：始终显示，新建 / 插入 / 删除 / 清空 / 导入 / 查找替换
+        几个核心动作都集中在这里。空工程也展示，因为「新建」和「导入」是
+        「从无到有」的入口
+      */}
+      <div className="flex h-8 shrink-0 items-center gap-1 border-b border-border bg-bg-panel px-2 text-2xs">
+        <ToolbarIconButton
+          onClick={() => newSegment()}
+          disabled={!isIdle}
+          title={t('segments.tb_new')}
+        >
+          <Plus size={12} />
+        </ToolbarIconButton>
+        <ToolbarIconButton
+          onClick={() => selectedSegmentId && insertSegmentBefore(selectedSegmentId)}
+          disabled={!isIdle || !hasSelection}
+          title={t('segments.tb_insert_before')}
+        >
+          <ArrowUpFromLine size={12} />
+        </ToolbarIconButton>
+        <ToolbarIconButton
+          onClick={() => selectedSegmentId && insertSegmentAfter(selectedSegmentId)}
+          disabled={!isIdle || !hasSelection}
+          title={t('segments.tb_insert_after')}
+        >
+          <ArrowDownFromLine size={12} />
+        </ToolbarIconButton>
+        <div className="mx-1 h-4 w-px bg-border" />
+        <ToolbarIconButton
+          onClick={() => void onBatchDelete()}
+          disabled={!isIdle || totalSelected === 0}
+          title={t('segments.tb_delete_selected')}
+          danger
+        >
+          <Trash2 size={12} />
+        </ToolbarIconButton>
+        <ToolbarIconButton
+          onClick={() => void onClearAll()}
+          disabled={!isIdle || order.length === 0}
+          title={t('segments.tb_clear_all')}
+          danger
+        >
+          <Eraser size={12} />
+        </ToolbarIconButton>
+        <div className="mx-1 h-4 w-px bg-border" />
+        <ToolbarIconButton
+          onClick={openImportScript}
+          disabled={!isIdle}
+          title={t('segments.tb_import_script')}
+        >
+          <FileInput size={12} />
+        </ToolbarIconButton>
+        <div className="mx-1 h-4 w-px bg-border" />
+        <ToolbarIconButton
+          onClick={() => setFindOpen((v) => !v)}
+          active={findOpen}
+          title={t('segments.tb_find_replace')}
+        >
+          <Search size={12} />
+        </ToolbarIconButton>
 
-          <div className="ml-auto flex items-center gap-2">
-            {showBatchActions && (
-              <>
-                <span className="text-fg-muted">
-                  {t('segments.batch_selected', { count: totalSelected })}
-                </span>
-                <button
-                  onClick={() => void onBatchDelete()}
-                  className={cn(
-                    'flex items-center gap-1 rounded-sm border border-border bg-bg-raised px-2 py-0.5',
-                    'text-fg hover:border-rec hover:text-rec'
-                  )}
-                >
-                  <Trash2 size={10} />
-                  {t('segments.batch_delete')}
-                </button>
-              </>
-            )}
-            {search && (
-              <span className="text-fg-dim">
-                {t('segments.search_match_count', {
-                  count: filteredOrder.length,
-                  total: order.length
-                })}
-              </span>
-            )}
-          </div>
+        {/* 选中数量徽标 + 过滤匹配数：靠右 */}
+        <div className="ml-auto flex items-center gap-2 text-fg-dim">
+          {showBatchActions && (
+            <span>{t('segments.batch_selected', { count: totalSelected })}</span>
+          )}
+          {findText && (
+            <span>
+              {t('segments.search_match_count', {
+                count: filteredOrder.length,
+                total: order.length
+              })}
+            </span>
+          )}
         </div>
+      </div>
+
+      {/*
+        悬浮查找 / 替换面板。绝对定位在 SegmentsView 右上角内侧（避开
+        toolbar 高度），关闭时不挂载，避免 input 在隐藏状态下还吃焦点
+      */}
+      {findOpen && (
+        <FindReplacePanel
+          findText={findText}
+          replaceText={replaceText}
+          onFindChange={setFindText}
+          onReplaceChange={setReplaceText}
+          onReplaceAll={handleReplaceAll}
+          onClose={() => {
+            setFindOpen(false)
+            setFindText('')
+            setReplaceText('')
+          }}
+          matchCount={findText ? filteredOrder.length : 0}
+          disabled={!isIdle}
+        />
       )}
       <div
         className="grid h-7 shrink-0 items-center border-b border-border bg-bg-panel text-2xs text-fg-muted"
@@ -499,6 +823,7 @@ export function SegmentsView(): React.JSX.Element {
           gridStyle={gridStyle}
           sensors={sensors}
           onDragEnd={handleDragEnd}
+          highlight={findText}
         />
       )}
     </div>
@@ -522,13 +847,16 @@ function VirtualizedRows({
   fullOrder,
   gridStyle,
   sensors,
-  onDragEnd
+  onDragEnd,
+  highlight
 }: {
   filteredOrder: string[]
   fullOrder: string[]
   gridStyle: React.CSSProperties
   sensors: ReturnType<typeof useSensors>
   onDragEnd: (e: DragEndEvent) => void
+  /** 透传给每行的查找高亮关键字 */
+  highlight: string
 }): React.JSX.Element {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const [scrollTop, setScrollTop] = useState(0)
@@ -577,7 +905,13 @@ function VirtualizedRows({
           <div style={{ height: totalHeight, position: 'relative' }}>
             <div style={{ position: 'absolute', top: offsetTop, left: 0, right: 0 }}>
               {visibleIds.map((id) => (
-                <SegmentRow key={id} id={id} idx={orderIndex.get(id) ?? 0} gridStyle={gridStyle} />
+                <SegmentRow
+                  key={id}
+                  id={id}
+                  idx={orderIndex.get(id) ?? 0}
+                  highlight={highlight}
+                  gridStyle={gridStyle}
+                />
               ))}
             </div>
           </div>

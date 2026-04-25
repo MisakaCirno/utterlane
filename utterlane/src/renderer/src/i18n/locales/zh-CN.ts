@@ -83,7 +83,21 @@ export const zhCN = {
     search_placeholder: '按文案内容过滤…',
     search_match_count: '{{count}} / {{total}}',
     batch_selected: '已选 {{count}} 条',
-    batch_delete: '批量删除'
+    batch_delete: '批量删除',
+    tb_new: '新建 Segment（追加在末尾）',
+    tb_insert_before: '在选中之前插入',
+    tb_insert_after: '在选中之后插入',
+    tb_delete_selected: '删除选中（含批量）',
+    tb_clear_all: '清空所有 Segment',
+    tb_import_script: '导入文案…',
+    tb_find_replace: '查找 / 替换（Ctrl+F）',
+    find_placeholder: '查找…',
+    replace_placeholder: '替换为…',
+    replace_all: '全部替换',
+    replace_done_title: '替换完成',
+    replace_done_desc: '已替换 {{count}} 个 Segment 中的内容',
+    replace_none_title: '没有匹配项',
+    replace_none_desc: '没有 Segment 包含查找内容'
   },
 
   inspector: {
@@ -100,6 +114,8 @@ export const zhCN = {
     btn_split: '拆分',
     btn_split_hint: '把光标停在文案中要拆分的位置，再点这里',
     btn_merge_prev: '合并到前一段',
+    btn_paragraph_head: '段首',
+    btn_paragraph_head_locked: '首段不可取消「段首」标记',
     takes_label: 'Takes',
     takes_count: '{{count}} 个',
     takes_empty: '还没有录音',
@@ -187,6 +203,8 @@ export const zhCN = {
   confirm: {
     delete_segment_title: '删除这条 Segment？',
     delete_segments_title: '删除选中的 {{count}} 条 Segment？',
+    clear_all_segments_title: '清空全部 {{count}} 条 Segment？',
+    clear_all_segments_description: '此操作可以通过 Ctrl+Z 撤销，但会丢失所有 Take 引用。',
     close_recording_title: '正在录音，确定关闭吗？',
     close_recording_description: '当前录音将被丢弃。',
     close_recording_btn: '关闭并丢弃',
@@ -251,7 +269,13 @@ export const zhCN = {
     import_script: '导入文案',
     split_segment: '拆分 Segment',
     merge_segment: '合并 Segment',
-    delete_segments_batch: '批量删除 Segment'
+    delete_segments_batch: '批量删除 Segment',
+    insert_segment: '新建 Segment',
+    insert_segment_before: '在前插入 Segment',
+    insert_segment_after: '在后插入 Segment',
+    clear_segments: '清空 Segment',
+    set_paragraph_start: '切换段首',
+    replace_all: '全部替换'
   },
 
   audit_dialog: {

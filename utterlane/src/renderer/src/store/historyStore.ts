@@ -135,6 +135,34 @@ export type Command =
       nextSelectedSegmentId: string | undefined
     }
   | {
+      type: 'insertSegment'
+      /** 插入位置（在 order 中的下标） */
+      index: number
+      segment: Segment
+      prevSelectedSegmentId: string | undefined
+      nextSelectedSegmentId: string | undefined
+    }
+  | {
+      type: 'clearSegments'
+      /** 清空前完整状态——和 importScript 同样思路：覆盖式操作只能全量回退 */
+      beforeOrder: string[]
+      beforeSegmentsById: Record<string, Segment>
+      beforeSelectedSegmentId: string | undefined
+    }
+  | {
+      type: 'setParagraphStart'
+      segId: string
+      before: boolean | undefined
+      after: boolean
+    }
+  | {
+      type: 'replaceAll'
+      find: string
+      replaceWith: string
+      /** 实际改了 text 的所有 segment 的 before / after */
+      edits: Array<{ segId: string; before: string; after: string }>
+    }
+  | {
       type: 'mergeSegment'
       /** 接收方 Segment ID（合并后留下的那个，一般是前一段） */
       targetSegmentId: string
@@ -372,6 +400,48 @@ function applyCommand(cmd: Command): void {
         }
       })
       return
+    case 'insertSegment':
+      editor.applyHistoryPatch((s) => {
+        const nextOrder = s.order.slice()
+        nextOrder.splice(Math.min(cmd.index, nextOrder.length), 0, cmd.segment.id)
+        return {
+          order: nextOrder,
+          segmentsById: { ...s.segmentsById, [cmd.segment.id]: cmd.segment },
+          selectedSegmentId: cmd.nextSelectedSegmentId
+        }
+      })
+      return
+    case 'clearSegments':
+      editor.applyHistoryPatch(() => ({
+        order: [],
+        segmentsById: {},
+        selectedSegmentId: undefined
+      }))
+      return
+    case 'setParagraphStart':
+      editor.applyHistoryPatch((s) => {
+        const seg = s.segmentsById[cmd.segId]
+        if (!seg) return null
+        // 设为 false 时把字段置 undefined，存储更紧凑
+        const next = { ...seg }
+        if (cmd.after) next.paragraphStart = true
+        else delete next.paragraphStart
+        return {
+          segmentsById: { ...s.segmentsById, [cmd.segId]: next }
+        }
+      })
+      return
+    case 'replaceAll':
+      editor.applyHistoryPatch((s) => {
+        const nextById = { ...s.segmentsById }
+        for (const e of cmd.edits) {
+          const seg = nextById[e.segId]
+          if (!seg) continue
+          nextById[e.segId] = { ...seg, text: e.after }
+        }
+        return { segmentsById: nextById }
+      })
+      return
   }
 }
 
@@ -509,6 +579,48 @@ function revertCommand(cmd: Command): void {
           segmentsById: nextById,
           selectedSegmentId: cmd.prevSelectedSegmentId
         }
+      })
+      return
+    case 'insertSegment':
+      editor.applyHistoryPatch((s) => {
+        const nextOrder = s.order.filter((id) => id !== cmd.segment.id)
+        const nextById = { ...s.segmentsById }
+        delete nextById[cmd.segment.id]
+        return {
+          order: nextOrder,
+          segmentsById: nextById,
+          selectedSegmentId: cmd.prevSelectedSegmentId
+        }
+      })
+      return
+    case 'clearSegments':
+      editor.applyHistoryPatch(() => ({
+        order: cmd.beforeOrder.slice(),
+        segmentsById: { ...cmd.beforeSegmentsById },
+        selectedSegmentId: cmd.beforeSelectedSegmentId
+      }))
+      return
+    case 'setParagraphStart':
+      editor.applyHistoryPatch((s) => {
+        const seg = s.segmentsById[cmd.segId]
+        if (!seg) return null
+        const next = { ...seg }
+        if (cmd.before) next.paragraphStart = true
+        else delete next.paragraphStart
+        return {
+          segmentsById: { ...s.segmentsById, [cmd.segId]: next }
+        }
+      })
+      return
+    case 'replaceAll':
+      editor.applyHistoryPatch((s) => {
+        const nextById = { ...s.segmentsById }
+        for (const e of cmd.edits) {
+          const seg = nextById[e.segId]
+          if (!seg) continue
+          nextById[e.segId] = { ...seg, text: e.before }
+        }
+        return { segmentsById: nextById }
       })
       return
   }

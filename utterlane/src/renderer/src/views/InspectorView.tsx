@@ -9,7 +9,8 @@ import {
   Circle,
   AlertTriangle,
   Scissors,
-  ArrowUpToLine
+  ArrowUpToLine,
+  Pilcrow
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { cn } from '@renderer/lib/cn'
@@ -116,6 +117,7 @@ export function InspectorView(): React.JSX.Element {
   const deleteSegment = useEditorStore((s) => s.deleteSegment)
   const splitSegmentAt = useEditorStore((s) => s.splitSegmentAt)
   const mergeSegmentWithPrevious = useEditorStore((s) => s.mergeSegmentWithPrevious)
+  const setParagraphStart = useEditorStore((s) => s.setParagraphStart)
   const setSelectedTake = useEditorStore((s) => s.setSelectedTake)
   const deleteTake = useEditorStore((s) => s.deleteTake)
   const playback = useEditorStore((s) => s.playback)
@@ -176,6 +178,9 @@ export function InspectorView(): React.JSX.Element {
   }
   const canSplit = hasTextFocus && playback === 'idle' && segment.text.length > 1
   const canMerge = playback === 'idle' && index > 0
+  // 段首切换：首段（idx === 0）天然就是段首，不允许取消，按钮 disabled
+  const canToggleParagraph = playback === 'idle' && index > 0
+  const isParagraphHead = index === 0 || !!segment.paragraphStart
 
   return (
     <div className="flex h-full flex-col bg-bg">
@@ -260,6 +265,19 @@ export function InspectorView(): React.JSX.Element {
         <ToolbarButton onClick={() => mergeSegmentWithPrevious(selectedId)} disabled={!canMerge}>
           <ArrowUpToLine size={11} />
           {t('inspector.btn_merge_prev')}
+        </ToolbarButton>
+        <ToolbarButton
+          onClick={() => setParagraphStart(selectedId, !isParagraphHead)}
+          active={isParagraphHead}
+          disabled={!canToggleParagraph}
+          title={
+            index === 0
+              ? t('inspector.btn_paragraph_head_locked')
+              : t('inspector.btn_paragraph_head')
+          }
+        >
+          <Pilcrow size={11} />
+          {t('inspector.btn_paragraph_head')}
         </ToolbarButton>
         <div className="ml-auto" />
         <ToolbarButton danger onClick={onDeleteSegment} disabled={isRecordingThis}>

@@ -30,6 +30,16 @@ export type Segment = {
   text: string
   takes: Take[]
   selectedTakeId?: string
+  /**
+   * 该 Segment 是否为所属段落的首段。true = 段首，false / undefined = 非段首。
+   *
+   * 「段尾」状态不存储——用 deriveParagraphPosition 从「下一个 Segment 是否
+   * 为段首 / 当前是否为最后一段」推导出来，避免双字段同步成本（split / merge
+   * / 重排时只需关心 paragraphStart 一个字段）。
+   *
+   * 用于将来导出时区分「句间」和「段间」静音（句间默认间距 vs 段间更长间距）。
+   */
+  paragraphStart?: boolean
 }
 
 export type Project = {
@@ -135,6 +145,41 @@ export function makeEmptyWorkspaceFile(): WorkspaceFile {
 // ---------------------------------------------------------------------------
 // 打开工程时返回给 renderer 的一次性 bundle
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// 段落位置推导
+// ---------------------------------------------------------------------------
+
+/**
+ * 一个 Segment 在所属段落中的位置：段首 / 段中 / 段尾 / 单段（既首又尾）。
+ * 这是个派生值，仅供 UI 展示，不在数据模型里持久化
+ */
+export type ParagraphPosition = 'head' | 'middle' | 'tail' | 'singleton'
+
+/**
+ * 推导规则：
+ *   - 段首 = 在 order 中是第 0 个，或自身 paragraphStart === true
+ *   - 段尾 = 在 order 中是最后一个，或下一个 Segment 的 paragraphStart === true
+ *   - 同时段首 + 段尾 → singleton（独立成段）
+ *   - 否则 middle
+ */
+export function deriveParagraphPosition(
+  order: string[],
+  segmentsById: Record<string, Segment>,
+  segId: string
+): ParagraphPosition {
+  const idx = order.indexOf(segId)
+  if (idx < 0) return 'middle'
+  const seg = segmentsById[segId]
+  if (!seg) return 'middle'
+  const isHead = idx === 0 || !!seg.paragraphStart
+  const next = idx < order.length - 1 ? segmentsById[order[idx + 1]] : null
+  const isTail = idx === order.length - 1 || !!next?.paragraphStart
+  if (isHead && isTail) return 'singleton'
+  if (isHead) return 'head'
+  if (isTail) return 'tail'
+  return 'middle'
+}
 
 /** 打开工程后主进程给 renderer 的完整初始状态 */
 export type ProjectBundle = {
