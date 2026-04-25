@@ -7,7 +7,7 @@ import { projectSession, registerProjectIpc } from './project-storage'
 import { registerRecordingIpc } from './recording'
 import { registerExportIpc } from './export'
 import { registerAudioAuditIpc } from './audio-audit'
-import { initLogger } from './logger'
+import { broadcastCrash, initLogger, onUncaughtError } from './logger'
 import { registerLogsIpc } from './logger/ipc'
 import { registerAppInfoIpc } from './app-info/ipc'
 import type { WindowBounds } from '@shared/preferences'
@@ -15,6 +15,18 @@ import { WINDOW_IPC } from '@shared/ipc'
 
 // 日志必须最早 init：后面任何模块的 log 调用、uncaughtException 捕获都依赖它
 initLogger()
+
+// logger 自身只负责落盘，crash 广播放在 main 这一层——让基础设施保持单一
+// 职责：未捕获异常发生时，logger 把事件回调出来，main 决定怎么通知 UI。
+onUncaughtError((error) => {
+  broadcastCrash({
+    source: 'main',
+    title: error.name || 'Uncaught Exception',
+    message: error.message || String(error),
+    stack: error.stack,
+    timestamp: new Date().toISOString()
+  })
+})
 
 /** 窗口尺寸下限：低于此值 UI 会严重挤压，拒绝接受更小的持久化值 */
 const MIN_WINDOW_WIDTH = 900

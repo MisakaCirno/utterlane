@@ -20,9 +20,30 @@ export const CRASH_EVENT = APP_IPC.crash
  *   - Windows: %USERPROFILE%/AppData/Roaming/<appName>/logs/main.log
  *   - macOS:   ~/Library/Logs/<appName>/main.log
  *   - Linux:   ~/.config/<appName>/logs/main.log
+ *
+ * === 与 crash 广播解耦 ===
+ *
+ * 旧实现把 broadcastCrash 直接挂在 logger.errorHandler.onError 里——logger
+ * 是基础设施，引用 BrowserWindow / CRASH_EVENT 让它跨层依赖了「app 整体
+ * 行为」。改成订阅模式：logger 只负责落盘 + 通过 onUncaughtError(callback)
+ * 把错误事件向外发布；上层（main/index.ts）注册一个 listener，自己决定
+ * 怎么 broadcastCrash。这样 logger 就回到「写日志」的单一职责
  */
 
 let initialized = false
+
+type UncaughtListener = (error: Error) => void
+const uncaughtListeners = new Set<UncaughtListener>()
+
+/**
+ * 订阅未捕获异常 / Promise 拒绝事件。logger 已经落盘，这里只是把事件
+ * 转发给关心的上层模块（典型用途：广播给 renderer 弹 CrashDialog）。
+ * 返回 unsubscribe。
+ */
+export function onUncaughtError(listener: UncaughtListener): () => void {
+  uncaughtListeners.add(listener)
+  return () => uncaughtListeners.delete(listener)
+}
 
 export function initLogger(): void {
   if (initialized) return
@@ -48,14 +69,14 @@ export function initLogger(): void {
     onError: ({ error }) => {
       // 落盘
       log.error('[uncaught]', error)
-      // 同时广播给所有 renderer，由 CrashDialog 弹出展示
-      broadcastCrash({
-        source: 'main',
-        title: error.name || 'Uncaught Exception',
-        message: error.message || String(error),
-        stack: error.stack,
-        timestamp: new Date().toISOString()
-      })
+      // 通知订阅者，吞掉单个 listener 的异常避免连锁——本来就是 last-resort
+      for (const listener of uncaughtListeners) {
+        try {
+          listener(error)
+        } catch (err) {
+          log.warn('[uncaught-listener] failed:', err)
+        }
+      }
     }
   })
 
