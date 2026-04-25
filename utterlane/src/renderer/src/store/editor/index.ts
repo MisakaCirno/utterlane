@@ -1,6 +1,5 @@
 import { create } from 'zustand'
 import type { Segment } from '@renderer/types/project'
-import type { Project } from '@renderer/types/project'
 import * as recorder from '@renderer/services/recorder'
 import * as player from '@renderer/services/player'
 import { showError } from '@renderer/store/toastStore'
@@ -8,16 +7,9 @@ import { alert as alertDialog } from '@renderer/store/confirmStore'
 import { useHistoryStore } from '@renderer/store/historyStore'
 import { usePreferencesStore } from '@renderer/store/preferencesStore'
 import i18n from '@renderer/i18n'
-import {
-  INITIAL_DATA,
-  type EditorState
-} from './types'
-import {
-  cancelPendingSegmentsSave,
-  markDirty,
-  pushWorkspace,
-  scheduleSegmentsSave
-} from './save'
+import { INITIAL_DATA, type EditorState } from './types'
+import { markDirty, pushWorkspace, scheduleSegmentsSave } from './save'
+import { createLifecycleSlice } from './lifecycle'
 
 /**
  * 编辑器 store 承载「当前打开的工程」的全部内存状态。
@@ -177,115 +169,7 @@ function splitScriptIntoSegments(rawText: string): Segment[] {
 export const useEditorStore = create<EditorState>((set, get) => ({
   ...INITIAL_DATA,
 
-  applyBundle: (bundle) => {
-    // 切换工程必须清空 undo / redo 栈，否则新工程头一次按 Ctrl+Z 会把上个工程
-    // 遗留的 deleteSegment 命令应用到当前 segmentsById 上，产生幽灵段
-    useHistoryStore.getState().clear()
-    set({
-      ...INITIAL_DATA,
-      projectPath: bundle.path,
-      project: bundle.project,
-      order: bundle.segments.order,
-      segmentsById: bundle.segments.segmentsById,
-      selectedSegmentId: bundle.workspace.selectedSegmentId,
-      lastPreviewedTakeId: bundle.workspace.lastPreviewedTakeId,
-      scriptListScrollTop: bundle.workspace.scriptListScrollTop ?? 0,
-      timelineScrollLeft: bundle.workspace.timelineScrollLeft ?? 0,
-      timelineZoom: bundle.workspace.timelineZoom ?? 1
-    })
-    // 后台扫一次缺失文件，不阻塞 UI。结果回填 missingTakeIds 让 Inspector 标徽
-    void window.api.audioAudit.scan().then((result) => {
-      // 期间用户可能已经关掉 / 切到别的工程；只在仍是同一工程时回填
-      const cur = useEditorStore.getState()
-      if (cur.projectPath !== bundle.path) return
-      cur.setMissingTakeIds(result.missing.map((m) => m.takeId))
-    })
-  },
-
-  clear: () => {
-    // 切换工程时若 segments 还有 pending 保存，直接丢弃定时器——
-    // 此时前一份工程的锁即将释放，保存已经来不及了（close 已经 flush 过 workspace）。
-    cancelPendingSegmentsSave()
-    useHistoryStore.getState().clear()
-    set({ ...INITIAL_DATA })
-  },
-
-  updateProject: (patch) => {
-    const prev = get()
-    if (!prev.project) return
-    // updatedAt 在 renderer 侧写入：保持 store 内存值和磁盘值一致，
-    // 避免 main 重新覆写一次时间戳让两边发散。
-    const next: Project = {
-      ...prev.project,
-      ...patch,
-      updatedAt: new Date().toISOString()
-    }
-    set({ project: next })
-    // fire-and-forget：失败时通过 toast 提示，但不阻塞 UI 反馈
-    void window.api.project.saveProject(next).then((result) => {
-      if (!result.ok) {
-        showError(
-          i18n.t('errors.save_project_title'),
-          i18n.t('errors.save_project_description', { message: result.message })
-        )
-      }
-    })
-  },
-
-  setMissingTakeIds: (takeIds) => set({ missingTakeIds: new Set(takeIds) }),
-
-  applyRemapResult: (segmentId, takeId, durationMs) => {
-    set((state) => {
-      const seg = state.segmentsById[segmentId]
-      if (!seg) return state
-      const idx = seg.takes.findIndex((t) => t.id === takeId)
-      if (idx < 0) return state
-      const nextTakes = seg.takes.slice()
-      nextTakes[idx] = { ...nextTakes[idx], durationMs }
-      // 从 missingTakeIds 移除：复制一份新 Set 以保持引用替换语义
-      const nextMissing = new Set(state.missingTakeIds)
-      nextMissing.delete(takeId)
-      return {
-        segmentsById: {
-          ...state.segmentsById,
-          [segmentId]: { ...seg, takes: nextTakes }
-        },
-        missingTakeIds: nextMissing,
-        ...markDirty()
-      }
-    })
-    scheduleSegmentsSave()
-  },
-
-  appendTakeFromOrphan: (segmentId, take) => {
-    set((state) => {
-      const seg = state.segmentsById[segmentId]
-      if (!seg) return state
-      return {
-        segmentsById: {
-          ...state.segmentsById,
-          [segmentId]: { ...seg, takes: [...seg.takes, take] }
-        },
-        ...markDirty()
-      }
-    })
-    scheduleSegmentsSave()
-  },
-
-  applyHistoryPatch: (patch) => {
-    let dirty = false
-    set((state) => {
-      const delta = patch(state)
-      if (!delta) return state
-      dirty = true
-      return { ...delta, ...markDirty() }
-    })
-    if (dirty) {
-      scheduleSegmentsSave()
-      // selectedSegmentId 可能被 revert 改动，同步一份 workspace 到 main
-      pushWorkspace(get())
-    }
-  },
+  ...createLifecycleSlice(set, get),
 
   // -------- workspace --------
 
