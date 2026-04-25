@@ -635,6 +635,34 @@ function TimelineContent({ pxPerMs }: { pxPerMs: number }): React.JSX.Element {
     setTimelineScroll(sl, timelineZoom)
   }
 
+  // 滚轮交互：
+  //   - Ctrl/Cmd + wheel：缩放（DAW 习惯）
+  //   - 普通 wheel：横向滚动时间轴（垂直方向无内容可滚）
+  // 用 native event listener 而不是 React 的 onWheel，因为 React 的
+  // SyntheticEvent 在某些版本下 passive: true 不能 preventDefault
+  useEffect(() => {
+    const el = scrollerRef.current
+    if (!el) return
+    const onWheel = (e: WheelEvent): void => {
+      if (e.ctrlKey || e.metaKey) {
+        // 缩放：deltaY > 0 = 向下滚（缩小）；< 0 = 向上滚（放大）
+        e.preventDefault()
+        const factor = Math.exp(-e.deltaY * 0.0015)
+        const nextZoom = clampZoom(timelineZoom * factor)
+        setTimelineScroll(el.scrollLeft, nextZoom)
+        return
+      }
+      // 普通滚轮 → 横向滚动。多数鼠标只有 Y 轴，所以用 deltaY；触摸板
+      // 二指水平滑动会给 deltaX，这里两个都拿，谁非 0 用谁
+      const dx = e.deltaX !== 0 ? e.deltaX : e.deltaY
+      if (dx === 0) return
+      e.preventDefault()
+      el.scrollLeft += dx
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [timelineZoom, setTimelineScroll])
+
   // 内容总宽度：所有 clip 的占位宽度 + 间隔。pxPerMs 用浮点，做一次 ceil
   // 让滚动条容纳尾部那一两个像素的舍入误差
   const contentWidthPx = Math.ceil(totalMs * pxPerMs) + 32 // 32 = 内边距与缓冲
@@ -820,23 +848,9 @@ export function ProjectTimelineView(): React.JSX.Element {
   const setTimelineScroll = useEditorStore((s) => s.setTimelineScroll)
   const pxPerMs = BASE_PX_PER_MS * zoom
 
-  // Ctrl/Cmd + 滚轮缩放：DAW 习惯。普通滚轮保持横向滚动行为
-  // 容器 ref 用来监听 wheel 事件
+  // wheel 处理放在 TimelineContent 内部（就近 scrollerRef），这里只保留
+  // wrapperRef 给将来可能的需求用
   const wrapperRef = useRef<HTMLDivElement | null>(null)
-  useEffect(() => {
-    const el = wrapperRef.current
-    if (!el) return
-    const onWheel = (e: WheelEvent): void => {
-      if (!(e.ctrlKey || e.metaKey)) return
-      e.preventDefault()
-      // deltaY > 0 = 向下滚（缩小）；< 0 = 向上滚（放大）
-      const factor = Math.exp(-e.deltaY * 0.0015)
-      const nextZoom = clampZoom(zoom * factor)
-      setTimelineScroll(useEditorStore.getState().timelineScrollLeft, nextZoom)
-    }
-    el.addEventListener('wheel', onWheel, { passive: false })
-    return () => el.removeEventListener('wheel', onWheel)
-  }, [zoom, setTimelineScroll])
 
   return (
     // PanelShell（Workspace.tsx）的 contain:strict 已经阻断了「内容反向
