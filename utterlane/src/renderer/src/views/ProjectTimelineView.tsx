@@ -129,8 +129,14 @@ function ProjectControlRow({
   //     移到左边、面板可用宽度变窄时，三组按钮的总宽度仍然得到保留，
   //     超出部分横向滚动而不是被裁掉——重点是「所有按钮始终可点」。
   //   - shrink-0 在外层保持工具栏自身高度不被纵向挤压
+  //   - min-w-0 必须加：本 div 是 ProjectTimelineView root（flex-col）的
+  //     flex item，默认 min-width:auto = max-content。内层 grid 用
+  //     min-w-max 撑出的 max-content 会通过 min-width:auto 反向传播让
+  //     本 div 不收缩，进而撑大 root → 超出 PanelShell 被裁。min-w-0
+  //     让 stretch 生效，本 div 等于 root 宽度，max-content 内容由
+  //     overflow-x-auto 接管成横向滚动条
   return (
-    <div className="h-8 shrink-0 overflow-x-auto border-b border-border-subtle bg-bg-panel">
+    <div className="h-8 min-w-0 shrink-0 overflow-x-auto border-b border-border-subtle bg-bg-panel">
       <div
         className="grid h-full min-w-max items-center gap-2 px-2"
         style={{ gridTemplateColumns: '1fr auto 1fr' }}
@@ -648,7 +654,13 @@ function TimelineContent({ pxPerMs }: { pxPerMs: number }): React.JSX.Element {
   }
 
   return (
-    <div className="flex flex-1 flex-col overflow-hidden">
+    // min-w-0 同 ProjectControlRow 的理由：本 div 是 root 的 flex item，
+    // 内层 scrollerRef 的 contentWidthPx 是固定的「内容宽度」（≈ totalMs *
+    // pxPerMs）。如果不加 min-w-0，min-width:auto 会让本 div 取
+    // contentWidthPx，撑大 root，超出 PanelShell。加上后 stretch 生效，
+    // 本 div = root 宽度（= panel 宽度），scrollerRef 的 overflow-auto
+    // 才会真正出现横向滚动条
+    <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
       <div ref={scrollerRef} onScroll={onScroll} className="flex-1 overflow-auto">
         {/* 整条时间轴的内容容器：ruler / clip 区 / 游标都是它的子元素，
             统一 width 与 relative 上下文。游标 absolute 起来才能正确跨高度 */}
@@ -834,10 +846,17 @@ export function ProjectTimelineView(): React.JSX.Element {
   }, [zoom, setTimelineScroll])
 
   return (
-    // 尺寸约束由 Workspace.tsx 的 PanelShell 统一处理（强制 w-full +
-    // overflow-hidden），这里 root 只管自己的 layout：纵向 flex 让 toolbar
-    // 在顶部，content 占剩余空间
-    <div ref={wrapperRef} className="flex h-full flex-col bg-bg">
+    // PanelShell 强制 width 100% panel container，但 flex item 默认
+    // min-width:auto = max-content。如果不加 min-w-0，本 root 内部的
+    // toolbar / TimelineContent 用 min-w-max / 显式 contentWidthPx 撑出
+    // 的 max-content 会沿着 flex item min-width 反向传播：root 被撑成
+    // max-content，超出 PanelShell 宽度后被 overflow-hidden 直接裁，
+    // 表现为「中间 / 右侧 toolbar 消失」。
+    //
+    // 给 root 加 min-w-0 让 stretch 真正生效——root width = PanelShell
+    // 给的 100% 宽度。下方 ProjectControlRow / TimelineContent 内部还
+    // 各自需要 min-w-0，才能让 root 内的 stretch 链路一路传到底
+    <div ref={wrapperRef} className="flex h-full min-w-0 flex-col bg-bg">
       <ProjectControlRow
         zoom={zoom}
         onZoomChange={(next) =>
