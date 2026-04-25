@@ -1,5 +1,9 @@
-import { shell } from 'electron'
+import { BrowserWindow, shell } from 'electron'
 import log from 'electron-log/main'
+import type { CrashInfo } from '@shared/crash'
+
+/** Renderer 端订阅的崩溃事件通道名 */
+export const CRASH_EVENT = 'app:crash'
 
 /**
  * 日志系统：基于 electron-log。
@@ -41,8 +45,16 @@ export function initLogger(): void {
   log.errorHandler.startCatching({
     showDialog: false,
     onError: ({ error }) => {
-      // 捕获后落盘，不 rethrow，交 electron-log 处理
+      // 落盘
       log.error('[uncaught]', error)
+      // 同时广播给所有 renderer，由 CrashDialog 弹出展示
+      broadcastCrash({
+        source: 'main',
+        title: error.name || 'Uncaught Exception',
+        message: error.message || String(error),
+        stack: error.stack,
+        timestamp: new Date().toISOString()
+      })
     }
   })
 
@@ -72,3 +84,26 @@ export async function openLogsFolder(): Promise<string | null> {
 }
 
 export { log as logger }
+
+/**
+ * 广播崩溃信息到所有窗口。
+ *
+ * 分两类调用方：
+ *   - 内部：errorHandler.onError 捕获到 main 异常时调
+ *   - 外部 IPC：renderer 也可能直接调（renderer 自己的 window.onerror 走本地 dispatch
+ *     就行，不需要绕回 main 再回来；这个 export 主要给未来可能的「让 main 主动通报
+ *     某个错误」预留接口）
+ *
+ * 失败时静默吞掉——本来就是 last-resort 路径，不能再抛出造成连锁反应。
+ */
+export function broadcastCrash(info: CrashInfo): void {
+  try {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) {
+        win.webContents.send(CRASH_EVENT, info)
+      }
+    }
+  } catch (err) {
+    log.warn('[crash-broadcast] failed:', err)
+  }
+}

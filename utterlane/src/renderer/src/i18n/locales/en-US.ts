@@ -201,6 +201,16 @@ export const enUS: TranslationSchema = {
     kind_srt: 'SRT subtitles'
   },
 
+  crash: {
+    title: 'Unhandled error',
+    description:
+      'The error has been logged. Copy the details below to attach to your bug report, or open the logs folder for the full record.',
+    stack_label: 'Stack trace',
+    copy_btn: 'Copy error info',
+    open_logs_btn: 'Open logs folder',
+    copied: 'Error info copied to clipboard'
+  },
+
   about: {
     title: 'About',
     version: 'v{{version}}',

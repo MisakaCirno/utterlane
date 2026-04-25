@@ -201,6 +201,15 @@ export const zhCN = {
     kind_srt: 'SRT 字幕'
   },
 
+  crash: {
+    title: '应用程序遇到未处理的错误',
+    description: '错误已写入日志。可以复制下方信息附在反馈中，或打开日志目录查看完整记录。',
+    stack_label: '调用栈',
+    copy_btn: '复制错误信息',
+    open_logs_btn: '打开日志目录',
+    copied: '错误信息已复制到剪贴板'
+  },
+
   about: {
     title: '关于',
     version: 'v{{version}}',

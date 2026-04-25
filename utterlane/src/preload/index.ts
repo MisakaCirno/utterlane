@@ -4,6 +4,7 @@ import type { AppPreferences } from '@shared/preferences'
 import type { ProjectBundle, SegmentsFile, WorkspaceFile } from '@shared/project'
 import type { WriteTakeResult } from '@shared/recording'
 import type { AppInfo } from '@shared/appInfo'
+import type { CrashInfo } from '@shared/crash'
 
 // IPC 通道名需要和 main 侧保持一致。
 // 这里复制字面量而不是 import 主进程的常量，是因为 preload 打包时
@@ -29,6 +30,7 @@ const EXPORT_SUBTITLES_SRT = 'export:subtitles-srt'
 const LOGS_OPEN_FOLDER = 'logs:open-folder'
 
 const APP_GET_INFO = 'app:get-info'
+const APP_CRASH_EVENT = 'app:crash'
 
 /** 与 main 的 OpenResult 保持同步；preload 不 import main 代码，所以在这里复述结构 */
 export type OpenResult =
@@ -145,7 +147,18 @@ const api = {
 
   app: {
     /** 应用 / 运行时元信息（版本、Electron / Chromium / Node 版本、平台等） */
-    getInfo: (): Promise<AppInfo> => ipcRenderer.invoke(APP_GET_INFO)
+    getInfo: (): Promise<AppInfo> => ipcRenderer.invoke(APP_GET_INFO),
+
+    /**
+     * 订阅来自 main 的崩溃事件（uncaughtException / unhandledRejection）。
+     * Renderer 自身的错误不走这条——renderer 在本地直接 dispatch 即可。
+     * 返回 unsubscribe 函数。
+     */
+    onCrash: (cb: (info: CrashInfo) => void): (() => void) => {
+      const listener = (_: unknown, info: CrashInfo): void => cb(info)
+      ipcRenderer.on(APP_CRASH_EVENT, listener)
+      return () => ipcRenderer.removeListener(APP_CRASH_EVENT, listener)
+    }
   }
 }
 

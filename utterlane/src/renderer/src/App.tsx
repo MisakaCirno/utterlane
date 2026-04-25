@@ -9,6 +9,8 @@ import { WelcomeView } from './views/WelcomeView'
 import { ImportScriptDialog } from './dialogs/ImportScriptDialog'
 import { PreferencesDialog } from './dialogs/PreferencesDialog'
 import { AboutDialog } from './dialogs/AboutDialog'
+import { CrashDialog } from './dialogs/CrashDialog'
+import { reportCrash } from './store/crashStore'
 import { useEditorStore } from './store/editorStore'
 import { connectPreferencesStore, usePreferencesStore } from './store/preferencesStore'
 import { useDialogStore } from './store/dialogStore'
@@ -88,10 +90,16 @@ function App(): React.JSX.Element {
 
     const shortcutsCleanup = installKeyboardShortcuts()
 
+    // 订阅 main 端的崩溃事件 → 走和 renderer 自身错误同样的弹窗
+    const crashCleanup = window.api.app.onCrash((info) => {
+      reportCrash(info)
+    })
+
     return () => {
       cleanup?.()
       closeCleanup()
       shortcutsCleanup()
+      crashCleanup()
     }
   }, [])
 
@@ -117,6 +125,7 @@ function App(): React.JSX.Element {
         onOpenChange={(open) => !open && closePreferences()}
       />
       <AboutDialog open={aboutOpen} onOpenChange={(open) => !open && closeAbout()} />
+      <CrashDialog />
       <ConfirmHost />
       <ToastHost />
     </div>
