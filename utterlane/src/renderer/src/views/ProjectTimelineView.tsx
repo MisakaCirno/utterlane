@@ -34,6 +34,7 @@ import { cn } from '@renderer/lib/cn'
 import { useEditorStore } from '@renderer/store/editorStore'
 import { formatDuration } from '@renderer/lib/format'
 import { subscribePosition } from '@renderer/services/player'
+import { takeEffectiveDurationMs, takeEffectiveRange } from '@shared/project'
 
 /**
  * ProjectTimelineView — 整个项目的横向时间轴。
@@ -328,15 +329,18 @@ function TimelineClip({
   if (!seg) return null
   const current = seg.takes.find((t) => t.id === seg.selectedTakeId)
   const hasAudio = !!current
-  // 已录段：宽度严格等于 take 时长 × pxPerMs，外框和时间轴严格对齐
-  // 未录段：没有真实时长，给一个 placeholder 宽度让用户能选中（这部分会
-  // 让后续 clip 的视觉位置和时间轴产生一点偏差，但未录段本来就不计入播放
+  // 已录段：宽度等于「节选后有效时长」× pxPerMs。trim 之后 clip 宽度自然
+  // 反映「实际会播 / 导出的那段时间」，与 ProjectTimeline 的累计起点
+  // 算法一致。clip 内部展示原 take 时长 / 有效时长两个数字让用户对比。
+  // 未录段：没有真实时长，给 placeholder 宽度让用户能选中（这部分会让
+  // 后续 clip 的视觉位置和时间轴产生一点偏差，但未录段本来就不计入播放
   // 时间，可以接受）
   const placeholderWidth = Math.max(
     40,
     UNRECORDED_CLIP_WIDTH_AT_1X * Math.min(1, pxPerMs / BASE_PX_PER_MS)
   )
-  const width = hasAudio ? current.durationMs * pxPerMs : placeholderWidth
+  const effectiveDurationMs = current ? takeEffectiveDurationMs(current) : 0
+  const width = hasAudio ? effectiveDurationMs * pxPerMs : placeholderWidth
 
   const style: React.CSSProperties = {
     width,
@@ -380,7 +384,7 @@ function TimelineClip({
           <div className="flex items-center justify-between font-mono tabular-nums opacity-70">
             <span>{formatDuration(startMs)}</span>
             {hasAudio ? (
-              <span>{formatDuration(current.durationMs)}</span>
+              <span>{formatDuration(effectiveDurationMs)}</span>
             ) : (
               <span>{t('timeline.clip_unrecorded')}</span>
             )}
@@ -502,19 +506,26 @@ function TimelineContent({ pxPerMs }: { pxPerMs: number }): React.JSX.Element {
   const setTimelinePlayhead = useEditorStore((s) => s.setTimelinePlayhead)
   const persistedScrollLeft = useEditorStore.getState().timelineScrollLeft
 
-  // 每个 clip 的起点时间戳：累积「前序 clip 的 take 时长 + gapAfter 时长」。
-  // 顺手建一个 filePath → startMs 的反查表，给播放游标用：subscribePosition
-  // 给的是文件相对路径，需要映射回工程时间轴上的起点
+  // 每个 clip 的起点时间戳：累积「前序 clip 的有效时长 + gapAfter 时长」。
+  // 用 takeEffectiveDurationMs 让 trim 后的时间轴正确反映「实际会播 / 导
+  // 出的那段时间」——clip 宽度 / 游标 / 起播 ms 都按这个口径算。
+  //
+  // 顺手建 filePath → { segStart, trimStartMs } 的反查表给播放游标用：
+  // subscribePosition 给的是文件相对位置（含 trim 起点），需要减掉
+  // trimStart 后再加 segStart 才对齐工程时间轴
   const { startMsById, totalMs, startMsByFilePath } = useMemo(() => {
     const idMap = new Map<string, number>()
-    const pathMap = new Map<string, number>()
+    const pathMap = new Map<string, { segStart: number; trimStartMs: number }>()
     let acc = 0
     for (const id of order) {
       idMap.set(id, acc)
       const seg = segmentsById[id]
       const take = seg?.takes.find((t) => t.id === seg.selectedTakeId)
-      if (take) pathMap.set(take.filePath, acc)
-      acc += take?.durationMs ?? 0
+      if (take) {
+        const range = takeEffectiveRange(take)
+        pathMap.set(take.filePath, { segStart: acc, trimStartMs: range.startMs })
+        acc += range.endMs - range.startMs
+      }
       acc += seg?.gapAfter?.ms ?? 0
     }
     return { startMsById: idMap, totalMs: acc, startMsByFilePath: pathMap }
@@ -533,9 +544,11 @@ function TimelineContent({ pxPerMs }: { pxPerMs: number }): React.JSX.Element {
         setLivePlayheadMs(null)
         return
       }
-      const segStart = startMsByFilePath.get(path)
-      if (segStart === undefined) return
-      setLivePlayheadMs(segStart + ms)
+      const meta = startMsByFilePath.get(path)
+      if (!meta) return
+      // ms 是文件相对位置（含 trim 起点），减掉 trimStart 后才是「在
+      // effective 段内的偏移」，再加 segStart 才对齐工程时间轴
+      setLivePlayheadMs(meta.segStart + Math.max(0, ms - meta.trimStartMs))
     })
   }, [playback, startMsByFilePath])
 

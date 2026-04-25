@@ -444,9 +444,7 @@ export const createSegmentsSlice: SliceCreator<
     if (nextStart === before.start && nextEnd === before.end) return
     const after = { start: nextStart, end: nextEnd }
 
-    const writeTrim = (
-      val: { start: number | undefined; end: number | undefined }
-    ): void =>
+    const writeTrim = (val: { start: number | undefined; end: number | undefined }): void =>
       patch((s) => {
         const cur = s.segmentsById[segmentId]
         if (!cur) return null

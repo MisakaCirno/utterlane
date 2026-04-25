@@ -22,6 +22,7 @@ import { subscribeLevel } from '@renderer/services/recorder'
 import * as player from '@renderer/services/player'
 import { amplitudeToDb, dbToFill, formatDb } from '@renderer/lib/audio'
 import { DEFAULT_PREFERENCES } from '@shared/preferences'
+import { takeEffectiveRange } from '@shared/project'
 
 /**
  * 录音输入电平条（横向）。订阅 recorder.subscribeLevel 获取实时 RMS，
@@ -319,8 +320,15 @@ export function InspectorView(): React.JSX.Element {
                 <button
                   // 单 take 试听：直接走 player.playFile，不走 store 的
                   // playCurrentSegment——后者只播 selectedTakeId，这里允许
-                  // 用户预览非当前 take 而不必先「设为当前」
-                  onClick={() => void player.playFile(take.filePath)}
+                  // 用户预览非当前 take 而不必先「设为当前」。
+                  // 节选 take 也只播节选段，与 playCurrentSegment 一致
+                  onClick={() => {
+                    const range = takeEffectiveRange(take)
+                    const opts: { startMs?: number; endMs?: number } = {}
+                    if (range.startMs > 0) opts.startMs = range.startMs
+                    if (range.endMs < take.durationMs) opts.endMs = range.endMs
+                    void player.playFile(take.filePath, opts)
+                  }}
                   disabled={isMissing || playback !== 'idle'}
                   aria-label={t('inspector.take_play_aria')}
                   title={t('inspector.take_play_aria')}

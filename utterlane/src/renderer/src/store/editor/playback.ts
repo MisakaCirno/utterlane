@@ -1,6 +1,7 @@
 import * as player from '@renderer/services/player'
 import { showError } from '@renderer/store/toastStore'
 import i18n from '@renderer/i18n'
+import { takeEffectiveRange } from '@shared/project'
 import type { EditorActions, SliceCreator } from './types'
 import { pushWorkspace } from './save'
 
@@ -14,6 +15,24 @@ import { pushWorkspace } from './save'
  * 缺失文件守卫：playCurrentSegment 单段命中 missingTakeIds 时直接弹错
  * 提示用户去 Audio Audit 修复；playProject 跳过缺失段，连读不被中断。
  */
+
+/**
+ * 把节选区间整理成 player.playFile 的 options。
+ *   - startMs === 0 时省略字段，避免对 currentTime 的多余赋值
+ *   - endMs === fileDurationMs 时省略字段，避免无意义的 timeupdate 监听
+ *
+ * 等价于「无 trim 等同于不传 options」，让全段播放走最短路径
+ */
+function buildPlayOptions(
+  range: { startMs: number; endMs: number },
+  fileDurationMs: number
+): { startMs?: number; endMs?: number } {
+  const opts: { startMs?: number; endMs?: number } = {}
+  if (range.startMs > 0) opts.startMs = range.startMs
+  if (range.endMs < fileDurationMs) opts.endMs = range.endMs
+  return opts
+}
+
 export const createPlaybackSlice: SliceCreator<
   Pick<EditorActions, 'playCurrentSegment' | 'playProject' | 'stopPlayback' | 'togglePausePlayback'>
 > = (set, get) => ({
@@ -41,9 +60,13 @@ export const createPlaybackSlice: SliceCreator<
       return
     }
 
+    // 节选区间：take 设了 trim 就只播节选段，否则整段
+    const range = takeEffectiveRange(take)
+    const playOpts = buildPlayOptions(range, take.durationMs)
+
     set({ playback: 'segment', paused: false })
     try {
-      await player.playFile(take.filePath)
+      await player.playFile(take.filePath, playOpts)
     } finally {
       // 只有当 playback 还是我们这一轮设置的 'segment' 时才回落；
       // 如果期间被 playProject 接管，不覆盖它的状态
@@ -69,13 +92,20 @@ export const createPlaybackSlice: SliceCreator<
     const state = get()
     if (state.playback !== 'idle') return
 
-    // 收集可播 items + 累计起点：跳过缺失文件的 take（与导出「跳过未录段」
-    // 语义一致），同时算出每段在工程时间轴上的起点 ms 与本段长度
+    // 收集可播 items + 累计起点：跳过缺失文件的 take。
+    // 时间轴用「节选后的有效时长」累计——和 ProjectTimelineView 的 clip
+    // 宽度计算保持一致，游标 / 起播 ms 都算的是「实际会播出来的那段时间」
     type PlayableItem = {
       segmentId: string
       filePath: string
-      startMs: number
-      durationMs: number
+      /** 在工程时间轴上的起点（已剔除前序段的 trim 段） */
+      effectiveStartMs: number
+      /** 本段实际会播出的时长（trimEnd - trimStart） */
+      effectiveDurationMs: number
+      /** 文件相对的 trim 区间，传给 player.playFile */
+      trimStartMs: number
+      trimEndMs: number
+      fileDurationMs: number
     }
     const items: PlayableItem[] = []
     let cursor = 0
@@ -83,13 +113,18 @@ export const createPlaybackSlice: SliceCreator<
       const seg = state.segmentsById[id]
       const take = seg?.takes.find((t) => t.id === seg.selectedTakeId)
       if (take && !state.missingTakeIds.has(take.id)) {
+        const range = takeEffectiveRange(take)
+        const effectiveDur = range.endMs - range.startMs
         items.push({
           segmentId: id,
           filePath: take.filePath,
-          startMs: cursor,
-          durationMs: take.durationMs
+          effectiveStartMs: cursor,
+          effectiveDurationMs: effectiveDur,
+          trimStartMs: range.startMs,
+          trimEndMs: range.endMs,
+          fileDurationMs: take.durationMs
         })
-        cursor += take.durationMs
+        cursor += effectiveDur
       }
       cursor += seg?.gapAfter?.ms ?? 0
     }
@@ -99,9 +134,9 @@ export const createPlaybackSlice: SliceCreator<
     // playhead 落在 gap 区间，会找到 gap 之后的下一段；如果 playhead
     // 超过总时长，回退到从头播
     const playhead = state.timelinePlayheadMs
-    let startIdx = items.findIndex((it) => playhead < it.startMs + it.durationMs)
+    let startIdx = items.findIndex((it) => playhead < it.effectiveStartMs + it.effectiveDurationMs)
     if (startIdx < 0) startIdx = 0
-    const offsetWithinFirst = Math.max(0, playhead - items[startIdx].startMs)
+    const offsetWithinFirst = Math.max(0, playhead - items[startIdx].effectiveStartMs)
 
     set({ playback: 'project', paused: false })
     try {
@@ -111,9 +146,13 @@ export const createPlaybackSlice: SliceCreator<
         if (get().playback !== 'project') break
         set({ selectedSegmentId: item.segmentId })
         pushWorkspace(get())
-        // 仅第一段以游标偏移起播，后续段都从头
-        const playStartMs = i === startIdx ? offsetWithinFirst : 0
-        await player.playFile(item.filePath, playStartMs > 0 ? { startMs: playStartMs } : {})
+        // 第一段叠加段内偏移：trimStart + 用户在该段内的起播位置；
+        // 后续段从 trimStart 起播。endMs 始终是 trimEnd
+        const fileStartMs = (i === startIdx ? offsetWithinFirst : 0) + item.trimStartMs
+        await player.playFile(
+          item.filePath,
+          buildPlayOptions({ startMs: fileStartMs, endMs: item.trimEndMs }, item.fileDurationMs)
+        )
       }
       // 自然播完：把游标停在工程末尾，便于用户看到「播到哪了」
       if (get().playback === 'project') {
