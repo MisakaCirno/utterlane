@@ -1,6 +1,7 @@
 import type { Segment } from '@renderer/types/project'
 import { useHistoryStore } from '@renderer/store/historyStore'
-import type { EditorActions, SliceCreator } from './types'
+import { useEditorStore } from '@renderer/store/editorStore'
+import type { EditorActions, EditorState, SliceCreator } from './types'
 import { markDirty, pushWorkspace, scheduleSegmentsSave } from './save'
 
 /**
@@ -11,9 +12,18 @@ import { markDirty, pushWorkspace, scheduleSegmentsSave } from './save'
  *   - 写入 markDirty() 标记 + 调 scheduleSegmentsSave 触发 200ms debounce 落盘
  *   - 改 selectedSegmentId 时附带 pushWorkspace 让 workspace.json 同步
  *
- * 切分依据：所有 segment / take / gap / paragraph 的字段都属于工程内容
- * （segments.json 范畴），共享同一套副作用。把它们集中到一个 slice 既不
- * 拆得过碎，也方便 #19 改 history push API 时一次性更新这一组调用。
+ * === 新 push API ===
+ *
+ * 每条 mutation push 时直接传 { coalesceKey, labelKey, apply, revert }
+ * 闭包，apply / revert 通过 applyHistoryPatch 把 patch 函数喂回 store——
+ * patch 函数读「执行那一刻的 store 状态」决定怎么改，而不是依赖 push 时的
+ * 闭包变量。这点很关键：deleteSegment 之类的命令在 redo 时如果直接复用
+ * push 时的闭包数据，可能引用已被中间命令删掉的 Segment。让 patch 在
+ * 当前 state 上算 delta 是更稳健的做法。
+ *
+ * 对编辑路径不变量的「初始 mutation」仍走 set() 直接修改，与 apply 在
+ * 语义上重合但避免再走一次 applyHistoryPatch 的额外副作用调度——push 之后
+ * 的 set 只是把当前已构造好的 next 状态落进去
  */
 
 // ---------------------------------------------------------------------------
@@ -83,6 +93,18 @@ function splitScriptIntoSegments(rawText: string): Segment[] {
   return segments
 }
 
+/**
+ * apply / revert 的运行通道：把一个 patch 函数喂给 editorStore.applyHistoryPatch，
+ * 由它统一处理 markDirty + scheduleSegmentsSave + pushWorkspace 三件套。
+ *
+ * 用 lazy useEditorStore.getState() 而非传入 (set, get)：apply / revert 在
+ * push 之后才执行，那时 store 已经初始化完毕；这样 history 闭包不需要持
+ * 有 set/get 引用
+ */
+function patch(fn: (s: EditorState) => Partial<EditorState> | null): void {
+  useEditorStore.getState().applyHistoryPatch(fn)
+}
+
 // ---------------------------------------------------------------------------
 // slice
 // ---------------------------------------------------------------------------
@@ -119,16 +141,31 @@ export const createSegmentsSlice: SliceCreator<
     const afterOrder = segments.map((s) => s.id)
     const afterSelected = segments[0]?.id
 
-    // importScript 是覆盖式操作，before / after 都要完整记录；
-    // 未来改成追加式时只需换这一处的 before / after 构造方式，命令类型不用动
-    useHistoryStore.getState().push('importScript', 'history.import_script', {
-      type: 'importScript',
-      beforeOrder: prev.order.slice(),
-      beforeSegmentsById: { ...prev.segmentsById },
-      beforeSelectedSegmentId: prev.selectedSegmentId,
-      afterOrder: afterOrder.slice(),
-      afterSegmentsById: { ...segmentsById },
-      afterSelectedSegmentId: afterSelected
+    // importScript 是覆盖式操作：apply 写新内容、revert 完整恢复旧内容。
+    // 闭包持有 before / after 完整快照——这里两份 snapshot 可能很大（几千段
+    // 的工程），但 history 上限只有 100 条，单条覆盖式操作不会频繁出现，
+    // 整体内存可控
+    const beforeOrder = prev.order.slice()
+    const beforeSegmentsById = { ...prev.segmentsById }
+    const beforeSelectedSegmentId = prev.selectedSegmentId
+    const afterOrderCopy = afterOrder.slice()
+    const afterSegmentsByIdCopy = { ...segmentsById }
+
+    useHistoryStore.getState().push({
+      coalesceKey: 'importScript',
+      labelKey: 'history.import_script',
+      apply: () =>
+        patch(() => ({
+          order: afterOrderCopy.slice(),
+          segmentsById: { ...afterSegmentsByIdCopy },
+          selectedSegmentId: afterSelected
+        })),
+      revert: () =>
+        patch(() => ({
+          order: beforeOrder.slice(),
+          segmentsById: { ...beforeSegmentsById },
+          selectedSegmentId: beforeSelectedSegmentId
+        }))
     })
 
     set({
@@ -149,20 +186,27 @@ export const createSegmentsSlice: SliceCreator<
     // 中的中间态可能有前后空格，trim 由 UI 在 commit / blur 时显式做
     const sanitized = sanitizeSegmentText(text)
     if (seg.text === sanitized) return
+    const before = seg.text
+    const after = sanitized
+
+    const setText = (value: string): void =>
+      patch((s) => {
+        const cur = s.segmentsById[id]
+        if (!cur) return null
+        return { segmentsById: { ...s.segmentsById, [id]: { ...cur, text: value } } }
+      })
 
     // 同一 Segment 连续打字在 coalesce 窗内合并为一条，避免每个按键一格 undo
-    useHistoryStore.getState().push(`editText:${id}`, 'history.edit_text', {
-      type: 'editText',
-      segId: id,
-      before: seg.text,
-      after: sanitized
+    useHistoryStore.getState().push({
+      coalesceKey: `editText:${id}`,
+      labelKey: 'history.edit_text',
+      apply: () => setText(after),
+      revert: () => setText(before),
+      mergeable: true
     })
 
     set({
-      segmentsById: {
-        ...prev.segmentsById,
-        [id]: { ...seg, text: sanitized }
-      },
+      segmentsById: { ...prev.segmentsById, [id]: { ...seg, text: sanitized } },
       ...markDirty()
     })
     scheduleSegmentsSave()
@@ -176,19 +220,21 @@ export const createSegmentsSlice: SliceCreator<
   reorderSegments: (nextOrder) => {
     const prev = get()
     if (nextOrder.length !== prev.order.length) return
-    // 成员必须和旧 order 完全一致，仅顺序不同
     const currentSet = new Set(prev.order)
     for (const id of nextOrder) {
       if (!currentSet.has(id)) return
     }
-    // 顺序未变则不写盘，也不入栈
     const same = nextOrder.every((id, i) => id === prev.order[i])
     if (same) return
 
-    useHistoryStore.getState().push('reorder', 'history.reorder', {
-      type: 'reorder',
-      before: prev.order.slice(),
-      after: nextOrder.slice()
+    const before = prev.order.slice()
+    const after = nextOrder.slice()
+
+    useHistoryStore.getState().push({
+      coalesceKey: 'reorder',
+      labelKey: 'history.reorder',
+      apply: () => patch(() => ({ order: after.slice() })),
+      revert: () => patch(() => ({ order: before.slice() }))
     })
 
     set({ order: nextOrder.slice(), ...markDirty() })
@@ -203,21 +249,43 @@ export const createSegmentsSlice: SliceCreator<
     const nextOrder = prev.order.filter((oid) => oid !== id)
     const nextById = { ...prev.segmentsById }
     delete nextById[id]
-    // 选中态跟随：若删除的是当前选中段，自动选相邻段（优先后一个，没有就前一个，都没有就清空）
     let nextSelected = prev.selectedSegmentId
     if (nextSelected === id) {
       nextSelected = nextOrder[removedIdx] ?? nextOrder[removedIdx - 1]
     }
 
-    // 保存完整 Segment（含所有 Takes），这样 undo 能原样还原；
-    // 即便之后 takes 被别的操作动过，这个 cmd 依然还原删除那一刻的状态
-    useHistoryStore.getState().push(`deleteSegment:${id}`, 'history.delete_segment', {
-      type: 'deleteSegment',
-      id,
-      index: removedIdx,
-      segment: seg,
-      prevSelectedSegmentId: prev.selectedSegmentId,
-      nextSelectedSegmentId: nextSelected
+    // 完整 Segment 快照（含所有 Takes）放进闭包，revert 能原样还原；
+    // 即便之后 takes 被别的操作动过，这条 entry 仍然还原删除那一刻的状态
+    const removedSegment = seg
+    const removedIndex = removedIdx
+    const prevSelected = prev.selectedSegmentId
+    const nextSelectedFinal = nextSelected
+
+    useHistoryStore.getState().push({
+      coalesceKey: `deleteSegment:${id}`,
+      labelKey: 'history.delete_segment',
+      apply: () =>
+        patch((s) => {
+          const order = s.order.filter((oid) => oid !== id)
+          const byId = { ...s.segmentsById }
+          delete byId[id]
+          return {
+            order,
+            segmentsById: byId,
+            selectedSegmentId: nextSelectedFinal
+          }
+        }),
+      revert: () =>
+        patch((s) => {
+          const nextOrderArr = s.order.slice()
+          const insertAt = Math.min(removedIndex, nextOrderArr.length)
+          nextOrderArr.splice(insertAt, 0, id)
+          return {
+            order: nextOrderArr,
+            segmentsById: { ...s.segmentsById, [id]: removedSegment },
+            selectedSegmentId: prevSelected
+          }
+        })
     })
 
     set({
@@ -234,12 +302,23 @@ export const createSegmentsSlice: SliceCreator<
     const prev = get()
     const seg = prev.segmentsById[segmentId]
     if (!seg || seg.selectedTakeId === takeId) return
+    const before = seg.selectedTakeId
+    const after = takeId
 
-    useHistoryStore.getState().push(`setSelectedTake:${segmentId}`, 'history.set_selected_take', {
-      type: 'setSelectedTake',
-      segId: segmentId,
-      before: seg.selectedTakeId,
-      after: takeId
+    const setSelected = (value: string | undefined): void =>
+      patch((s) => {
+        const cur = s.segmentsById[segmentId]
+        if (!cur) return null
+        return {
+          segmentsById: { ...s.segmentsById, [segmentId]: { ...cur, selectedTakeId: value } }
+        }
+      })
+
+    useHistoryStore.getState().push({
+      coalesceKey: `setSelectedTake:${segmentId}`,
+      labelKey: 'history.set_selected_take',
+      apply: () => setSelected(after),
+      revert: () => setSelected(before)
     })
 
     set({
@@ -273,16 +352,48 @@ export const createSegmentsSlice: SliceCreator<
       nextSelectedTakeId = neighbor?.id
     }
 
+    const prevSelectedTakeId = seg.selectedTakeId
+    const nextSelectedTakeIdFinal = nextSelectedTakeId
+    const takeIndex = removedIdx
+    const take = removedTake
+
     // deleteTake 只改 segments.json，不删 WAV 文件（孤儿由专用清理工具处理）。
-    // 这个设计让 undo 变得简单：revert 时 Take 引用恢复，磁盘文件原本就还在，
-    // 不需要做任何 IO
-    useHistoryStore.getState().push(`deleteTake:${segmentId}:${takeId}`, 'history.delete_take', {
-      type: 'deleteTake',
-      segId: segmentId,
-      takeIndex: removedIdx,
-      take: removedTake,
-      prevSelectedTakeId: seg.selectedTakeId,
-      nextSelectedTakeId
+    // 这个设计让 undo 变得简单：revert 时 Take 引用恢复，磁盘文件原本就还在
+    useHistoryStore.getState().push({
+      coalesceKey: `deleteTake:${segmentId}:${takeId}`,
+      labelKey: 'history.delete_take',
+      apply: () =>
+        patch((s) => {
+          const cur = s.segmentsById[segmentId]
+          if (!cur) return null
+          return {
+            segmentsById: {
+              ...s.segmentsById,
+              [segmentId]: {
+                ...cur,
+                takes: cur.takes.filter((t) => t.id !== takeId),
+                selectedTakeId: nextSelectedTakeIdFinal
+              }
+            }
+          }
+        }),
+      revert: () =>
+        patch((s) => {
+          const cur = s.segmentsById[segmentId]
+          if (!cur) return null
+          const restored = cur.takes.slice()
+          restored.splice(Math.min(takeIndex, restored.length), 0, take)
+          return {
+            segmentsById: {
+              ...s.segmentsById,
+              [segmentId]: {
+                ...cur,
+                takes: restored,
+                selectedTakeId: prevSelectedTakeId
+              }
+            }
+          }
+        })
     })
 
     set({
@@ -312,7 +423,6 @@ export const createSegmentsSlice: SliceCreator<
     const seg = prev.segmentsById[segmentId]
     if (!seg) return
     const text = seg.text
-    // 越界保护：拆分点必须落在文本中段，否则一段空一段全的拆没意义
     if (splitAt <= 0 || splitAt >= text.length) return
     const sourceIdx = prev.order.indexOf(segmentId)
     if (sourceIdx < 0) return
@@ -326,17 +436,54 @@ export const createSegmentsSlice: SliceCreator<
     // 拆分后这个语义自然属于「后半段（新段）与原下一段之间」，所以转交给
     // 新段；前半段的 gapAfter 清零（中间是新生成的内部边界，本不该有间隔）
     const sourceGapBefore = seg.gapAfter ? { ...seg.gapAfter } : undefined
+    const sourceTextBefore = text
+    const newSegmentIndex = sourceIdx + 1
+    const prevSelected = prev.selectedSegmentId
 
-    useHistoryStore.getState().push(`splitSegment:${segmentId}`, 'history.split_segment', {
-      type: 'splitSegment',
-      sourceSegmentId: segmentId,
-      sourceTextBefore: text,
-      splitAt,
-      sourceGapBefore,
-      newSegmentId,
-      newSegmentIndex: sourceIdx + 1,
-      prevSelectedSegmentId: prev.selectedSegmentId,
-      nextSelectedSegmentId: prev.selectedSegmentId
+    useHistoryStore.getState().push({
+      coalesceKey: `splitSegment:${segmentId}`,
+      labelKey: 'history.split_segment',
+      apply: () =>
+        patch((s) => {
+          const source = s.segmentsById[segmentId]
+          if (!source) return null
+          const front = { ...source, text: beforeText }
+          delete front.gapAfter
+          const newSegment: Segment = {
+            id: newSegmentId,
+            text: afterText,
+            takes: []
+          }
+          if (sourceGapBefore) newSegment.gapAfter = { ...sourceGapBefore }
+          const order = s.order.slice()
+          order.splice(newSegmentIndex, 0, newSegmentId)
+          return {
+            order,
+            segmentsById: {
+              ...s.segmentsById,
+              [segmentId]: front,
+              [newSegmentId]: newSegment
+            },
+            selectedSegmentId: prevSelected
+          }
+        }),
+      revert: () =>
+        patch((s) => {
+          const source = s.segmentsById[segmentId]
+          if (!source) return null
+          const restored = { ...source, text: sourceTextBefore }
+          if (sourceGapBefore) restored.gapAfter = { ...sourceGapBefore }
+          else delete restored.gapAfter
+          const order = s.order.filter((id) => id !== newSegmentId)
+          const byId = { ...s.segmentsById }
+          delete byId[newSegmentId]
+          byId[segmentId] = restored
+          return {
+            order,
+            segmentsById: byId,
+            selectedSegmentId: prevSelected
+          }
+        })
     })
 
     const nextOrder = prev.order.slice()
@@ -360,7 +507,7 @@ export const createSegmentsSlice: SliceCreator<
   /**
    * 合并行为：
    *   - 必须存在「前一段」（segmentId 在 order 中 idx > 0），否则 no-op
-   *   - 文本：`${prev.text} ${curr.text}`（中间加空格；不区分中英文，
+   *   - 文本：`${prev.text} ${curr.text}`（中间加空格；不区分中英文,
    *     用户合完可以再编辑）。两端先 trim 避免多余空白
    *   - takes：append curr.takes 到 prev.takes 末尾。selectedTakeId 不动
    *     （前一段原本选哪个还选哪个）
@@ -369,7 +516,7 @@ export const createSegmentsSlice: SliceCreator<
   mergeSegmentWithPrevious: (segmentId) => {
     const prev = get()
     const idx = prev.order.indexOf(segmentId)
-    if (idx <= 0) return // 已经是首段，无前一段可合
+    if (idx <= 0) return
     const targetId = prev.order[idx - 1]
     const target = prev.segmentsById[targetId]
     const curr = prev.segmentsById[segmentId]
@@ -379,25 +526,62 @@ export const createSegmentsSlice: SliceCreator<
     const targetTakesBefore = target.takes
     const targetGapBefore = target.gapAfter ? { ...target.gapAfter } : undefined
     const mergedText = `${target.text.trim()} ${curr.text.trim()}`.trim()
+    const mergedSegment = curr
+    const mergedIndex = idx
+    const prevSelected = prev.selectedSegmentId
 
-    useHistoryStore.getState().push(`mergeSegment:${segmentId}`, 'history.merge_segment', {
-      type: 'mergeSegment',
-      targetSegmentId: targetId,
-      targetTextBefore,
-      targetTextAfter: mergedText,
-      targetTakesBefore,
-      targetGapBefore,
-      mergedSegment: curr,
-      mergedIndex: idx,
-      prevSelectedSegmentId: prev.selectedSegmentId,
-      nextSelectedSegmentId: targetId
+    useHistoryStore.getState().push({
+      coalesceKey: `mergeSegment:${segmentId}`,
+      labelKey: 'history.merge_segment',
+      apply: () =>
+        patch((s) => {
+          const tgt = s.segmentsById[targetId]
+          if (!tgt) return null
+          const order = s.order.filter((id) => id !== segmentId)
+          const byId = { ...s.segmentsById }
+          delete byId[segmentId]
+          const merged = {
+            ...tgt,
+            text: mergedText,
+            takes: [...targetTakesBefore, ...mergedSegment.takes]
+          }
+          if (mergedSegment.gapAfter) merged.gapAfter = { ...mergedSegment.gapAfter }
+          else delete merged.gapAfter
+          byId[targetId] = merged
+          return {
+            order,
+            segmentsById: byId,
+            selectedSegmentId: targetId
+          }
+        }),
+      revert: () =>
+        patch((s) => {
+          const tgt = s.segmentsById[targetId]
+          if (!tgt) return null
+          const order = s.order.slice()
+          order.splice(mergedIndex, 0, mergedSegment.id)
+          const restoredTarget = {
+            ...tgt,
+            text: targetTextBefore,
+            takes: targetTakesBefore
+          }
+          if (targetGapBefore) restoredTarget.gapAfter = { ...targetGapBefore }
+          else delete restoredTarget.gapAfter
+          return {
+            order,
+            segmentsById: {
+              ...s.segmentsById,
+              [targetId]: restoredTarget,
+              [mergedSegment.id]: mergedSegment
+            },
+            selectedSegmentId: prevSelected
+          }
+        })
     })
 
     const nextOrder = prev.order.filter((id) => id !== segmentId)
     const nextById = { ...prev.segmentsById }
     delete nextById[segmentId]
-    // merged 体的 gapAfter 接管 curr 的（= 合并体到下一段的间隔）；
-    // target 原来的 gapAfter（= target → curr 的内部边界）随合并消失
     const mergedTarget = {
       ...target,
       text: mergedText,
@@ -421,13 +605,35 @@ export const createSegmentsSlice: SliceCreator<
     const newId = crypto.randomUUID()
     const seg: Segment = { id: newId, text: text ?? '', takes: [] }
     const insertIdx = prev.order.length
-    useHistoryStore.getState().push(`insertSegment:${newId}`, 'history.insert_segment', {
-      type: 'insertSegment',
-      index: insertIdx,
-      segment: seg,
-      prevSelectedSegmentId: prev.selectedSegmentId,
-      nextSelectedSegmentId: newId
+    const prevSelected = prev.selectedSegmentId
+    const insertedSegment = seg
+
+    useHistoryStore.getState().push({
+      coalesceKey: `insertSegment:${newId}`,
+      labelKey: 'history.insert_segment',
+      apply: () =>
+        patch((s) => {
+          const order = s.order.slice()
+          order.splice(Math.min(insertIdx, order.length), 0, newId)
+          return {
+            order,
+            segmentsById: { ...s.segmentsById, [newId]: insertedSegment },
+            selectedSegmentId: newId
+          }
+        }),
+      revert: () =>
+        patch((s) => {
+          const order = s.order.filter((id) => id !== newId)
+          const byId = { ...s.segmentsById }
+          delete byId[newId]
+          return {
+            order,
+            segmentsById: byId,
+            selectedSegmentId: prevSelected
+          }
+        })
     })
+
     set({
       order: [...prev.order, newId],
       segmentsById: { ...prev.segmentsById, [newId]: seg },
@@ -446,13 +652,36 @@ export const createSegmentsSlice: SliceCreator<
     if (refIdx < 0) return null
     const newId = crypto.randomUUID()
     const seg: Segment = { id: newId, text: text ?? '', takes: [] }
-    useHistoryStore.getState().push(`insertSegment:${newId}`, 'history.insert_segment_before', {
-      type: 'insertSegment',
-      index: refIdx,
-      segment: seg,
-      prevSelectedSegmentId: prev.selectedSegmentId,
-      nextSelectedSegmentId: newId
+    const insertIdx = refIdx
+    const prevSelected = prev.selectedSegmentId
+    const insertedSegment = seg
+
+    useHistoryStore.getState().push({
+      coalesceKey: `insertSegment:${newId}`,
+      labelKey: 'history.insert_segment_before',
+      apply: () =>
+        patch((s) => {
+          const order = s.order.slice()
+          order.splice(Math.min(insertIdx, order.length), 0, newId)
+          return {
+            order,
+            segmentsById: { ...s.segmentsById, [newId]: insertedSegment },
+            selectedSegmentId: newId
+          }
+        }),
+      revert: () =>
+        patch((s) => {
+          const order = s.order.filter((id) => id !== newId)
+          const byId = { ...s.segmentsById }
+          delete byId[newId]
+          return {
+            order,
+            segmentsById: byId,
+            selectedSegmentId: prevSelected
+          }
+        })
     })
+
     const nextOrder = prev.order.slice()
     nextOrder.splice(refIdx, 0, newId)
     set({
@@ -473,13 +702,36 @@ export const createSegmentsSlice: SliceCreator<
     if (refIdx < 0) return null
     const newId = crypto.randomUUID()
     const seg: Segment = { id: newId, text: text ?? '', takes: [] }
-    useHistoryStore.getState().push(`insertSegment:${newId}`, 'history.insert_segment_after', {
-      type: 'insertSegment',
-      index: refIdx + 1,
-      segment: seg,
-      prevSelectedSegmentId: prev.selectedSegmentId,
-      nextSelectedSegmentId: newId
+    const insertIdx = refIdx + 1
+    const prevSelected = prev.selectedSegmentId
+    const insertedSegment = seg
+
+    useHistoryStore.getState().push({
+      coalesceKey: `insertSegment:${newId}`,
+      labelKey: 'history.insert_segment_after',
+      apply: () =>
+        patch((s) => {
+          const order = s.order.slice()
+          order.splice(Math.min(insertIdx, order.length), 0, newId)
+          return {
+            order,
+            segmentsById: { ...s.segmentsById, [newId]: insertedSegment },
+            selectedSegmentId: newId
+          }
+        }),
+      revert: () =>
+        patch((s) => {
+          const order = s.order.filter((id) => id !== newId)
+          const byId = { ...s.segmentsById }
+          delete byId[newId]
+          return {
+            order,
+            segmentsById: byId,
+            selectedSegmentId: prevSelected
+          }
+        })
     })
+
     const nextOrder = prev.order.slice()
     nextOrder.splice(refIdx + 1, 0, newId)
     set({
@@ -497,12 +749,28 @@ export const createSegmentsSlice: SliceCreator<
   clearAllSegments: () => {
     const prev = get()
     if (prev.order.length === 0) return
-    useHistoryStore.getState().push('clearSegments', 'history.clear_segments', {
-      type: 'clearSegments',
-      beforeOrder: prev.order.slice(),
-      beforeSegmentsById: { ...prev.segmentsById },
-      beforeSelectedSegmentId: prev.selectedSegmentId
+
+    const beforeOrder = prev.order.slice()
+    const beforeSegmentsById = { ...prev.segmentsById }
+    const beforeSelectedSegmentId = prev.selectedSegmentId
+
+    useHistoryStore.getState().push({
+      coalesceKey: 'clearSegments',
+      labelKey: 'history.clear_segments',
+      apply: () =>
+        patch(() => ({
+          order: [],
+          segmentsById: {},
+          selectedSegmentId: undefined
+        })),
+      revert: () =>
+        patch(() => ({
+          order: beforeOrder.slice(),
+          segmentsById: { ...beforeSegmentsById },
+          selectedSegmentId: beforeSelectedSegmentId
+        }))
     })
+
     set({
       order: [],
       segmentsById: {},
@@ -519,16 +787,25 @@ export const createSegmentsSlice: SliceCreator<
     const seg = prev.segmentsById[segmentId]
     if (!seg) return
     const before = seg.paragraphStart
-    // before 实际是 boolean | undefined；和目标值都规范成 boolean 再比较
     if (!!before === value) return
-    useHistoryStore
-      .getState()
-      .push(`setParagraphStart:${segmentId}`, 'history.set_paragraph_start', {
-        type: 'setParagraphStart',
-        segId: segmentId,
-        before,
-        after: value
+
+    const writeFlag = (flag: boolean | undefined): void =>
+      patch((s) => {
+        const cur = s.segmentsById[segmentId]
+        if (!cur) return null
+        const next = { ...cur }
+        if (flag) next.paragraphStart = true
+        else delete next.paragraphStart
+        return { segmentsById: { ...s.segmentsById, [segmentId]: next } }
       })
+
+    useHistoryStore.getState().push({
+      coalesceKey: `setParagraphStart:${segmentId}`,
+      labelKey: 'history.set_paragraph_start',
+      apply: () => writeFlag(value),
+      revert: () => writeFlag(before)
+    })
+
     const nextSeg = { ...seg }
     if (value) nextSeg.paragraphStart = true
     else delete nextSeg.paragraphStart
@@ -543,16 +820,28 @@ export const createSegmentsSlice: SliceCreator<
     const prev = get()
     const seg = prev.segmentsById[segmentId]
     if (!seg) return
-    const before = seg.gapAfter
-    if (gapEquals(before, gap)) return
+    const before = seg.gapAfter ? { ...seg.gapAfter } : undefined
+    if (gapEquals(seg.gapAfter, gap)) return
+    const after = gap ? { ...gap } : undefined
+
+    const writeGap = (value: { ms: number; manual?: boolean } | undefined): void =>
+      patch((s) => {
+        const cur = s.segmentsById[segmentId]
+        if (!cur) return null
+        const next = { ...cur }
+        if (value && value.ms > 0) next.gapAfter = { ms: value.ms, manual: value.manual }
+        else delete next.gapAfter
+        return { segmentsById: { ...s.segmentsById, [segmentId]: next } }
+      })
 
     // coalesceKey 加 segId 后缀：连续拖拽同一段的 spacer 时合并成一格 undo；
     // 切到别段拖拽则开新条目
-    useHistoryStore.getState().push(`setSegmentGap:${segmentId}`, 'history.set_segment_gap', {
-      type: 'setSegmentGap',
-      segId: segmentId,
-      before: before ? { ...before } : undefined,
-      after: gap ? { ...gap } : undefined
+    useHistoryStore.getState().push({
+      coalesceKey: `setSegmentGap:${segmentId}`,
+      labelKey: 'history.set_segment_gap',
+      apply: () => writeGap(after),
+      revert: () => writeGap(before),
+      mergeable: true
     })
 
     const nextSeg = { ...seg }
@@ -568,58 +857,16 @@ export const createSegmentsSlice: SliceCreator<
   resetGapsToDefault: (defaults) => {
     const prev = get()
     if (prev.order.length <= 1) return
-    const edits: Array<{
-      segId: string
-      before: { ms: number; manual?: boolean } | undefined
-      after: { ms: number; manual?: boolean } | undefined
-    }> = []
-
-    for (let i = 0; i < prev.order.length; i++) {
-      const segId = prev.order[i]
-      const seg = prev.segmentsById[segId]
-      if (!seg) continue
-      if (i === prev.order.length - 1) continue // 最后一段无意义
-      const next = prev.segmentsById[prev.order[i + 1]]
-      const isParagraphBoundary = !!next?.paragraphStart
-      const ms = isParagraphBoundary ? defaults.paragraphMs : defaults.sentenceMs
-      // reset 写入的是「非 manual 的默认值」——清掉 manual 标志，让下次
-      // applyDefaultGaps 还能继续覆盖它
-      const newGap = ms > 0 ? { ms } : undefined
-
-      if (gapEquals(seg.gapAfter, newGap)) continue
-      edits.push({
-        segId,
-        before: seg.gapAfter ? { ...seg.gapAfter } : undefined,
-        after: newGap
-      })
-    }
+    const edits = collectGapEdits(prev, defaults, /* skipManual */ false)
     if (edits.length === 0) return
 
-    useHistoryStore.getState().push('resetGapsToDefault', 'history.reset_gaps_to_default', {
-      type: 'applyDefaultGaps',
-      edits
-    })
-
-    const nextById = { ...prev.segmentsById }
-    for (const e of edits) {
-      const seg = nextById[e.segId]
-      if (!seg) continue
-      const nextSeg = { ...seg }
-      if (e.after) nextSeg.gapAfter = { ...e.after }
-      else delete nextSeg.gapAfter
-      nextById[e.segId] = nextSeg
-    }
-    set({ segmentsById: nextById, ...markDirty() })
-    scheduleSegmentsSave()
+    pushGapBatch(edits, 'resetGapsToDefault', 'history.reset_gaps_to_default')
+    applyGapBatchInline(prev, set, edits)
   },
 
   clearAutoGaps: () => {
     const prev = get()
-    const edits: Array<{
-      segId: string
-      before: { ms: number; manual?: boolean } | undefined
-      after: { ms: number; manual?: boolean } | undefined
-    }> = []
+    const edits: GapEdit[] = []
     for (const segId of prev.order) {
       const seg = prev.segmentsById[segId]
       if (!seg) continue
@@ -633,73 +880,18 @@ export const createSegmentsSlice: SliceCreator<
     }
     if (edits.length === 0) return
 
-    useHistoryStore.getState().push('clearAutoGaps', 'history.clear_auto_gaps', {
-      type: 'applyDefaultGaps',
-      edits
-    })
-
-    const nextById = { ...prev.segmentsById }
-    for (const e of edits) {
-      const seg = nextById[e.segId]
-      if (!seg) continue
-      const nextSeg = { ...seg }
-      delete nextSeg.gapAfter
-      nextById[e.segId] = nextSeg
-    }
-    set({ segmentsById: nextById, ...markDirty() })
-    scheduleSegmentsSave()
+    pushGapBatch(edits, 'clearAutoGaps', 'history.clear_auto_gaps')
+    applyGapBatchInline(prev, set, edits)
   },
 
   applyDefaultGaps: (defaults) => {
     const prev = get()
     if (prev.order.length <= 1) return
-    const edits: Array<{
-      segId: string
-      before: { ms: number; manual?: boolean } | undefined
-      after: { ms: number; manual?: boolean } | undefined
-    }> = []
-
-    for (let i = 0; i < prev.order.length; i++) {
-      const segId = prev.order[i]
-      const seg = prev.segmentsById[segId]
-      if (!seg) continue
-      // 最后一段的 gapAfter 在拼接里无意义，不写
-      if (i === prev.order.length - 1) continue
-      // 用户手动设过的不动
-      if (seg.gapAfter?.manual) continue
-
-      // 决定句间还是段间：依据「下一段是否为段首」
-      const next = prev.segmentsById[prev.order[i + 1]]
-      const isParagraphBoundary = !!next?.paragraphStart
-      const ms = isParagraphBoundary ? defaults.paragraphMs : defaults.sentenceMs
-      const newGap = ms > 0 ? { ms } : undefined
-
-      if (gapEquals(seg.gapAfter, newGap)) continue
-      edits.push({
-        segId,
-        before: seg.gapAfter ? { ...seg.gapAfter } : undefined,
-        after: newGap
-      })
-    }
-
+    const edits = collectGapEdits(prev, defaults, /* skipManual */ true)
     if (edits.length === 0) return
 
-    useHistoryStore.getState().push('applyDefaultGaps', 'history.apply_default_gaps', {
-      type: 'applyDefaultGaps',
-      edits
-    })
-
-    const nextById = { ...prev.segmentsById }
-    for (const e of edits) {
-      const seg = nextById[e.segId]
-      if (!seg) continue
-      const nextSeg = { ...seg }
-      if (e.after) nextSeg.gapAfter = { ...e.after }
-      else delete nextSeg.gapAfter
-      nextById[e.segId] = nextSeg
-    }
-    set({ segmentsById: nextById, ...markDirty() })
-    scheduleSegmentsSave()
+    pushGapBatch(edits, 'applyDefaultGaps', 'history.apply_default_gaps')
+    applyGapBatchInline(prev, set, edits)
   },
 
   replaceAllInSegments: (find, replaceWith) => {
@@ -717,11 +909,28 @@ export const createSegmentsSlice: SliceCreator<
     }
     if (edits.length === 0) return 0
 
-    useHistoryStore.getState().push('replaceAll', 'history.replace_all', {
-      type: 'replaceAll',
-      find,
-      replaceWith,
-      edits
+    const editsCopy = edits.map((e) => ({ ...e }))
+    useHistoryStore.getState().push({
+      coalesceKey: 'replaceAll',
+      labelKey: 'history.replace_all',
+      apply: () =>
+        patch((s) => {
+          const byId = { ...s.segmentsById }
+          for (const e of editsCopy) {
+            const cur = byId[e.segId]
+            if (cur) byId[e.segId] = { ...cur, text: e.after }
+          }
+          return { segmentsById: byId }
+        }),
+      revert: () =>
+        patch((s) => {
+          const byId = { ...s.segmentsById }
+          for (const e of editsCopy) {
+            const cur = byId[e.segId]
+            if (cur) byId[e.segId] = { ...cur, text: e.before }
+          }
+          return { segmentsById: byId }
+        })
     })
 
     const nextById = { ...prev.segmentsById }
@@ -760,3 +969,104 @@ export const createSegmentsSlice: SliceCreator<
     scheduleSegmentsSave()
   }
 })
+
+// ---------------------------------------------------------------------------
+// gap 批量编辑共享逻辑：apply/reset/clear 三个 action 都走相同的 edits 形态
+// ---------------------------------------------------------------------------
+
+type GapEdit = {
+  segId: string
+  before: { ms: number; manual?: boolean } | undefined
+  after: { ms: number; manual?: boolean } | undefined
+}
+
+/**
+ * 按当前 order 计算出每段应当生效的 gap，返回与现状不同的 edits。
+ * skipManual = true 时跳过用户手动设过的段；false 时一视同仁覆盖。
+ */
+function collectGapEdits(
+  state: EditorState,
+  defaults: { sentenceMs: number; paragraphMs: number },
+  skipManual: boolean
+): GapEdit[] {
+  const edits: GapEdit[] = []
+  for (let i = 0; i < state.order.length; i++) {
+    const segId = state.order[i]
+    const seg = state.segmentsById[segId]
+    if (!seg) continue
+    // 最后一段的 gapAfter 在拼接里无意义，不写
+    if (i === state.order.length - 1) continue
+    if (skipManual && seg.gapAfter?.manual) continue
+
+    // 决定句间还是段间：依据「下一段是否为段首」
+    const next = state.segmentsById[state.order[i + 1]]
+    const isParagraphBoundary = !!next?.paragraphStart
+    const ms = isParagraphBoundary ? defaults.paragraphMs : defaults.sentenceMs
+    const newGap = ms > 0 ? { ms } : undefined
+
+    if (gapEquals(seg.gapAfter, newGap)) continue
+    edits.push({
+      segId,
+      before: seg.gapAfter ? { ...seg.gapAfter } : undefined,
+      after: newGap
+    })
+  }
+  return edits
+}
+
+function pushGapBatch(edits: GapEdit[], coalesceKey: string, labelKey: string): void {
+  const editsCopy = edits.map((e) => ({
+    segId: e.segId,
+    before: e.before ? { ...e.before } : undefined,
+    after: e.after ? { ...e.after } : undefined
+  }))
+  useHistoryStore.getState().push({
+    coalesceKey,
+    labelKey,
+    apply: () =>
+      patch((s) => {
+        const byId = { ...s.segmentsById }
+        for (const e of editsCopy) {
+          const seg = byId[e.segId]
+          if (!seg) continue
+          const next = { ...seg }
+          if (e.after) next.gapAfter = { ...e.after }
+          else delete next.gapAfter
+          byId[e.segId] = next
+        }
+        return { segmentsById: byId }
+      }),
+    revert: () =>
+      patch((s) => {
+        const byId = { ...s.segmentsById }
+        for (const e of editsCopy) {
+          const seg = byId[e.segId]
+          if (!seg) continue
+          const next = { ...seg }
+          if (e.before) next.gapAfter = { ...e.before }
+          else delete next.gapAfter
+          byId[e.segId] = next
+        }
+        return { segmentsById: byId }
+      })
+  })
+}
+
+/** 把 edits 直接应用到当前 state（push 之后的初始 mutation） */
+function applyGapBatchInline(
+  prev: EditorState,
+  set: (partial: Partial<EditorState>) => void,
+  edits: GapEdit[]
+): void {
+  const nextById = { ...prev.segmentsById }
+  for (const e of edits) {
+    const seg = nextById[e.segId]
+    if (!seg) continue
+    const nextSeg = { ...seg }
+    if (e.after) nextSeg.gapAfter = { ...e.after }
+    else delete nextSeg.gapAfter
+    nextById[e.segId] = nextSeg
+  }
+  set({ segmentsById: nextById, ...markDirty() })
+  scheduleSegmentsSave()
+}

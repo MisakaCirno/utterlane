@@ -328,11 +328,7 @@ export const useHistoryStore = create<HistoryState>((set, get) => ({
 
   // 实现签名是宽松的 (a, b?, c?)，运行期按参数形态分派。新 API 只传一个对象，
   // 旧 API 传三个参数；TypeScript 重载（HistoryState.push）保证调用点类型安全。
-  push: ((
-    a: HistoryCommandSpec | string,
-    b?: string,
-    c?: Command
-  ) => {
+  push: ((a: HistoryCommandSpec | string, b?: string, c?: Command) => {
     const now = Date.now()
     if (typeof a !== 'string') {
       // 新 API
