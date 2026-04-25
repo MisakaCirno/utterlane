@@ -1,33 +1,35 @@
 import { encodeWavFromPcm } from './wavEncoder'
+// Vite 用 ?url 后缀把 worklet 文件 emit 为静态资源，URL 在 dev / prod 都
+// 稳定指向 'self' 同源——避免 CSP script-src 拦截 blob: URL。worklet
+// runtime 通过 audioContext.audioWorklet.addModule(url) 在隔离环境里加载它
+import workletUrl from './recorder-worklet.js?url'
 
 /**
- * 第一版录音后端：Web Audio（getUserMedia + ScriptProcessor）。
+ * 录音后端：Web Audio (getUserMedia + AudioWorkletNode)。
  *
- * 为什么选 Web Audio 而不是文档里规划的 miniaudio utility process：
- *   - miniaudio 需要 Node-API addon，依赖 C++ 编译工具链与平台预构建，
- *     设置成本高；Slice D1 先把 IPC 契约和 Take 生成链路跑通
- *   - 后续替换成 miniaudio 后端时，这个模块的对外接口（start / stop / cancel）
- *     不变，editorStore 和 UI 不需要改
+ * === 为什么是 AudioWorklet 而不是 ScriptProcessorNode ===
  *
- * 为什么用 ScriptProcessorNode 而不是 AudioWorkletNode：
- *   - ScriptProcessorNode 已经被标记 deprecated，但在 Electron 里仍然可用
- *   - AudioWorklet 需要 worklet 文件的独立打包，为 Vite + Electron 配
- *     一套 worklet 路径不划算；miniaudio 方案会直接越过 Web Audio，
- *     AudioWorklet 的迁移就没意义了
+ * ScriptProcessorNode 已被 W3C deprecated，本质问题是 onaudioprocess
+ * 在主线程被调用——每 ~85ms (4096 samples @ 48kHz) 跑一次。一旦主线程
+ * 被 React 重渲染、layout、GC pause 等阻塞超过这个窗口，buffer 就被丢，
+ * 录音表现为「中间卡顿」。AudioWorklet 跑在独立 audio rendering thread
+ * 与主线程隔离，主线程压力不再影响录音质量。
  *
- * === 后端切换路标 ===
+ * 实现差异：
+ *   - 旧：processor.onaudioprocess 同步回调拿 inputBuffer
+ *   - 新：worklet process() 通过 port.postMessage 把数据发回主线程；
+ *     主线程在 node.port.onmessage 里累积 chunks + 算电平
  *
- * ScriptProcessorNode 的两条已知缺陷：
- *   1. 跑在主线程，重 React 渲染时可能丢音频帧
- *   2. bufferSize 4096 在 48kHz 下 ~85ms 延迟，电平表能感知到滞后
+ * 对外接口（startRecording / stopRecording / cancelRecording /
+ * subscribeLevel）完全不变。
  *
- * 当前都未到「让用户感知到」的程度，所以保持 ScriptProcessor。如果发现：
- *   - 明显的录音杂音 / 缺帧（issue 报告）
- *   - 电平表对人声反应明显延后
- *   - Chromium 升级移除 ScriptProcessor 兼容
- * 任一条满足，就启动 miniaudio utility process 切换；不要回头切到
- * AudioWorklet——那是中间方案，迁移 worklet 打包路径的成本和直接上 miniaudio
- * 接近，但获得的稳定性提升不如后者。
+ * === 后续切换路标 ===
+ *
+ * AudioWorklet 仍跑在 Web Audio 内，受 Chromium 调度。如果未来发现：
+ *   - 还有可感知的杂音 / 缺帧（极端高负载场景）
+ *   - 需要超低延迟监听
+ * 再考虑切到 miniaudio utility process。这个模块的对外接口在那次切换里
+ * 仍然不变，editorStore 和 UI 不需要改。
  *
  * 本模块提供一个简单的状态机：idle → recording → idle。
  * 同时只允许一个录音会话，开第二次会报错。
@@ -39,7 +41,8 @@ type RecordingSession = {
   stream: MediaStream
   context: AudioContext
   source: MediaStreamAudioSourceNode
-  processor: ScriptProcessorNode
+  node: AudioWorkletNode
+  sink: GainNode
   chunks: Float32Array[]
   sampleRate: number
   channels: 1 | 2
@@ -52,9 +55,9 @@ let current: RecordingSession | null = null
  * 电平监听列表挂在模块作用域。
  * 把它和 RecordingSession 解耦是为了解决时序问题：
  *   UI 在 playback 变 'recording' 时就挂载 LevelMeter 组件，
- *   但 startRecording() 的 getUserMedia 是异步的，session 还没建立；
- *   如果监听挂在 session 上，订阅瞬间 session=null，后面的电平事件就收不到。
- * 解决：listener 常驻，recorder.onaudioprocess 每次都向它广播。
+ *   但 startRecording() 的 getUserMedia + worklet load 是异步的，session
+ *   还没建立；如果监听挂在 session 上，订阅瞬间 session=null，后面的
+ *   电平事件就收不到。解决：listener 常驻，worklet 消息回调每次都向它广播
  */
 const levelListeners = new Set<LevelListener>()
 
@@ -68,6 +71,17 @@ function computeLevel(chunk: Float32Array): number {
     sum += chunk[i] * chunk[i]
   }
   return Math.sqrt(sum / chunk.length)
+}
+
+/**
+ * Worklet 模块加载是「全 AudioContext 共享」的——同一 context 调一次
+ * addModule 即可。但每次 startRecording 都会 new AudioContext（mic 关闭
+ * 后旧 context 已 close），所以这个 Promise 缓存只对当次 context 有效，
+ * 跨录音会话需要重新 add。我们把 promise 跟 context 绑死——下次新 context
+ * 会重新 await
+ */
+async function ensureWorkletLoaded(context: AudioContext): Promise<void> {
+  await context.audioWorklet.addModule(workletUrl)
 }
 
 /**
@@ -124,24 +138,42 @@ export async function startRecording(options: {
   const stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints })
 
   const context = new AudioContext()
+  // worklet addModule 是 fire-and-forget 的 Promise——首次会触发文件下载
+  // + 解析。之后同一 context 调多次没副作用。失败时我们让异常透传到上层，
+  // 上层 alert 会提示用户「录音启动失败」
+  await ensureWorkletLoaded(context)
+
   const source = context.createMediaStreamSource(stream)
-  // bufferSize 4096 在多数设备上延迟 <100ms，落盘后不会感知到抖动
-  const processor = context.createScriptProcessor(4096, options.channels, options.channels)
+  const node = new AudioWorkletNode(context, 'utterlane-recorder', {
+    numberOfInputs: 1,
+    numberOfOutputs: 1,
+    // 显式指定 output channel 数 = 输入声道数。AudioWorkletNode 默认
+    // 会做 channel up/down mix，与我们「原样捕获」的语义不符
+    outputChannelCount: [options.channels],
+    channelCount: options.channels,
+    channelCountMode: 'explicit'
+  })
 
   const chunks: Float32Array[] = []
 
-  processor.onaudioprocess = (e) => {
-    // 先算电平（用原始 channel 0 即可，双声道也没必要分开算平均电平）
-    const level = computeLevel(e.inputBuffer.getChannelData(0))
+  node.port.onmessage = (e: MessageEvent<{ channels: Float32Array[] }>): void => {
+    const channels = e.data.channels
+    if (!channels || channels.length === 0 || channels[0].length === 0) return
+
+    // 电平用 channel 0 即可——双声道场景没必要分开算
+    const level = computeLevel(channels[0])
     for (const cb of levelListeners) cb(level)
 
     if (options.channels === 1) {
-      // 单声道：直接拷贝 channel 0
-      chunks.push(new Float32Array(e.inputBuffer.getChannelData(0)))
+      // 单声道：channels[0] 已经是从 worklet transferred 过来的独立
+      // ArrayBuffer，可以直接 push 不用复制
+      chunks.push(channels[0])
     } else {
-      // 双声道：按 [L0,R0,L1,R1,...] 交错拼进一个数组
-      const left = e.inputBuffer.getChannelData(0)
-      const right = e.inputBuffer.getChannelData(1)
+      // 双声道：按 [L0,R0,L1,R1,...] 交错拼进一个数组。
+      // 注意 channels.length 可能 < 2（极端情况下 mic 只送了 mono），
+      // 这种情况复用左声道当右声道，避免 undefined 访问
+      const left = channels[0]
+      const right = channels[1] ?? left
       const interleaved = new Float32Array(left.length * 2)
       for (let i = 0; i < left.length; i++) {
         interleaved[i * 2] = left[i]
@@ -151,19 +183,21 @@ export async function startRecording(options: {
     }
   }
 
-  source.connect(processor)
-  // ScriptProcessor 必须连到 destination 才会触发 onaudioprocess 事件——
-  // 但我们不想听到麦克风反馈，所以接一个 gain=0 的节点做「静音 sink」
+  source.connect(node)
+  // worklet node 必须连到一个 destination 链才会被 graph schedule。
+  // 不想听到麦克风反馈，所以接一个 gain=0 的节点做「静音 sink」——和
+  // ScriptProcessor 时代一致
   const sink = context.createGain()
   sink.gain.value = 0
-  processor.connect(sink)
+  node.connect(sink)
   sink.connect(context.destination)
 
   current = {
     stream,
     context,
     source,
-    processor,
+    node,
+    sink,
     chunks,
     sampleRate: context.sampleRate,
     channels: options.channels,
@@ -213,9 +247,11 @@ export function isRecording(): boolean {
 }
 
 async function teardown(session: RecordingSession): Promise<void> {
-  session.processor.disconnect()
+  // 摘消息回调，断开 worklet → sink → destination 链
+  session.node.port.onmessage = null
+  session.node.disconnect()
+  session.sink.disconnect()
   session.source.disconnect()
-  session.processor.onaudioprocess = null
   // 关闭流与 AudioContext；不关会让麦克风指示灯一直亮
   for (const track of session.stream.getTracks()) track.stop()
   await session.context.close()

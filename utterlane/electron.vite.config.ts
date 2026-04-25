@@ -24,6 +24,16 @@ export default defineConfig({
         ...sharedAlias
       }
     },
-    plugins: [react()]
+    plugins: [react()],
+    build: {
+      // Vite 默认对 < 4KB 的 ?url 资源会 inline 成 data:text/javascript;base64
+      // URL。这对录音用的 AudioWorklet 文件是致命的——CSP 的 script-src
+      // 'self' 不允许 data: 协议加载脚本，prod 构建会被浏览器拦截。
+      //
+      // 把 inline 阈值降到 0：所有 ?url 资源 emit 为独立文件，URL 走 'self'
+      // 同源。本项目目前唯一的 ?url 用法就是 worklet，全局禁用 inline 没
+      // 副作用；若将来加图片等小资源，按需在导入处用 ?url&inline 显式覆盖
+      assetsInlineLimit: 0
+    }
   }
 })
