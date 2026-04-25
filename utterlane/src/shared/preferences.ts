@@ -11,6 +11,106 @@
 
 export const PREFERENCES_SCHEMA_VERSION = 1
 
+// ---------------------------------------------------------------------------
+// 快捷键
+// ---------------------------------------------------------------------------
+
+/**
+ * 单个键位绑定。key 直接采用 KeyboardEvent.key 的命名：单字符（'r' / ' '）
+ * 用小写存储；特殊键用全名（'ArrowUp' / 'Escape'）。modifier 缺省 = false。
+ *
+ * ctrl 字段在 Windows / Linux 表示 Ctrl 键，在 macOS 同时匹配 Cmd（Meta）——
+ * 让同一份偏好跨平台都自然工作。需要分别绑定时再扩字段
+ */
+export type KeyBinding = {
+  key: string
+  ctrl?: boolean
+  alt?: boolean
+  shift?: boolean
+}
+
+/**
+ * 可被用户自定义的动作 ID 清单。仅放传输 / 导航类——OS 约定的 Ctrl+Z 等
+ * 维持硬编码，避免用户改了之后跨应用习惯断裂
+ */
+export const CUSTOMIZABLE_ACTIONS = [
+  'record',
+  'rerecord',
+  'playSegment',
+  'playProject',
+  'prevSegment',
+  'nextSegment',
+  'stopOrCancel'
+] as const
+export type CustomizableActionId = (typeof CUSTOMIZABLE_ACTIONS)[number]
+
+export const DEFAULT_KEYBINDINGS: Record<CustomizableActionId, KeyBinding> = {
+  record: { key: 'r' },
+  rerecord: { key: 'r', shift: true },
+  playSegment: { key: ' ' },
+  playProject: { key: ' ', shift: true },
+  prevSegment: { key: 'ArrowUp' },
+  nextSegment: { key: 'ArrowDown' },
+  stopOrCancel: { key: 'Escape' }
+}
+
+/**
+ * 当前生效的绑定（preferences 覆盖 fallback 默认）。
+ * 用户偏好里值为 null 表示「显式取消该动作的快捷键」（区别于 undefined =
+ * 没改过、走默认）
+ */
+export function resolveBindings(
+  prefs: AppPreferences
+): Record<CustomizableActionId, KeyBinding | null> {
+  const overrides = prefs.keyboard?.bindings ?? {}
+  const out = {} as Record<CustomizableActionId, KeyBinding | null>
+  for (const id of CUSTOMIZABLE_ACTIONS) {
+    if (id in overrides) {
+      // 用户显式设过（包括 null / undefined）
+      const v = overrides[id]
+      out[id] = v === null ? null : (v ?? DEFAULT_KEYBINDINGS[id])
+    } else {
+      out[id] = DEFAULT_KEYBINDINGS[id]
+    }
+  }
+  return out
+}
+
+/** 判断 KeyboardEvent 是否匹配某个绑定 */
+export function bindingMatches(b: KeyBinding, e: KeyboardEvent): boolean {
+  const eKey = e.key
+  // 单字符 key 大小写不敏感（例如 'r' 在 Shift 按下时变 'R'，仍属于同一键）
+  if (b.key.length === 1) {
+    if (eKey.toLowerCase() !== b.key.toLowerCase()) return false
+  } else {
+    if (eKey !== b.key) return false
+  }
+  const eCtrl = e.ctrlKey || e.metaKey
+  if ((b.ctrl ?? false) !== eCtrl) return false
+  if ((b.alt ?? false) !== e.altKey) return false
+  if ((b.shift ?? false) !== e.shiftKey) return false
+  return true
+}
+
+/** 把绑定格式化成展示字符串，例如「Shift+R」「Ctrl+,」「↑」 */
+export function formatBinding(b: KeyBinding): string {
+  const parts: string[] = []
+  if (b.ctrl) parts.push('Ctrl')
+  if (b.alt) parts.push('Alt')
+  if (b.shift) parts.push('Shift')
+  let key = b.key
+  if (key === ' ') key = 'Space'
+  else if (key === 'ArrowUp') key = '↑'
+  else if (key === 'ArrowDown') key = '↓'
+  else if (key === 'ArrowLeft') key = '←'
+  else if (key === 'ArrowRight') key = '→'
+  else if (key === 'Escape') key = 'Esc'
+  else if (key === 'Enter') key = 'Enter'
+  else if (key.length === 1) key = key.toUpperCase()
+  parts.push(key)
+  return parts.join('+')
+}
+
 export type DockThemeKey =
   | 'dark'
   | 'light'
@@ -67,6 +167,16 @@ export type AppPreferences = {
 
   /** 最近打开的工程目录绝对路径，按最近优先 */
   recentProjects?: string[]
+
+  /** 用户自定义快捷键 */
+  keyboard?: {
+    /**
+     * 用户对各动作绑定的覆盖。键缺失或值为 null 时回落到 DEFAULT_KEYBINDINGS。
+     * 只覆盖「可定制」的传输 / 导航类动作；OS 级约定（Ctrl+Z 撤销 / Ctrl+N
+     * 新建等）不进入这个表，保持跨平台一致
+     */
+    bindings?: Partial<Record<string, KeyBinding | null>>
+  }
 
   /** 录音相关偏好 */
   recording?: {
@@ -145,6 +255,12 @@ export function mergePreferences(
   }
   if (patch.recording) {
     next.recording = { ...base.recording, ...patch.recording }
+  }
+  if (patch.keyboard) {
+    next.keyboard = { ...base.keyboard, ...patch.keyboard }
+    if (patch.keyboard.bindings) {
+      next.keyboard.bindings = { ...base.keyboard?.bindings, ...patch.keyboard.bindings }
+    }
   }
 
   return next

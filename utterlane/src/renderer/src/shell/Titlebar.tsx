@@ -6,6 +6,8 @@ import type { TFunction } from 'i18next'
 import { cn } from '@renderer/lib/cn'
 import { useEditorStore } from '@renderer/store/editorStore'
 import { useHistoryStore } from '@renderer/store/historyStore'
+import { usePreferencesStore } from '@renderer/store/preferencesStore'
+import { formatBinding, resolveBindings } from '@shared/preferences'
 import { closeCurrentProject, newProject, openProject } from '@renderer/actions/project'
 import { exportAudioWav, exportSubtitlesSrt } from '@renderer/actions/export'
 import { useDialogStore } from '@renderer/store/dialogStore'
@@ -39,7 +41,14 @@ function buildMenus(
   openPreferences: () => void,
   openAbout: () => void,
   openAudioAudit: () => void,
-  history: HistoryMenuCtx
+  history: HistoryMenuCtx,
+  transportShortcuts: {
+    record: string
+    rerecord: string
+    playSegment: string
+    playProject: string
+    stop: string
+  }
 ): MenuDef[] {
   // undo / redo 动态标签：可用时显示「撤销：编辑文案」让用户知道会撤销什么；
   // 不可用时退回纯标签（也不显示 label 后缀，避免视觉上像可点击）
@@ -154,12 +163,24 @@ function buildMenus(
     {
       label: t('menu.transport'),
       items: [
-        { kind: 'item', label: t('menu.transport_record'), shortcut: 'R' },
-        { kind: 'item', label: t('menu.transport_rerecord'), shortcut: 'Shift+R' },
+        { kind: 'item', label: t('menu.transport_record'), shortcut: transportShortcuts.record },
+        {
+          kind: 'item',
+          label: t('menu.transport_rerecord'),
+          shortcut: transportShortcuts.rerecord
+        },
         { kind: 'separator' },
-        { kind: 'item', label: t('menu.transport_play_segment'), shortcut: 'Space' },
-        { kind: 'item', label: t('menu.transport_play_project'), shortcut: 'Shift+Space' },
-        { kind: 'item', label: t('menu.transport_stop'), shortcut: 'Esc' }
+        {
+          kind: 'item',
+          label: t('menu.transport_play_segment'),
+          shortcut: transportShortcuts.playSegment
+        },
+        {
+          kind: 'item',
+          label: t('menu.transport_play_project'),
+          shortcut: transportShortcuts.playProject
+        },
+        { kind: 'item', label: t('menu.transport_stop'), shortcut: transportShortcuts.stop }
       ]
     },
     {
@@ -327,6 +348,18 @@ export function Titlebar(): React.JSX.Element {
   const undoLabelKey = useHistoryStore((s) => s.past[s.past.length - 1]?.labelKey ?? null)
   const redoLabelKey = useHistoryStore((s) => s.future[s.future.length - 1]?.labelKey ?? null)
 
+  // 传输菜单的快捷键标签从用户当前绑定计算。preferences 变化时整个菜单
+  // 重新构建，让 Record / Play 等条目显示用户实际生效的键位
+  const prefs = usePreferencesStore((s) => s.prefs)
+  const bindings = resolveBindings(prefs)
+  const transportShortcuts = {
+    record: bindings.record ? formatBinding(bindings.record) : '',
+    rerecord: bindings.rerecord ? formatBinding(bindings.rerecord) : '',
+    playSegment: bindings.playSegment ? formatBinding(bindings.playSegment) : '',
+    playProject: bindings.playProject ? formatBinding(bindings.playProject) : '',
+    stop: bindings.stopOrCancel ? formatBinding(bindings.stopOrCancel) : ''
+  }
+
   const [maximized, setMaximized] = useState(false)
 
   const hasProject = project !== null
@@ -348,7 +381,8 @@ export function Titlebar(): React.JSX.Element {
         openPreferences,
         openAbout,
         openAudioAudit,
-        historyCtx
+        historyCtx,
+        transportShortcuts
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [
@@ -362,7 +396,12 @@ export function Titlebar(): React.JSX.Element {
       historyCtx.canUndo,
       historyCtx.canRedo,
       historyCtx.undoLabelKey,
-      historyCtx.redoLabelKey
+      historyCtx.redoLabelKey,
+      transportShortcuts.record,
+      transportShortcuts.rerecord,
+      transportShortcuts.playSegment,
+      transportShortcuts.playProject,
+      transportShortcuts.stop
     ]
   )
 

@@ -1,7 +1,9 @@
 import { useEditorStore } from '@renderer/store/editorStore'
 import { useDialogStore } from '@renderer/store/dialogStore'
 import { useHistoryStore } from '@renderer/store/historyStore'
+import { usePreferencesStore } from '@renderer/store/preferencesStore'
 import { newProject, openProject } from '@renderer/actions/project'
+import { bindingMatches, resolveBindings, type CustomizableActionId } from '@shared/preferences'
 
 /**
  * 在全局安装键盘快捷键。
@@ -11,6 +13,15 @@ import { newProject, openProject } from '@renderer/actions/project'
  *
  * 焦点位于 input / textarea / contenteditable 时跳过所有快捷键，
  * 避免用户打字时误触（比如在 Inspector 文案框里输入 "r" 会开始录音）。
+ *
+ * === 可定制 vs 不可定制 ===
+ *
+ * 「OS 约定」类（Ctrl+N 新建 / Ctrl+Z 撤销 / Ctrl+, 偏好等）保持硬编码，
+ * 跨应用习惯不应被自定义打破。
+ *
+ * 「传输 / 导航」类（录音 / 重录 / 播放 / 上下段切换 / 停止）通过
+ * preferences.keyboard.bindings 用户自定义，这里通过 resolveBindings
+ * 拿到当前生效的绑定表，按 actionId 调用 dispatchAction。
  *
  * 返回 cleanup，给 useEffect 用。
  */
@@ -22,7 +33,9 @@ export function installKeyboardShortcuts(): () => void {
     const hasProject = state.project !== null
     const mod = e.ctrlKey || e.metaKey
 
-    // Ctrl/Cmd + N / O：新建 / 打开工程（菜单上显示的 shortcut 在这里兑现）
+    // ----- OS 约定（不可自定义） -----
+
+    // Ctrl/Cmd + N / O：新建 / 打开工程
     if (mod && e.key.toLowerCase() === 'n') {
       e.preventDefault()
       void newProject()
@@ -34,7 +47,7 @@ export function installKeyboardShortcuts(): () => void {
       return
     }
 
-    // Ctrl/Cmd + , 打开偏好设置。遵循 macOS / VSCode 传统键位
+    // Ctrl/Cmd + , 打开偏好设置（macOS / VSCode 习惯）
     if (mod && e.key === ',') {
       e.preventDefault()
       useDialogStore.getState().openPreferences()
@@ -43,12 +56,7 @@ export function installKeyboardShortcuts(): () => void {
 
     if (!hasProject) return
 
-    // Ctrl/Cmd+Z: undo；Ctrl/Cmd+Shift+Z 或 Ctrl/Cmd+Y: redo。
-    // historyStore 的 undo / redo 内部会检查 playback === 'idle'，
-    // 录音 / 播放中按下会被 no-op 掉，但 preventDefault 仍然生效，
-    // 免得浏览器原生回退（例如某些控件的 Ctrl+Z）干扰用户。
-    // 焦点在 input / textarea 时上面的 isEditableTarget 已经直接 return，
-    // 所以文本框里的 Ctrl+Z 仍然走原生编辑历史
+    // Ctrl/Cmd+Z / Ctrl/Cmd+Shift+Z / Ctrl/Cmd+Y：undo / redo
     if (mod && e.key.toLowerCase() === 'z' && !e.altKey) {
       e.preventDefault()
       if (e.shiftKey) useHistoryStore.getState().redo()
@@ -61,69 +69,116 @@ export function installKeyboardShortcuts(): () => void {
       return
     }
 
-    // Esc 优先级：倒计时 > 录音 > 播放 > 多选副选 > （idle 时无操作）。
-    // 多选副选清空放最后是因为它是「无副作用的视觉收敛」，应该让位给
-    // 录音播放这种「真要中止某个会话」的更高优先级动作
-    if (e.key === 'Escape') {
-      if (state.playback === 'countdown') {
-        e.preventDefault()
-        state.cancelCountdown()
-      } else if (state.playback === 'recording') {
-        e.preventDefault()
-        void state.cancelRecording()
-      } else if (state.playback === 'segment' || state.playback === 'project') {
-        e.preventDefault()
-        state.stopPlayback()
-      } else if (state.extraSelectedSegmentIds.size > 0) {
-        e.preventDefault()
-        state.clearExtraSelection()
-      }
-      return
-    }
+    // ----- 可自定义动作：按 preferences 里的绑定派发 -----
 
-    // Space：DAW 式 toggle。idle → 播当前句；播放中 → 暂停 / 继续
-    // Shift+Space：同样的逻辑作用于项目连读
-    if (e.key === ' ' && !mod && !e.altKey) {
-      e.preventDefault()
-      if (state.playback === 'segment' || state.playback === 'project') {
-        state.togglePausePlayback()
-      } else if (state.playback === 'idle') {
-        if (e.shiftKey) void state.playProject()
-        else void state.playCurrentSegment()
-      }
-      return
-    }
-
-    // Arrow Up / Down：在 Segments 列表里上下导航（录音 / 播放期间禁用）
-    if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !mod && !e.altKey && !e.shiftKey) {
-      if (state.playback !== 'idle') return
-      const idx = state.selectedSegmentId ? state.order.indexOf(state.selectedSegmentId) : -1
-      const next =
-        e.key === 'ArrowUp' ? Math.max(0, idx - 1) : Math.min(state.order.length - 1, idx + 1)
-      if (next !== idx && state.order[next]) {
+    // resolveBindings 拿到的是 actionId → KeyBinding | null。null 表示
+    // 用户显式取消了该动作的快捷键，遍历时 continue
+    const bindings = resolveBindings(usePreferencesStore.getState().prefs)
+    for (const id of Object.keys(bindings) as CustomizableActionId[]) {
+      const b = bindings[id]
+      if (!b) continue
+      if (!bindingMatches(b, e)) continue
+      if (dispatchAction(id)) {
         e.preventDefault()
-        state.selectSegment(state.order[next])
-      }
-      return
-    }
-
-    // R / Shift+R：录音 / 重录；录音中按 R 视作停止录音
-    if (e.key.toLowerCase() === 'r' && !mod && !e.altKey) {
-      e.preventDefault()
-      if (state.playback === 'recording') {
-        void state.stopRecordingAndSave()
         return
-      }
-      if (e.shiftKey) {
-        void state.startRerecordingSelected()
-      } else {
-        void state.startRecordingForSelected()
       }
     }
   }
 
   window.addEventListener('keydown', handler)
   return () => window.removeEventListener('keydown', handler)
+}
+
+/**
+ * 真正执行一个可自定义动作。返回 true 表示该 keypress 已被消费（包括 no-op
+ * 的吞键场景，比如非空闲态下按播放键），调用方应 preventDefault 不再继续。
+ *
+ * 把行为分支留在这里而不是绑定表，是因为多数动作都需要根据 playback 状态
+ * 走不同分支（比如 stopOrCancel 在不同状态下行为完全不同），用纯函数而不是
+ * 「绑定 → 函数引用」的简单映射更直观
+ */
+function dispatchAction(id: CustomizableActionId): boolean {
+  const state = useEditorStore.getState()
+
+  switch (id) {
+    case 'record': {
+      // 录音中按 record 视作「停止录音」，否则发起新录
+      if (state.playback === 'recording') {
+        void state.stopRecordingAndSave()
+        return true
+      }
+      void state.startRecordingForSelected()
+      return true
+    }
+    case 'rerecord': {
+      // 录音中按 rerecord 也视作停止；重录默认是覆盖当前 Take，要先有当前 Take
+      if (state.playback === 'recording') {
+        void state.stopRecordingAndSave()
+        return true
+      }
+      void state.startRerecordingSelected()
+      return true
+    }
+    case 'playSegment': {
+      // DAW 习惯：播放中按一下变暂停 / 恢复，空闲中按一下开始播
+      if (state.playback === 'segment' || state.playback === 'project') {
+        state.togglePausePlayback()
+        return true
+      }
+      if (state.playback === 'idle') {
+        void state.playCurrentSegment()
+        return true
+      }
+      // 录音 / 倒计时态：吞键不动，但仍 preventDefault 避免空格被滚到底部
+      return true
+    }
+    case 'playProject': {
+      if (state.playback === 'segment' || state.playback === 'project') {
+        state.togglePausePlayback()
+        return true
+      }
+      if (state.playback === 'idle') {
+        void state.playProject()
+        return true
+      }
+      return true
+    }
+    case 'prevSegment':
+    case 'nextSegment': {
+      // 录音 / 播放期间禁用导航，避免和正在进行的会话冲突
+      if (state.playback !== 'idle') return false
+      const curIdx = state.selectedSegmentId ? state.order.indexOf(state.selectedSegmentId) : -1
+      const nextIdx =
+        id === 'prevSegment'
+          ? Math.max(0, curIdx - 1)
+          : Math.min(state.order.length - 1, curIdx + 1)
+      if (nextIdx !== curIdx && state.order[nextIdx]) {
+        state.selectSegment(state.order[nextIdx])
+        return true
+      }
+      return false
+    }
+    case 'stopOrCancel': {
+      // 复合行为：按当前态决定执行哪一步
+      if (state.playback === 'countdown') {
+        state.cancelCountdown()
+        return true
+      }
+      if (state.playback === 'recording') {
+        void state.cancelRecording()
+        return true
+      }
+      if (state.playback === 'segment' || state.playback === 'project') {
+        state.stopPlayback()
+        return true
+      }
+      if (state.extraSelectedSegmentIds.size > 0) {
+        state.clearExtraSelection()
+        return true
+      }
+      return false
+    }
+  }
 }
 
 function isEditableTarget(target: EventTarget | null): boolean {

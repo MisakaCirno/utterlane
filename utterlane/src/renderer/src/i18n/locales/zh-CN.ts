@@ -346,7 +346,18 @@ export const zhCN = {
     font_scale_large: '舒适',
     font_scale_xlarge: '宽松',
     language_zh_cn: '简体中文',
-    language_en_us: 'English'
+    language_en_us: 'English',
+    section_keyboard: '快捷键',
+    kb_press_keys: '按下新键…（Esc 取消）',
+    kb_unbound: '未绑定',
+    kb_reset: '重置',
+    kb_action_record: '录音',
+    kb_action_rerecord: '重录（覆盖当前 Take）',
+    kb_action_playSegment: '播放当前句 / 暂停',
+    kb_action_playProject: '播放项目 / 暂停',
+    kb_action_prevSegment: '上一段',
+    kb_action_nextSegment: '下一段',
+    kb_action_stopOrCancel: '停止 / 取消'
   }
 }
 

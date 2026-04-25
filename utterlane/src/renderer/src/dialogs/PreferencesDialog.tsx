@@ -2,7 +2,17 @@ import * as Dialog from '@radix-ui/react-dialog'
 import { AlignCenter, AlignLeft, AlignRight, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { DEFAULT_PREFERENCES, type DockThemeKey, type TextAlign } from '@shared/preferences'
+import {
+  CUSTOMIZABLE_ACTIONS,
+  DEFAULT_KEYBINDINGS,
+  DEFAULT_PREFERENCES,
+  formatBinding,
+  resolveBindings,
+  type CustomizableActionId,
+  type DockThemeKey,
+  type KeyBinding,
+  type TextAlign
+} from '@shared/preferences'
 import { usePreferencesStore } from '@renderer/store/preferencesStore'
 import { themeRegistry } from '@renderer/shell/themes'
 import { cn } from '@renderer/lib/cn'
@@ -206,11 +216,111 @@ export function PreferencesDialog({
                 />
               </Row>
             </Section>
+
+            <KeyboardSection />
           </div>
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
   )
+}
+
+/**
+ * 快捷键自定义分区。
+ *
+ * 每行展示一个动作 + 当前绑定 + 「重新绑定 / 重置」按钮。点重新绑定后
+ * 进入「按键捕获模式」：行内显示「请按下新键…」并监听 keydown，捕获到
+ * 第一个非纯修饰键就保存。Esc 取消捕获。
+ *
+ * 不做冲突检测：同一组合键允许绑给多个动作（按下时多个 dispatchAction
+ * 分支会竞争，但每个分支自带 playback 状态守卫，实际并不会重复执行）。
+ * UI 上对显式冲突视而不见，倾向「让用户掌控」而不是「替用户拒绝」
+ */
+function KeyboardSection(): React.JSX.Element {
+  const { t } = useTranslation()
+  const prefs = usePreferencesStore((s) => s.prefs)
+  const update = usePreferencesStore((s) => s.update)
+  const bindings = resolveBindings(prefs)
+  const [capturing, setCapturing] = useState<CustomizableActionId | null>(null)
+
+  // 进入捕获模式后挂全局 keydown 监听。捕获到非纯修饰键就保存；
+  // Esc 取消整个捕获过程；纯修饰键（Shift / Ctrl 单独按）忽略，等组合
+  useEffect(() => {
+    if (!capturing) return
+    const onKey = (e: KeyboardEvent): void => {
+      e.preventDefault()
+      e.stopPropagation()
+      // 单独按修饰键时 e.key 会是 'Shift' / 'Control' 等，跳过等真正的键
+      if (e.key === 'Shift' || e.key === 'Control' || e.key === 'Alt' || e.key === 'Meta') return
+      if (e.key === 'Escape') {
+        setCapturing(null)
+        return
+      }
+      const newBinding: KeyBinding = {
+        // 单字符键存小写，遇到 Shift+Letter 时通过 modifier 表达；其他键
+        // （Space / ArrowUp / Escape）按原样存
+        key: e.key.length === 1 ? e.key.toLowerCase() : e.key,
+        ctrl: e.ctrlKey || e.metaKey || undefined,
+        alt: e.altKey || undefined,
+        shift: e.shiftKey || undefined
+      }
+      update({ keyboard: { bindings: { [capturing]: newBinding } } })
+      setCapturing(null)
+    }
+    // capture: true 让我们抢在 isEditableTarget 守卫之前——捕获模式下应当
+    // 拿到所有按键（用户可能想绑特殊键给录音）
+    window.addEventListener('keydown', onKey, { capture: true })
+    return () => window.removeEventListener('keydown', onKey, { capture: true })
+  }, [capturing, update])
+
+  return (
+    <Section title={t('preferences.section_keyboard')}>
+      {CUSTOMIZABLE_ACTIONS.map((id) => {
+        const current = bindings[id]
+        const isDefault = bindingsEqual(current, DEFAULT_KEYBINDINGS[id])
+        const isCapturing = capturing === id
+        return (
+          <div key={id} className="flex items-center gap-3">
+            <div className="w-32 shrink-0 text-2xs text-fg-muted">
+              {t(`preferences.kb_action_${id}`)}
+            </div>
+            <div className="flex-1">
+              {isCapturing ? (
+                <div className="flex h-6 items-center justify-center rounded-sm border border-accent bg-accent/10 px-2 text-2xs text-accent">
+                  {t('preferences.kb_press_keys')}
+                </div>
+              ) : (
+                <button
+                  onClick={() => setCapturing(id)}
+                  className={cn(
+                    'flex h-6 w-full items-center justify-center rounded-sm border bg-bg-deep px-2 text-2xs',
+                    'border-border hover:border-accent'
+                  )}
+                >
+                  {current ? formatBinding(current) : t('preferences.kb_unbound')}
+                </button>
+              )}
+            </div>
+            <button
+              disabled={isDefault}
+              onClick={() => update({ keyboard: { bindings: { [id]: undefined } } })}
+              className={cn(
+                'h-6 w-12 shrink-0 rounded-sm border border-border bg-bg-raised text-2xs text-fg',
+                'hover:border-border-strong disabled:opacity-40 disabled:hover:border-border'
+              )}
+            >
+              {t('preferences.kb_reset')}
+            </button>
+          </div>
+        )
+      })}
+    </Section>
+  )
+}
+
+function bindingsEqual(a: KeyBinding | null, b: KeyBinding | null): boolean {
+  if (a === null || b === null) return a === b
+  return a.key === b.key && !!a.ctrl === !!b.ctrl && !!a.alt === !!b.alt && !!a.shift === !!b.shift
 }
 
 function Section({

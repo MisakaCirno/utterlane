@@ -348,6 +348,17 @@ export const enUS: TranslationSchema = {
     font_scale_large: 'Comfortable',
     font_scale_xlarge: 'Roomy',
     language_zh_cn: '简体中文',
-    language_en_us: 'English'
+    language_en_us: 'English',
+    section_keyboard: 'Keyboard',
+    kb_press_keys: 'Press new keys… (Esc to cancel)',
+    kb_unbound: 'Unbound',
+    kb_reset: 'Reset',
+    kb_action_record: 'Record',
+    kb_action_rerecord: 'Re-record (overwrite current Take)',
+    kb_action_playSegment: 'Play current segment / pause',
+    kb_action_playProject: 'Play project / pause',
+    kb_action_prevSegment: 'Previous segment',
+    kb_action_nextSegment: 'Next segment',
+    kb_action_stopOrCancel: 'Stop / Cancel'
   }
 }
