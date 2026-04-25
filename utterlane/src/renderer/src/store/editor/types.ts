@@ -46,6 +46,10 @@ export type EditorData = {
   scriptListScrollTop: number
   timelineScrollLeft: number
   timelineZoom: number
+  /** SegmentTimeline 波形横向缩放（log 映射，slider 操作的目标值） */
+  waveformZoomH: number
+  /** SegmentTimeline 波形纵向缩放 */
+  waveformZoomV: number
 
   playback: PlaybackMode
   /**
@@ -132,6 +136,11 @@ export type EditorActions = {
   setTimelineScroll: (left: number, zoom?: number) => void
   /** 设置时间轴游标位置（毫秒）。会被 clamp 到 [0, +∞)；超过项目总时长由 UI 自行处理 */
   setTimelinePlayhead: (ms: number) => void
+  /**
+   * 设置波形缩放档位。仅写入指定的轴（h / v），未传的轴保持不变——slider /
+   * 滚轮一次只动一个轴，避免连带覆盖另一轴
+   */
+  setWaveformZoom: (patch: { h?: number; v?: number }) => void
 
   // Segment / Take 编辑
   importScript: (rawText: string) => void
@@ -285,6 +294,8 @@ export const INITIAL_DATA: EditorData = {
   scriptListScrollTop: 0,
   timelineScrollLeft: 0,
   timelineZoom: 1,
+  waveformZoomH: 1,
+  waveformZoomV: 1,
   playback: 'idle',
   paused: false,
   saved: true,

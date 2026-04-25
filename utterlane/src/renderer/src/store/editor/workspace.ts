@@ -28,6 +28,7 @@ export const createWorkspaceSlice: SliceCreator<
     | 'setScriptListScrollTop'
     | 'setTimelineScroll'
     | 'setTimelinePlayhead'
+    | 'setWaveformZoom'
   >
 > = (set, get) => ({
   selectSegment: (id) => {
@@ -184,6 +185,15 @@ export const createWorkspaceSlice: SliceCreator<
     const next = Math.max(0, ms)
     if (get().timelinePlayheadMs === next) return
     set({ timelinePlayheadMs: next })
+    pushWorkspace(get())
+  },
+
+  setWaveformZoom: (patch) => {
+    const state = get()
+    const nextH = patch.h ?? state.waveformZoomH
+    const nextV = patch.v ?? state.waveformZoomV
+    if (nextH === state.waveformZoomH && nextV === state.waveformZoomV) return
+    set({ waveformZoomH: nextH, waveformZoomV: nextV })
     pushWorkspace(get())
   }
 })

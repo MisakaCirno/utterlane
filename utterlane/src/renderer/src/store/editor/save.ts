@@ -41,7 +41,9 @@ export function snapshotWorkspace(state: EditorState): WorkspaceFile {
     scriptListScrollTop: state.scriptListScrollTop,
     timelineScrollLeft: state.timelineScrollLeft,
     timelineZoom: state.timelineZoom,
-    timelinePlayheadMs: state.timelinePlayheadMs
+    timelinePlayheadMs: state.timelinePlayheadMs,
+    waveformZoomH: state.waveformZoomH,
+    waveformZoomV: state.waveformZoomV
   }
 }
 

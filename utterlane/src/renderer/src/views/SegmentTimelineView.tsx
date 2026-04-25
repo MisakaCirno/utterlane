@@ -1,11 +1,7 @@
-import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   ChevronLeft,
   ChevronRight,
-  ChevronsDownUp,
-  ChevronsUpDown,
-  Maximize2,
   Mic,
   Pause,
   Play,
@@ -13,15 +9,14 @@ import {
   SkipBack,
   SkipForward,
   Square,
-  X,
-  ZoomIn,
-  ZoomOut
+  X
 } from 'lucide-react'
 import { cn } from '@renderer/lib/cn'
 import { useEditorStore } from '@renderer/store/editorStore'
 import { usePreferencesStore } from '@renderer/store/preferencesStore'
 import { WaveformView } from '@renderer/components/WaveformView'
 import { TextEditorWithCount } from '@renderer/components/TextEditorWithCount'
+import { ZoomSlider } from '@renderer/components/ZoomSlider'
 import { DEFAULT_PREFERENCES } from '@shared/preferences'
 
 /** 横向缩放档位上下限。1 = 自适应铺满宽度；超过 1 = 内容比可视区宽 */
@@ -85,47 +80,6 @@ function IconButton({
     >
       {children}
     </button>
-  )
-}
-
-/**
- * 单一缩放控件组：缩小 / 重置 / 放大 / 数值。横向 H、纵向 V 共用同一组件
- */
-function ZoomGroup({
-  axis,
-  zoom,
-  min,
-  max,
-  onZoomChange,
-  iconOut,
-  iconIn,
-  hint
-}: {
-  axis: 'H' | 'V'
-  zoom: number
-  min: number
-  max: number
-  onZoomChange: (next: number) => void
-  iconOut: React.ReactNode
-  iconIn: React.ReactNode
-  hint: { out: string; reset: string; in: string }
-}): React.JSX.Element {
-  return (
-    <div className="flex items-center gap-0.5 rounded-sm border border-border bg-bg-deep p-0.5">
-      <IconButton title={hint.out} onClick={() => onZoomChange(zoom / 1.5)} disabled={zoom <= min}>
-        {iconOut}
-      </IconButton>
-      <IconButton title={hint.reset} onClick={() => onZoomChange(1)} disabled={zoom === 1}>
-        <Maximize2 size={11} />
-      </IconButton>
-      <IconButton title={hint.in} onClick={() => onZoomChange(zoom * 1.5)} disabled={zoom >= max}>
-        {iconIn}
-      </IconButton>
-      <span className="px-1 font-mono text-2xs tabular-nums text-fg-dim">
-        {zoom >= 1 ? zoom.toFixed(1) : zoom.toFixed(2)}
-        {axis}
-      </span>
-    </div>
   )
 }
 
@@ -297,37 +251,26 @@ function SegmentControlRow({
           )}
         </div>
 
-        {/* 右：缩放控制组（横向 + 纵向）。横向控制波形 X 轴密度，纵向控制
-            振幅高度——两者解耦让用户在低音量录音里既能拉宽看清节选位置、
-            也能拉高看到细节波动 */}
-        <div className="flex items-center gap-1 justify-self-end">
-          <ZoomGroup
-            axis="H"
+        {/* 右：横向 + 纵向缩放滑动条。两轴解耦：横向控制波形 X 轴密度
+            （影响 trim 拖拽精度），纵向控制振幅高度（低音量录音需要拉高
+            才看得清细节）。log 刻度让 1x 在 slider 中段附近，半 / 倍距
+            离对称 */}
+        <div className="flex items-center gap-1.5 justify-self-end">
+          <ZoomSlider
+            label="H"
             zoom={zoomH}
             min={ZOOM_H_MIN}
             max={ZOOM_H_MAX}
-            onZoomChange={(z) => onZoomHChange(clampZoomH(z))}
-            iconOut={<ZoomOut size={12} />}
-            iconIn={<ZoomIn size={12} />}
-            hint={{
-              out: t('timeline.zoom_h_out'),
-              reset: t('timeline.zoom_h_reset'),
-              in: t('timeline.zoom_h_in')
-            }}
+            onChange={(z) => onZoomHChange(clampZoomH(z))}
+            resetTitle={t('timeline.zoom_h_slider_hint')}
           />
-          <ZoomGroup
-            axis="V"
+          <ZoomSlider
+            label="V"
             zoom={zoomV}
             min={ZOOM_V_MIN}
             max={ZOOM_V_MAX}
-            onZoomChange={(z) => onZoomVChange(clampZoomV(z))}
-            iconOut={<ChevronsDownUp size={12} />}
-            iconIn={<ChevronsUpDown size={12} />}
-            hint={{
-              out: t('timeline.zoom_v_out'),
-              reset: t('timeline.zoom_v_reset'),
-              in: t('timeline.zoom_v_in')
-            }}
+            onChange={(z) => onZoomVChange(clampZoomV(z))}
+            resetTitle={t('timeline.zoom_v_slider_hint')}
           />
         </div>
       </div>
@@ -413,11 +356,12 @@ export function SegmentTimelineView(): React.JSX.Element {
     setTakeTrim(selectedId, takeId, next)
   }
 
-  // 缩放档位：本地 state（不持久化到 workspace.json）。zoomH 影响波形横向
-  // 密度 + trim 拖拽精度；zoomV 影响振幅高度。两个轴独立，因为典型用法
-  // 是「先 zoomH 定位起 / 终点，再 zoomV 看振幅细节」这种正交操作
-  const [zoomH, setZoomH] = useState(1)
-  const [zoomV, setZoomV] = useState(1)
+  // 缩放档位走 editorStore（持久化到 workspace.json）。两个轴独立：zoomH
+  // 影响波形横向密度 + trim 拖拽精度，zoomV 影响振幅高度——典型用法是
+  // 「先 zoomH 定位起 / 终点，再 zoomV 看振幅细节」这种正交操作
+  const zoomH = useEditorStore((s) => s.waveformZoomH)
+  const zoomV = useEditorStore((s) => s.waveformZoomV)
+  const setWaveformZoom = useEditorStore((s) => s.setWaveformZoom)
 
   // 滚轮策略，与 ProjectTimeline 同款：
   //   - Ctrl+Shift+wheel：纵向缩放（振幅）
@@ -430,13 +374,13 @@ export function SegmentTimelineView(): React.JSX.Element {
     if (e.ctrlKey && e.shiftKey) {
       e.preventDefault()
       const factor = Math.exp(-e.deltaY * 0.0015)
-      setZoomV((z) => clampZoomV(z * factor))
+      setWaveformZoom({ v: clampZoomV(zoomV * factor) })
       return
     }
     if (e.ctrlKey || e.metaKey) {
       e.preventDefault()
       const factor = Math.exp(-e.deltaY * 0.0015)
-      setZoomH((z) => clampZoomH(z * factor))
+      setWaveformZoom({ h: clampZoomH(zoomH * factor) })
       return
     }
     const dx = e.deltaX !== 0 ? e.deltaX : e.deltaY
@@ -453,8 +397,8 @@ export function SegmentTimelineView(): React.JSX.Element {
       <SegmentControlRow
         zoomH={zoomH}
         zoomV={zoomV}
-        onZoomHChange={setZoomH}
-        onZoomVChange={setZoomV}
+        onZoomHChange={(z) => setWaveformZoom({ h: z })}
+        onZoomVChange={(z) => setWaveformZoom({ v: z })}
       />
       <SegmentTextEditor />
       <WaveformView

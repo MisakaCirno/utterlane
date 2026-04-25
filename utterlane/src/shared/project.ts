@@ -166,6 +166,13 @@ export type WorkspaceFile = {
    * 游标停留在最终位置；点击时间轴某处会把游标设到该 ms。
    */
   timelinePlayheadMs?: number
+  /**
+   * SegmentTimeline 波形横向缩放（zoomH）。1 = 自适应铺满；> 1 = 内容比
+   * 可视区宽，外层 overflow-x-auto 出滚动条
+   */
+  waveformZoomH?: number
+  /** 波形纵向缩放（zoomV）。1 = 默认振幅；< 1 压低、> 1 拉高 */
+  waveformZoomV?: number
 }
 
 // ---------------------------------------------------------------------------

@@ -10,9 +10,6 @@ import {
   RefreshCw,
   Rewind,
   Square,
-  ZoomIn,
-  ZoomOut,
-  Maximize2,
   AlignVerticalJustifyCenter
 } from 'lucide-react'
 import {
@@ -35,6 +32,7 @@ import { useEditorStore } from '@renderer/store/editorStore'
 import { formatDuration } from '@renderer/lib/format'
 import { subscribePosition } from '@renderer/services/player'
 import { takeEffectiveDurationMs, takeEffectiveRange } from '@shared/project'
+import { ZoomSlider } from '@renderer/components/ZoomSlider'
 
 /**
  * ProjectTimelineView — 整个项目的横向时间轴。
@@ -208,32 +206,15 @@ function ProjectControlRow({
           </IconButton>
         </div>
 
-        {/* 右：缩放控制组 */}
-        <div className="flex items-center gap-0.5 justify-self-end rounded-sm border border-border bg-bg-deep p-0.5">
-          <IconButton
-            title={t('timeline.zoom_out')}
-            onClick={() => onZoomChange(clampZoom(zoom / 1.5))}
-            disabled={zoom <= ZOOM_MIN}
-          >
-            <ZoomOut size={12} />
-          </IconButton>
-          <IconButton
-            title={t('timeline.zoom_reset')}
-            onClick={() => onZoomChange(1)}
-            disabled={zoom === 1}
-          >
-            <Maximize2 size={11} />
-          </IconButton>
-          <IconButton
-            title={t('timeline.zoom_in')}
-            onClick={() => onZoomChange(clampZoom(zoom * 1.5))}
-            disabled={zoom >= ZOOM_MAX}
-          >
-            <ZoomIn size={12} />
-          </IconButton>
-          <span className="px-1 font-mono text-2xs tabular-nums text-fg-dim">
-            {zoom >= 1 ? zoom.toFixed(1) : zoom.toFixed(2)}x
-          </span>
+        {/* 右：缩放滑动条。log 刻度让 1x 落在中间，半档与翻倍距离对称 */}
+        <div className="justify-self-end">
+          <ZoomSlider
+            zoom={zoom}
+            min={ZOOM_MIN}
+            max={ZOOM_MAX}
+            onChange={(z) => onZoomChange(clampZoom(z))}
+            resetTitle={t('timeline.zoom_slider_hint')}
+          />
         </div>
       </div>
     </div>
