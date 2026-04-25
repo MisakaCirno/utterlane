@@ -747,7 +747,12 @@ function TimeRuler({
   // 多渲染左右各 4 个 tick 作为缓冲，避免快速滚动时露出空白
   const overscan = 4
   const startTick = Math.max(0, Math.floor(scrollLeft / tickPx) - overscan)
-  const endTick = Math.ceil((scrollLeft + effectiveWidth) / tickPx) + overscan
+  // 上限是 contentWidthPx 对应的最大 tick 数——超过这个边界的 tick 即便
+  // 渲染了也是空白格，更关键是它会撑大父级的 scrollWidth（即便父级显式
+  // 设了 width，绝对定位子元素仍计入 scrollWidth）。让 scrollerRef 的
+  // 滚动条尺寸保持稳定，不随滚动位置抖动
+  const maxTick = Math.ceil(contentWidthPx / tickPx)
+  const endTick = Math.min(maxTick, Math.ceil((scrollLeft + effectiveWidth) / tickPx) + overscan)
 
   const ticks: React.JSX.Element[] = []
   for (let i = startTick; i < endTick; i++) {
@@ -774,7 +779,9 @@ function TimeRuler({
       )}
       style={{ width: contentWidthPx }}
     >
-      <div className="relative h-full" style={{ width: contentWidthPx }}>
+      {/* overflow-hidden 兜底：即便 endTick 算多了一两个 tick 越界，也
+          不会让绝对定位子元素影响外层 scrollerRef 的 scrollWidth */}
+      <div className="relative h-full overflow-hidden" style={{ width: contentWidthPx }}>
         {ticks}
       </div>
     </div>
@@ -827,7 +834,12 @@ export function ProjectTimelineView(): React.JSX.Element {
   }, [zoom, setTimelineScroll])
 
   return (
-    <div ref={wrapperRef} className="flex h-full flex-col bg-bg">
+    // overflow-hidden + min-w-0：dockview 把 tab 移到面板左/右侧时面板
+    // 可用宽度变窄，但内部子项（toolbar 的 min-w-max、TimelineContent 的
+    // contentWidthPx）保持原宽度。如果 root 不约束 overflow，子项会撑出
+    // panel 边界，scrollbar 视觉上延伸到 panel 外被父级裁掉。
+    // min-w-0 保证 flex item 能收缩到比内容更小，不撑大父级
+    <div ref={wrapperRef} className="flex h-full min-w-0 flex-col overflow-hidden bg-bg">
       <ProjectControlRow
         zoom={zoom}
         onZoomChange={(next) =>
