@@ -61,7 +61,7 @@ const MAX_RECENT_PROJECTS = 10
 export type OpenResult =
   | { ok: true; bundle: ProjectBundle }
   | { ok: false; reason: 'busy'; heldByPid: number }
-  | { ok: false; reason: 'invalid'; message: string }
+  | { ok: false; reason: 'invalid'; message: string; canceled?: boolean }
 
 class ProjectSession {
   private currentPath: string | null = null

@@ -48,10 +48,9 @@ function handleOpenResult(result: Awaited<ReturnType<typeof window.api.project.o
     )
     return
   }
-  // invalid / canceled 共用这个分支。取消没有用户可感知的 message，就静默。
-  // '已取消' / 'Cancelled' 都是 main 侧返回的字面量；canceled flag 的判断应该优先，
-  // 但为了兼容旧逻辑这里仍然做一次文本比较
-  if (result.message !== '已取消' && result.message !== 'Cancelled') {
-    reportError(i18n.t('errors.open_project_title'), result.message)
-  }
+  // 用户主动取消（对话框关闭）不弹错误。只看 canceled flag，避免和翻译
+  // 后的 message 字面量耦合——main 返回的 '已取消' 在英文环境下也是中文，
+  // 之前用 string 比对会在 i18n 切换时漏掉
+  if (result.canceled) return
+  reportError(i18n.t('errors.open_project_title'), result.message)
 }

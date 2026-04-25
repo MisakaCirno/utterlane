@@ -55,7 +55,7 @@ export function registerProjectIpc(): void {
       buttonLabel: '新建工程'
     })
     if (result.canceled || result.filePaths.length === 0) {
-      return { ok: false, reason: 'invalid', message: '已取消' }
+      return { ok: false, reason: 'invalid', message: '已取消', canceled: true }
     }
     const dir = result.filePaths[0]
 
@@ -83,7 +83,7 @@ export function registerProjectIpc(): void {
       buttonLabel: '打开'
     })
     if (result.canceled || result.filePaths.length === 0) {
-      return { ok: false, reason: 'invalid', message: '已取消' }
+      return { ok: false, reason: 'invalid', message: '已取消', canceled: true }
     }
     return projectSession.open(result.filePaths[0])
   })

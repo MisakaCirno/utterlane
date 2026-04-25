@@ -49,7 +49,7 @@ const APP_CRASH_EVENT = 'app:crash'
 export type OpenResult =
   | { ok: true; bundle: ProjectBundle }
   | { ok: false; reason: 'busy'; heldByPid: number }
-  | { ok: false; reason: 'invalid'; message: string }
+  | { ok: false; reason: 'invalid'; message: string; canceled?: boolean }
 
 /** 与 main 的 SaveSegmentsResult 保持同步 */
 export type SaveSegmentsResult = { ok: true } | { ok: false; message: string }
