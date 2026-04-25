@@ -61,9 +61,12 @@ export function installKeyboardShortcuts(): () => void {
       return
     }
 
-    // Esc：录音中 → 取消；播放中 → 停止；idle 时无操作
+    // Esc：倒计时中 → 取消倒计时；录音中 → 取消录音；播放中 → 停止；idle 时无操作
     if (e.key === 'Escape') {
-      if (state.playback === 'recording') {
+      if (state.playback === 'countdown') {
+        e.preventDefault()
+        state.cancelCountdown()
+      } else if (state.playback === 'recording') {
         e.preventDefault()
         void state.cancelRecording()
       } else if (state.playback === 'segment' || state.playback === 'project') {

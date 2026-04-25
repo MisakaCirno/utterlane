@@ -10,6 +10,7 @@ import * as recorder from '@renderer/services/recorder'
 import * as player from '@renderer/services/player'
 import { showError } from '@renderer/store/toastStore'
 import { useHistoryStore } from '@renderer/store/historyStore'
+import { usePreferencesStore } from '@renderer/store/preferencesStore'
 import i18n from '@renderer/i18n'
 
 /**
@@ -59,6 +60,12 @@ type EditorState = {
    */
   recordingSegmentId: string | null
   recordingTakeId: string | null
+
+  /**
+   * 倒计时剩余秒数，仅在 playback === 'countdown' 时有意义。
+   * UI 通过它渲染大数字。每秒递减一次，到 0 时切到 'recording'。
+   */
+  countdownRemaining: number
 
   /**
    * 已知缺失文件的 Take ID 集合。在 applyBundle 之后由 audio-audit:scan 后台
@@ -118,6 +125,8 @@ type EditorState = {
   startRerecordingSelected: () => Promise<void>
   stopRecordingAndSave: () => Promise<void>
   cancelRecording: () => Promise<void>
+  /** 用户在倒计时阶段按 Esc：直接回到 idle，不进入 recording */
+  cancelCountdown: () => void
 
   // 播放
   playCurrentSegment: () => Promise<void>
@@ -196,6 +205,62 @@ function markDirty(): { saved: false } {
 // 规则：去除行首尾空白，忽略空行；Segment id 用 crypto.randomUUID。
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// 录音流程辅助：可选 countdown 阶段 + 真正开录。
+//
+// 写在模块作用域而不是塞进 action 闭包，是因为这套流程被两个 action
+// （新录 / 重录）共用，逻辑唯一区别只是 takeId 来源
+// ---------------------------------------------------------------------------
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function beginRecordingFlow(
+  segmentId: string,
+  takeId: string,
+  channels: 1 | 2
+): Promise<void> {
+  // 从 preferences 取倒计时秒数。0 = 关闭，跳过 countdown 直接开录
+  const countdownSeconds = usePreferencesStore.getState().prefs.recording?.countdownSeconds ?? 0
+
+  if (countdownSeconds > 0) {
+    useEditorStore.setState({
+      playback: 'countdown',
+      countdownRemaining: countdownSeconds,
+      recordingSegmentId: segmentId,
+      recordingTakeId: takeId
+    })
+
+    for (let n = countdownSeconds; n > 0; n--) {
+      useEditorStore.setState({ countdownRemaining: n })
+      await sleep(1000)
+      // sleep 期间用户可能按 Esc 触发了 cancelCountdown 把 playback 切到 idle，
+      // 检测到就退出
+      if (useEditorStore.getState().playback !== 'countdown') return
+    }
+  }
+
+  // 进入正式录音
+  useEditorStore.setState({
+    playback: 'recording',
+    countdownRemaining: 0,
+    recordingSegmentId: segmentId,
+    recordingTakeId: takeId
+  })
+
+  try {
+    await recorder.startRecording({ channels })
+  } catch (err) {
+    useEditorStore.setState({
+      playback: 'idle',
+      recordingSegmentId: null,
+      recordingTakeId: null
+    })
+    showError(i18n.t('errors.recording_start_title'), (err as Error).message)
+  }
+}
+
 function splitScriptIntoSegments(rawText: string): Segment[] {
   return rawText
     .split(/\r?\n/)
@@ -229,6 +294,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   saved: true,
   recordingSegmentId: null,
   recordingTakeId: null,
+  countdownRemaining: 0,
   missingTakeIds: new Set<string>(),
 
   applyBundle: (bundle) => {
@@ -250,6 +316,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       saved: true,
       recordingSegmentId: null,
       recordingTakeId: null,
+      countdownRemaining: 0,
       missingTakeIds: new Set<string>()
     })
     // 后台扫一次缺失文件，不阻塞 UI。结果回填 missingTakeIds 让 Inspector 标徽
@@ -284,6 +351,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       saved: true,
       recordingSegmentId: null,
       recordingTakeId: null,
+      countdownRemaining: 0,
       missingTakeIds: new Set<string>()
     })
   },
@@ -549,24 +617,18 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   /**
    * 对当前选中 Segment 新增一个 Take。
    * 要求：有活动工程 + 选中了某个 Segment + 当前不在录音 / 播放中。
-   * 失败时恢复 playback 为 idle，并用 alert 提示（后续换成 toast）。
+   * 倒计时开启（preferences.recording.countdownSeconds > 0）时先走 N 秒
+   * countdown 阶段，期间用户按 Esc 或点击 overlay 都会取消并回到 idle。
    */
   startRecordingForSelected: async () => {
     const state = get()
     if (!state.project || !state.selectedSegmentId) return
     if (state.playback !== 'idle') return
-
-    const segmentId = state.selectedSegmentId
-    const takeId = crypto.randomUUID()
-
-    set({ playback: 'recording', recordingSegmentId: segmentId, recordingTakeId: takeId })
-
-    try {
-      await recorder.startRecording({ channels: state.project.audio.channels })
-    } catch (err) {
-      set({ playback: 'idle', recordingSegmentId: null, recordingTakeId: null })
-      showError(i18n.t('errors.recording_start_title'), (err as Error).message)
-    }
+    await beginRecordingFlow(
+      state.selectedSegmentId,
+      crypto.randomUUID(),
+      state.project.audio.channels
+    )
   },
 
   /**
@@ -579,18 +641,26 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     if (state.playback !== 'idle') return
     const seg = state.segmentsById[state.selectedSegmentId]
     if (!seg?.selectedTakeId) return
+    // 复用同 takeId → writeTake 会覆盖同名文件
+    await beginRecordingFlow(
+      state.selectedSegmentId,
+      seg.selectedTakeId,
+      state.project.audio.channels
+    )
+  },
 
-    const segmentId = state.selectedSegmentId
-    const takeId = seg.selectedTakeId // 复用同 ID → writeTake 覆盖同文件
-
-    set({ playback: 'recording', recordingSegmentId: segmentId, recordingTakeId: takeId })
-
-    try {
-      await recorder.startRecording({ channels: state.project.audio.channels })
-    } catch (err) {
-      set({ playback: 'idle', recordingSegmentId: null, recordingTakeId: null })
-      showError(i18n.t('errors.recording_start_title'), (err as Error).message)
-    }
+  cancelCountdown: () => {
+    const state = get()
+    if (state.playback !== 'countdown') return
+    // 直接回 idle，等待 beginRecordingFlow 内部的循环检测到状态变化后退出。
+    // 不需要主动 reject 任何 Promise——sleep 自然走完，sleep 后第一句
+    // get().playback 检查就 return 了
+    set({
+      playback: 'idle',
+      countdownRemaining: 0,
+      recordingSegmentId: null,
+      recordingTakeId: null
+    })
   },
 
   stopRecordingAndSave: async () => {

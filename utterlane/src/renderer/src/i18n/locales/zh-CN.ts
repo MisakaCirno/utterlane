@@ -228,6 +228,10 @@ export const zhCN = {
     title: '电平'
   },
 
+  countdown: {
+    cancel_hint: '按 Esc 或点击屏幕取消'
+  },
+
   history: {
     edit_text: '编辑文案',
     reorder: '调整 Segment 顺序',
@@ -300,6 +304,10 @@ export const zhCN = {
     title: '偏好设置',
     section_appearance: '外观',
     section_project_defaults: '新工程默认',
+    section_recording: '录音',
+    label_countdown: '录音前倒计时',
+    countdown_off: '关闭',
+    countdown_seconds: '{{count}} 秒',
     label_dock_theme: 'Dock 主题',
     label_font_scale: '字体缩放',
     label_language: '界面语言',

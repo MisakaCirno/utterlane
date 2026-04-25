@@ -67,6 +67,16 @@ export type AppPreferences = {
 
   /** 最近打开的工程目录绝对路径，按最近优先 */
   recentProjects?: string[]
+
+  /** 录音相关偏好 */
+  recording?: {
+    /**
+     * 录音前倒计时秒数。0 = 关闭，按下录音键立即开始。
+     * 即使设 1 秒也有用：足以避开按键音被收进起头。
+     * 取值约束在 0 / 1 / 3 / 5 之中（见 PreferencesDialog 的选项）。
+     */
+    countdownSeconds?: number
+  }
 }
 
 /**
@@ -86,7 +96,10 @@ export const DEFAULT_PREFERENCES: AppPreferences = {
     sampleRate: 48000,
     channels: 1
   },
-  recentProjects: []
+  recentProjects: [],
+  recording: {
+    countdownSeconds: 1
+  }
 }
 
 /**
@@ -120,6 +133,9 @@ export function mergePreferences(
   }
   if (patch.projectDefaults) {
     next.projectDefaults = { ...base.projectDefaults, ...patch.projectDefaults }
+  }
+  if (patch.recording) {
+    next.recording = { ...base.recording, ...patch.recording }
   }
 
   return next

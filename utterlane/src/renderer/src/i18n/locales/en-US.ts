@@ -229,6 +229,10 @@ export const enUS: TranslationSchema = {
     title: 'Level'
   },
 
+  countdown: {
+    cancel_hint: 'Press Esc or click anywhere to cancel'
+  },
+
   history: {
     edit_text: 'Edit Text',
     reorder: 'Reorder Segments',
@@ -301,6 +305,10 @@ export const enUS: TranslationSchema = {
     title: 'Preferences',
     section_appearance: 'Appearance',
     section_project_defaults: 'New project defaults',
+    section_recording: 'Recording',
+    label_countdown: 'Pre-recording countdown',
+    countdown_off: 'Off',
+    countdown_seconds: '{{count}} sec',
     label_dock_theme: 'Dock theme',
     label_font_scale: 'Font scale',
     label_language: 'Language',

@@ -5,6 +5,7 @@ import { StatusBar } from './shell/StatusBar'
 import { Workspace } from './shell/Workspace'
 import { ToastHost } from './shell/ToastHost'
 import { ConfirmHost } from './shell/ConfirmHost'
+import { CountdownOverlay } from './shell/CountdownOverlay'
 import { WelcomeView } from './views/WelcomeView'
 import { ImportScriptDialog } from './dialogs/ImportScriptDialog'
 import { PreferencesDialog } from './dialogs/PreferencesDialog'
@@ -136,6 +137,7 @@ function App(): React.JSX.Element {
       <CrashDialog />
       <ConfirmHost />
       <ToastHost />
+      <CountdownOverlay />
     </div>
   )
 }

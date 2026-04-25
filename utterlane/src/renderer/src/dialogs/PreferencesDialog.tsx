@@ -29,6 +29,12 @@ const FONT_SCALE_OPTIONS: Array<{ value: number; labelKey: string }> = [
 
 const SAMPLE_RATE_OPTIONS = [44100, 48000] as const
 
+/**
+ * 倒计时档位。0 = 关；1 秒已经足够避开「点击录音键的按键音」被录入起头。
+ * 3 / 5 适合需要一点时间清嗓子 / 调整状态的用户。
+ */
+const COUNTDOWN_OPTIONS = [0, 1, 3, 5] as const
+
 export function PreferencesDialog({
   open,
   onOpenChange
@@ -42,6 +48,7 @@ export function PreferencesDialog({
 
   const appearance = prefs.appearance ?? DEFAULT_PREFERENCES.appearance!
   const projectDefaults = prefs.projectDefaults ?? DEFAULT_PREFERENCES.projectDefaults!
+  const recording = prefs.recording ?? DEFAULT_PREFERENCES.recording!
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -150,6 +157,22 @@ export function PreferencesDialog({
                     { value: '1', label: t('project_settings.channel_mono') },
                     { value: '2', label: t('project_settings.channel_stereo') }
                   ]}
+                />
+              </Row>
+            </Section>
+
+            <Section title={t('preferences.section_recording')}>
+              <Row label={t('preferences.label_countdown')}>
+                <Select
+                  value={String(recording.countdownSeconds ?? 1)}
+                  onChange={(v) => update({ recording: { countdownSeconds: Number(v) } })}
+                  options={COUNTDOWN_OPTIONS.map((sec) => ({
+                    value: String(sec),
+                    label:
+                      sec === 0
+                        ? t('preferences.countdown_off')
+                        : t('preferences.countdown_seconds', { count: sec })
+                  }))}
                 />
               </Row>
             </Section>
