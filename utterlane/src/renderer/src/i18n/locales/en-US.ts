@@ -89,6 +89,8 @@ export const enUS: TranslationSchema = {
     tb_clear_all: 'Clear all Segments',
     tb_import_script: 'Import script…',
     tb_find_replace: 'Find / Replace (Ctrl+F)',
+    tb_paragraph_head: 'Toggle paragraph head on selected',
+    tb_paragraph_head_locked: 'First segment is always a paragraph head',
     find_placeholder: 'Find…',
     replace_placeholder: 'Replace with…',
     replace_all: 'Replace All',

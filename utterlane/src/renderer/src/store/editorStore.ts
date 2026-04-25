@@ -287,6 +287,21 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+/**
+ * Segment.text 的数据不变量：单行、不含制表符。
+ *
+ * 把 \r \n \t 等「结构性」空白字符塌缩成一个普通空格，让一段文字永远是
+ * 单行（导出 SRT 时一行字幕对应一段文字、时间轴 / 波形 / 字幕长度都不会
+ * 因为多行而错乱）。普通的多空格不动——用户可能有意为之（停顿表达 / 输入
+ * 错误恢复都常见）。
+ *
+ * trim 不在这里做：编辑过程中用户可能正在打头空格 / 尾空格，store 层 trim
+ * 会让光标跳。提交（blur / Enter）时再由 UI 显式 trim
+ */
+export function sanitizeSegmentText(text: string): string {
+  return text.replace(/[\r\n\t]+/g, ' ')
+}
+
 async function beginRecordingFlow(
   segmentId: string,
   takeId: string,
@@ -661,20 +676,25 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   editSegmentText: (id, text) => {
     const prev = get()
     const seg = prev.segmentsById[id]
-    if (!seg || seg.text === text) return
+    if (!seg) return
+    // 数据不变量：Segment.text 单行。任何入口（粘贴 / textarea Enter /
+    // 历史遗留多行）都在这里折成空格。trim 不在 store 层做——edit 过程
+    // 中的中间态可能有前后空格，trim 由 UI 在 commit / blur 时显式做
+    const sanitized = sanitizeSegmentText(text)
+    if (seg.text === sanitized) return
 
     // 同一 Segment 连续打字在 coalesce 窗内合并为一条，避免每个按键一格 undo
     useHistoryStore.getState().push(`editText:${id}`, 'history.edit_text', {
       type: 'editText',
       segId: id,
       before: seg.text,
-      after: text
+      after: sanitized
     })
 
     set({
       segmentsById: {
         ...prev.segmentsById,
-        [id]: { ...seg, text }
+        [id]: { ...seg, text: sanitized }
       },
       ...markDirty()
     })

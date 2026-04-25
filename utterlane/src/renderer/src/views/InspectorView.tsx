@@ -196,7 +196,17 @@ export function InspectorView(): React.JSX.Element {
             value={segment.text}
             onChange={(e) => editSegmentText(selectedId, e.target.value)}
             onFocus={() => setHasTextFocus(true)}
-            onBlur={() => setHasTextFocus(false)}
+            onBlur={(e) => {
+              setHasTextFocus(false)
+              // 提交时 trim：行内编辑过程中允许中间态有头尾空白
+              const trimmed = e.target.value.trim()
+              if (trimmed !== e.target.value) editSegmentText(selectedId, trimmed)
+            }}
+            onKeyDown={(e) => {
+              // 数据不变量：Segment.text 单行。textarea 拦截 Enter 阻止换行；
+              // store 层 sanitizeSegmentText 会把粘贴等带进来的 \n 也折成空格
+              if (e.key === 'Enter') e.preventDefault()
+            }}
             className={cn(
               'w-full resize-none rounded-sm border border-border bg-bg-deep px-2 py-1',
               'text-xs leading-5 outline-none focus:border-accent',

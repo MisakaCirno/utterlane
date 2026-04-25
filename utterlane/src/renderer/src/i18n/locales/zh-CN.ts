@@ -91,6 +91,8 @@ export const zhCN = {
     tb_clear_all: '清空所有 Segment',
     tb_import_script: '导入文案…',
     tb_find_replace: '查找 / 替换（Ctrl+F）',
+    tb_paragraph_head: '将选中段标记为段首（再次点击取消）',
+    tb_paragraph_head_locked: '首段恒为段首',
     find_placeholder: '查找…',
     replace_placeholder: '替换为…',
     replace_all: '全部替换',

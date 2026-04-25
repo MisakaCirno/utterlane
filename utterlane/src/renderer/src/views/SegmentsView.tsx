@@ -234,7 +234,9 @@ function SegmentRow({
   function commit(): void {
     if (!editing) return
     setEditing(false)
-    if (draft !== seg!.text) editSegmentText(id, draft)
+    // 提交时 trim 头尾空白；store 层 sanitizeSegmentText 还会再剥换行 / 制表符
+    const normalized = draft.trim()
+    if (normalized !== seg!.text) editSegmentText(id, normalized)
   }
   function cancel(): void {
     setEditing(false)
@@ -536,8 +538,20 @@ export function SegmentsView(): React.JSX.Element {
   const insertSegmentAfter = useEditorStore((s) => s.insertSegmentAfter)
   const clearAllSegments = useEditorStore((s) => s.clearAllSegments)
   const replaceAllInSegments = useEditorStore((s) => s.replaceAllInSegments)
+  const setParagraphStart = useEditorStore((s) => s.setParagraphStart)
   const playback = useEditorStore((s) => s.playback)
   const openImportScript = useDialogStore((s) => s.openImportScript)
+  // 当前主选段是否为段首：order 第一段恒为段首；其他看 paragraphStart 标志
+  const selectedIsParagraphHead = useEditorStore((s) => {
+    if (!s.selectedSegmentId) return false
+    const idx = s.order.indexOf(s.selectedSegmentId)
+    if (idx < 0) return false
+    if (idx === 0) return true
+    return !!s.segmentsById[s.selectedSegmentId]?.paragraphStart
+  })
+  const selectedIsFirstInOrder = useEditorStore(
+    (s) => s.selectedSegmentId !== undefined && s.order.indexOf(s.selectedSegmentId) === 0
+  )
 
   // 查找 / 替换：唯一的「过滤 + 文字操作」入口。
   // findText 为空时不过滤；非空时按子串匹配（大小写敏感，简化版）
@@ -719,6 +733,25 @@ export function SegmentsView(): React.JSX.Element {
           <ArrowDownFromLine size={12} />
         </ToolbarIconButton>
         <div className="mx-1 h-4 w-px bg-border" />
+        {/*
+          切换段首：active 态显示当前选中段是段首。首段恒为段首，禁用以免
+          用户误以为可以取消（state.setParagraphStart 内部对 idx === 0 也会
+          做同样兜底，UI 提前 disabled 让按钮 active 状态更清晰）
+        */}
+        <ToolbarIconButton
+          onClick={() =>
+            selectedSegmentId && setParagraphStart(selectedSegmentId, !selectedIsParagraphHead)
+          }
+          disabled={!isIdle || !hasSelection || selectedIsFirstInOrder}
+          active={selectedIsParagraphHead}
+          title={
+            selectedIsFirstInOrder
+              ? t('segments.tb_paragraph_head_locked')
+              : t('segments.tb_paragraph_head')
+          }
+        >
+          <Pilcrow size={12} />
+        </ToolbarIconButton>
         <ToolbarIconButton
           onClick={() => void onBatchDelete()}
           disabled={!isIdle || totalSelected === 0}

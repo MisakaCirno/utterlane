@@ -218,6 +218,15 @@ function SegmentTextEditor(): React.JSX.Element {
         value={text}
         disabled={!selectedId}
         onChange={(e) => selectedId && editSegmentText(selectedId, e.target.value)}
+        onBlur={(e) => {
+          if (!selectedId) return
+          const trimmed = e.target.value.trim()
+          if (trimmed !== e.target.value) editSegmentText(selectedId, trimmed)
+        }}
+        onKeyDown={(e) => {
+          // 单行约束：和 Inspector 文案区一致，拦截 Enter 阻止换行
+          if (e.key === 'Enter') e.preventDefault()
+        }}
         placeholder={t('timeline.segment_text_placeholder')}
         className={cn(
           'w-full resize-none rounded-sm border border-border bg-bg-deep px-2 py-1',
