@@ -3,6 +3,7 @@ import { electronAPI } from '@electron-toolkit/preload'
 import type { AppPreferences } from '@shared/preferences'
 import type { ProjectBundle, SegmentsFile, WorkspaceFile } from '@shared/project'
 import type { WriteTakeResult } from '@shared/recording'
+import type { AppInfo } from '@shared/appInfo'
 
 // IPC 通道名需要和 main 侧保持一致。
 // 这里复制字面量而不是 import 主进程的常量，是因为 preload 打包时
@@ -26,6 +27,8 @@ const EXPORT_AUDIO_WAV = 'export:audio-wav'
 const EXPORT_SUBTITLES_SRT = 'export:subtitles-srt'
 
 const LOGS_OPEN_FOLDER = 'logs:open-folder'
+
+const APP_GET_INFO = 'app:get-info'
 
 /** 与 main 的 OpenResult 保持同步；preload 不 import main 代码，所以在这里复述结构 */
 export type OpenResult =
@@ -138,6 +141,11 @@ const api = {
   logs: {
     /** 在系统文件管理器里打开日志目录。成功返回 null，失败返回错误文案。 */
     openFolder: (): Promise<string | null> => ipcRenderer.invoke(LOGS_OPEN_FOLDER)
+  },
+
+  app: {
+    /** 应用 / 运行时元信息（版本、Electron / Chromium / Node 版本、平台等） */
+    getInfo: (): Promise<AppInfo> => ipcRenderer.invoke(APP_GET_INFO)
   }
 }
 

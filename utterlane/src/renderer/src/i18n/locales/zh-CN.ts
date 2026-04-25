@@ -201,6 +201,17 @@ export const zhCN = {
     kind_srt: 'SRT 字幕'
   },
 
+  about: {
+    title: '关于',
+    version: 'v{{version}}',
+    license_label: '本软件使用',
+    license_suffix: '协议开源',
+    diagnostics_label: '诊断信息',
+    copy_btn: '复制',
+    copy_tooltip: '复制版本与运行时信息（提交 bug 时附上）',
+    copied: '已复制到剪贴板'
+  },
+
   level_meter: {
     title: '电平'
   },

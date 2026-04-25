@@ -8,6 +8,7 @@ import { registerRecordingIpc } from './recording'
 import { registerExportIpc } from './export'
 import { initLogger } from './logger'
 import { registerLogsIpc } from './logger/ipc'
+import { registerAppInfoIpc } from './app-info/ipc'
 import type { WindowBounds } from '@shared/preferences'
 
 // 日志必须最早 init：后面任何模块的 log 调用、uncaughtException 捕获都依赖它
@@ -129,6 +130,7 @@ app.whenReady().then(async () => {
   registerRecordingIpc()
   registerExportIpc()
   registerLogsIpc()
+  registerAppInfoIpc()
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)

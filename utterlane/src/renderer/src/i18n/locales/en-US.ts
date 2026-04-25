@@ -201,6 +201,17 @@ export const enUS: TranslationSchema = {
     kind_srt: 'SRT subtitles'
   },
 
+  about: {
+    title: 'About',
+    version: 'v{{version}}',
+    license_label: 'Licensed under',
+    license_suffix: '',
+    diagnostics_label: 'Diagnostics',
+    copy_btn: 'Copy',
+    copy_tooltip: 'Copy version and runtime info (handy for bug reports)',
+    copied: 'Copied to clipboard'
+  },
+
   level_meter: {
     title: 'Level'
   },

@@ -27,7 +27,8 @@ function buildMenus(
   t: TFunction,
   hasProject: boolean,
   openImportScript: () => void,
-  openPreferences: () => void
+  openPreferences: () => void,
+  openAbout: () => void
 ): MenuDef[] {
   return [
     {
@@ -124,7 +125,7 @@ function buildMenus(
     {
       label: t('menu.help'),
       items: [
-        { kind: 'item', label: t('menu.help_about') },
+        { kind: 'item', label: t('menu.help_about'), onSelect: openAbout },
         { kind: 'item', label: t('menu.help_license') },
         { kind: 'item', label: t('menu.help_homepage') },
         { kind: 'separator' },
@@ -244,15 +245,16 @@ export function Titlebar(): React.JSX.Element {
   const saved = useEditorStore((s) => s.saved)
   const openImportScript = useDialogStore((s) => s.openImportScript)
   const openPreferences = useDialogStore((s) => s.openPreferences)
+  const openAbout = useDialogStore((s) => s.openAbout)
   const [maximized, setMaximized] = useState(false)
 
   const hasProject = project !== null
 
   // 依赖 i18n.language 而不是 t：t 引用在语言切换时也会变，但 language 更明确
   const menus = useMemo(
-    () => buildMenus(t, hasProject, openImportScript, openPreferences),
+    () => buildMenus(t, hasProject, openImportScript, openPreferences, openAbout),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [t, i18n.language, hasProject, openImportScript, openPreferences]
+    [t, i18n.language, hasProject, openImportScript, openPreferences, openAbout]
   )
 
   useEffect(() => {

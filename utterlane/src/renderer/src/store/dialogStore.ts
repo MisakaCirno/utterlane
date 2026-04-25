@@ -18,6 +18,10 @@ type DialogState = {
   preferencesOpen: boolean
   openPreferences: () => void
   closePreferences: () => void
+
+  aboutOpen: boolean
+  openAbout: () => void
+  closeAbout: () => void
 }
 
 export const useDialogStore = create<DialogState>((set) => ({
@@ -27,5 +31,9 @@ export const useDialogStore = create<DialogState>((set) => ({
 
   preferencesOpen: false,
   openPreferences: () => set({ preferencesOpen: true }),
-  closePreferences: () => set({ preferencesOpen: false })
+  closePreferences: () => set({ preferencesOpen: false }),
+
+  aboutOpen: false,
+  openAbout: () => set({ aboutOpen: true }),
+  closeAbout: () => set({ aboutOpen: false })
 }))
