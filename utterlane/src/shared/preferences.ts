@@ -222,45 +222,95 @@ export const DEFAULT_PREFERENCES: AppPreferences = {
 }
 
 /**
+ * 浅合并：把 patch 中 value !== undefined 的字段并入 base，并把 value ===
+ * undefined 的字段从结果里删掉。
+ *
+ * 这是 mergePreferences 的语义关键：UI 用 `update({ keyboard: { bindings:
+ * { record: undefined } } })` 表达「重置该绑定」，希望最终 JSON 里没有
+ * record 这个 key——而不是 `{ record: undefined }`（JSON.stringify 会写成
+ * `{}` 但内存里 `'record' in bindings` 仍然为 true，破坏 resolveBindings
+ * 的「显式覆盖 vs 未覆盖」判定）。
+ *
+ * 调用方传 null 表达「显式取消该动作的快捷键」，与 undefined 区分开——
+ * null 会被保留。
+ */
+function mergePartial<T extends object>(base: T | undefined, patch: Partial<T>): T {
+  const out: Record<string, unknown> = { ...(base ?? {}) }
+  for (const key of Object.keys(patch)) {
+    const v = (patch as Record<string, unknown>)[key]
+    if (v === undefined) {
+      delete out[key]
+    } else {
+      out[key] = v
+    }
+  }
+  return out as T
+}
+
+/**
  * 深合并 patch 到 base，返回新对象。
  * 一层对象（appearance / layout / window / projectDefaults）按 key 合并；
  * 其余（如 recentProjects 数组、dockTheme 这类标量）整体替换。
  *
  * 抽出来是因为 update 操作从 UI 的角度往往只想更新某一个字段，
- * 不想每次都传完整的 appearance 对象。
+ * 不想每次都传完整的 appearance 对象。patch 中显式为 undefined 的字段
+ * 视为「请删除该字段」（见 mergePartial 注释）。
  */
 export function mergePreferences(
   base: AppPreferences,
   patch: Partial<AppPreferences>
 ): AppPreferences {
-  const next: AppPreferences = { ...base, ...patch, schemaVersion: base.schemaVersion }
+  const next: AppPreferences = { ...base, schemaVersion: base.schemaVersion }
+  // 顶层标量字段：用 mergePartial 让 undefined 也能删
+  for (const key of Object.keys(patch) as Array<keyof AppPreferences>) {
+    if (key === 'schemaVersion') continue
+    if (
+      key === 'appearance' ||
+      key === 'layout' ||
+      key === 'window' ||
+      key === 'projectDefaults' ||
+      key === 'recording' ||
+      key === 'keyboard'
+    ) {
+      continue // 嵌套对象走专门的合并分支
+    }
+    const v = patch[key]
+    if (v === undefined) {
+      delete next[key]
+    } else {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(next as any)[key] = v
+    }
+  }
 
   if (patch.appearance) {
-    next.appearance = { ...base.appearance, ...patch.appearance }
+    next.appearance = mergePartial(base.appearance, patch.appearance)
   }
   if (patch.layout) {
-    next.layout = { ...base.layout, ...patch.layout }
+    const layoutNext = mergePartial(base.layout, patch.layout)
     if (patch.layout.segmentsColumnWidths) {
-      next.layout.segmentsColumnWidths = {
-        ...base.layout?.segmentsColumnWidths,
-        ...patch.layout.segmentsColumnWidths
-      }
+      layoutNext.segmentsColumnWidths = mergePartial(
+        base.layout?.segmentsColumnWidths,
+        patch.layout.segmentsColumnWidths
+      )
     }
+    next.layout = layoutNext
   }
   if (patch.window) {
-    next.window = { ...base.window, ...patch.window }
+    next.window = mergePartial(base.window, patch.window)
   }
   if (patch.projectDefaults) {
-    next.projectDefaults = { ...base.projectDefaults, ...patch.projectDefaults }
+    next.projectDefaults = mergePartial(base.projectDefaults, patch.projectDefaults)
   }
   if (patch.recording) {
-    next.recording = { ...base.recording, ...patch.recording }
+    next.recording = mergePartial(base.recording, patch.recording)
   }
   if (patch.keyboard) {
-    next.keyboard = { ...base.keyboard, ...patch.keyboard }
+    const kbNext = mergePartial(base.keyboard, patch.keyboard)
     if (patch.keyboard.bindings) {
-      next.keyboard.bindings = { ...base.keyboard?.bindings, ...patch.keyboard.bindings }
+      kbNext.bindings = mergePartial(base.keyboard?.bindings, patch.keyboard.bindings)
     }
+    next.keyboard = kbNext
   }
 
   return next

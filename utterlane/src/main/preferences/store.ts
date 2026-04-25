@@ -55,7 +55,10 @@ class PreferencesStore {
           : 0
 
       if (version === PREFERENCES_SCHEMA_VERSION) {
-        this.current = { ...DEFAULT_PREFERENCES, ...(parsedRaw as AppPreferences) }
+        // 用 mergePreferences 而不是 ...spread——浅合并会让旧版本中只存了
+        // dockTheme 的 appearance 整个覆盖默认值，丢掉 fontScale / locale /
+        // segmentTextAlign / inspectorTextAlign 等新字段的默认。
+        this.current = mergePreferences(DEFAULT_PREFERENCES, parsedRaw as AppPreferences)
         return
       }
 
@@ -76,7 +79,7 @@ class PreferencesStore {
           preferencesMigrations
         ) as AppPreferences
         await writeJsonAtomic(this.filePath, migrated)
-        this.current = { ...DEFAULT_PREFERENCES, ...migrated }
+        this.current = mergePreferences(DEFAULT_PREFERENCES, migrated)
         console.log(
           `[preferences] migrated from v${version} to v${PREFERENCES_SCHEMA_VERSION} (backup saved)`
         )
