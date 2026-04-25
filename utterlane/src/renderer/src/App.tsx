@@ -20,6 +20,7 @@ import { useDialogStore } from './store/dialogStore'
 import { confirm } from './store/confirmStore'
 import { openProjectPath } from './actions/project'
 import { installKeyboardShortcuts } from './shell/keyboardShortcuts'
+import { FONT_SCALE_MAX, FONT_SCALE_MIN } from '@shared/preferences'
 
 function App(): React.JSX.Element {
   const hasProject = useEditorStore((s) => s.project !== null)
@@ -46,9 +47,10 @@ function App(): React.JSX.Element {
 
   // 字体缩放：把 fontScale 写到 documentElement 的 --fs-scale 变量上，
   // 所有 text-* Tailwind 类会通过 CSS 变量自动跟随。
-  // 范围收紧到 0.8~1.5，避免用户误操作造成 UI 崩溃。
+  // clamp 范围与 PreferencesDialog 暴露的离散档位共用 shared 常量，
+  // 避免「UI 选项 1.3 而 clamp 上限 1.5」这种含糊状态。
   useEffect(() => {
-    const clamped = Math.max(0.8, Math.min(1.5, fontScale ?? 1))
+    const clamped = Math.max(FONT_SCALE_MIN, Math.min(FONT_SCALE_MAX, fontScale ?? 1))
     document.documentElement.style.setProperty('--fs-scale', String(clamped))
   }, [fontScale])
 

@@ -111,6 +111,19 @@ export function formatBinding(b: KeyBinding): string {
   return parts.join('+')
 }
 
+/**
+ * 字体缩放档位 + 范围下限/上限。
+ *
+ * App.tsx 用 [FONT_SCALE_MIN, FONT_SCALE_MAX] clamp 用户偏好值（防止偏好
+ * 文件被外部编辑成离谱的极值），PreferencesDialog 用 FONT_SCALE_OPTIONS
+ * 的离散档位作为 UI 选项。两者一起放这里保证：
+ *   - 任意 OPTION 都落在 [MIN, MAX] 区间内
+ *   - 改 UI 选项时不会和 clamp 区间脱节
+ */
+export const FONT_SCALE_MIN = 0.85
+export const FONT_SCALE_MAX = 1.3
+export const FONT_SCALE_OPTIONS = [0.85, 1, 1.15, 1.3] as const
+
 export type DockThemeKey =
   | 'dark'
   | 'light'

@@ -6,6 +6,7 @@ import {
   CUSTOMIZABLE_ACTIONS,
   DEFAULT_KEYBINDINGS,
   DEFAULT_PREFERENCES,
+  FONT_SCALE_OPTIONS,
   formatBinding,
   resolveBindings,
   type CustomizableActionId,
@@ -31,13 +32,16 @@ import { enumerateInputDevices, type AudioInputDevice } from '@renderer/services
  *   - 新工程默认：新建工程时的采样率 / 声道数
  */
 
-/** 字体缩放的 4 档。取值范围与 App.tsx 里的 clamp 保持一致 */
-const FONT_SCALE_OPTIONS: Array<{ value: number; labelKey: string }> = [
-  { value: 0.85, labelKey: 'preferences.font_scale_small' },
-  { value: 1, labelKey: 'preferences.font_scale_default' },
-  { value: 1.15, labelKey: 'preferences.font_scale_large' },
-  { value: 1.3, labelKey: 'preferences.font_scale_xlarge' }
-]
+/**
+ * 字体缩放档位的展示标签。值列表来自 shared/preferences 的 FONT_SCALE_OPTIONS——
+ * 共用一份保证 clamp 范围与 UI 选项不脱节
+ */
+const FONT_SCALE_LABEL_KEYS: Record<number, string> = {
+  0.85: 'preferences.font_scale_small',
+  1: 'preferences.font_scale_default',
+  1.15: 'preferences.font_scale_large',
+  1.3: 'preferences.font_scale_xlarge'
+}
 
 const SAMPLE_RATE_OPTIONS = [44100, 48000] as const
 
@@ -110,12 +114,14 @@ export function PreferencesDialog({
 
               <Row label={t('preferences.label_font_scale')}>
                 <div className="flex gap-1">
-                  {FONT_SCALE_OPTIONS.map((opt) => {
-                    const isCurrent = (appearance.fontScale ?? 1) === opt.value
+                  {FONT_SCALE_OPTIONS.map((value) => {
+                    const isCurrent = (appearance.fontScale ?? 1) === value
+                    const labelKey =
+                      FONT_SCALE_LABEL_KEYS[value] ?? 'preferences.font_scale_default'
                     return (
                       <button
-                        key={opt.value}
-                        onClick={() => update({ appearance: { fontScale: opt.value } })}
+                        key={value}
+                        onClick={() => update({ appearance: { fontScale: value } })}
                         className={cn(
                           'h-6 flex-1 rounded-sm border px-2 text-2xs',
                           isCurrent
@@ -123,7 +129,7 @@ export function PreferencesDialog({
                             : 'border-border bg-bg-raised text-fg hover:border-border-strong'
                         )}
                       >
-                        {t(opt.labelKey)}
+                        {t(labelKey)}
                       </button>
                     )
                   })}

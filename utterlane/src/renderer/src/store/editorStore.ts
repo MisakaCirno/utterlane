@@ -1014,6 +1014,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
 
   __dev_appendFakeSegments: (count) => {
+    // 生产构建下整个分支应当被 tree-shake：Titlebar 调用入口包在
+    // import.meta.env.DEV 内已经会被剥离，但 store 本身的方法实现仍会进
+    // 包。再加一道运行期 guard 双保险——万一有第三方代码（未来的插件 /
+    // 调试工具）遍历 store action 调到，也不会污染生产数据
+    if (!import.meta.env.DEV) return
     const prev = get()
     const newSegs: Segment[] = []
     for (let i = 0; i < count; i++) {
