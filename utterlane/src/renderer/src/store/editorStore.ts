@@ -512,7 +512,13 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   updateProject: (patch) => {
     const prev = get()
     if (!prev.project) return
-    const next: Project = { ...prev.project, ...patch }
+    // updatedAt 在 renderer 侧写入：保持 store 内存值和磁盘值一致，
+    // 避免 main 重新覆写一次时间戳让两边发散。
+    const next: Project = {
+      ...prev.project,
+      ...patch,
+      updatedAt: new Date().toISOString()
+    }
     set({ project: next })
     // fire-and-forget：失败时通过 toast 提示，但不阻塞 UI 反馈
     void window.api.project.saveProject(next).then((result) => {

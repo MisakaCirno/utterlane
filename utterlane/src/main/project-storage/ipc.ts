@@ -142,14 +142,18 @@ export function registerProjectIpc(): void {
    * main 包上当前 PROJECT_SCHEMA_VERSION 后原子写入。
    *
    * 和 saveSegments 一样立即落盘——project meta 改动频率低（用户编辑设置
-   * 才会触发），每次都直接写不会成为性能瓶颈
+   * 才会触发），每次都直接写不会成为性能瓶颈。
+   *
+   * updatedAt 由 renderer 侧 updateProject 在 patch 应用时一并写入，
+   * 这里不再覆盖：保证 main 写入磁盘的值与 editorStore 内存里的 Project
+   * 一致，避免「内存看到的 updatedAt 是上次 open 的值，磁盘是当前时间」
+   * 这种隐性发散
    */
   ipcMain.handle(PROJECT_IPC.saveProject, async (_e, next: Project): Promise<SaveProjectResult> => {
     try {
       const file: ProjectFile = {
         ...next,
-        schemaVersion: PROJECT_SCHEMA_VERSION,
-        updatedAt: new Date().toISOString()
+        schemaVersion: PROJECT_SCHEMA_VERSION
       }
       await projectSession.saveProject(file)
       return { ok: true }
