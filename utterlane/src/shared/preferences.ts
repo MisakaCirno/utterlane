@@ -138,6 +138,22 @@ export type SegmentsColumnWidths = {
   duration?: number
 }
 
+/**
+ * dockLayout 当前版本号。每次默认布局结构发生破坏性变化（新加 / 删除
+ * panel、改 panel id 等）时 +1：旧版本的持久化布局会因 schemaVersion
+ * 不匹配被丢弃，回落到默认。
+ *
+ * 这是 dockview 内部 toJSON() 之外、由我们维护的「兼容标识」——dockview
+ * 自己不知道我们怎么定义「兼容」，只能由我们决定。
+ */
+export const DOCK_LAYOUT_SCHEMA_VERSION = 1
+
+export type DockLayoutEnvelope = {
+  schemaVersion: number
+  /** dockview toJSON() 原样存放；shape 由 dockview 决定，我们不解释 */
+  layout: unknown
+}
+
 export type AppPreferences = {
   schemaVersion: number
 
@@ -153,8 +169,11 @@ export type AppPreferences = {
   }
 
   layout?: {
-    /** dockview 序列化后的布局 JSON；结构由 dockview 自己定义，我们不解释 */
-    dockLayout?: unknown
+    /**
+     * dockview 序列化后的布局 + 我们的版本号信封。结构由 DockLayoutEnvelope
+     * 约束：兼容判定基于 schemaVersion，旧版本的会被丢弃回落默认布局。
+     */
+    dockLayout?: DockLayoutEnvelope
     segmentsColumnWidths?: SegmentsColumnWidths
   }
 

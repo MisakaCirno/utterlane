@@ -40,7 +40,8 @@ export type Migration = {
  * 调用前提：fromVersion < targetVersion。等于或大于的情况由调用方自己处理
  * （等于走快路径，大于直接拒绝），这里只负责「升级」这一段。
  *
- * 找不到下一步迁移时抛错，避免静默丢失数据。
+ * 找不到下一步迁移、或者迁移声明的 to !== from + 1 时抛错——保证迁移链
+ * 严格相邻推进，避免「跨多版本一次升」漏改某个字段或留下不一致状态。
  */
 export function runMigrations(
   raw: unknown,
@@ -56,6 +57,13 @@ export function runMigrations(
       throw new Error(
         `No migration registered from v${currentVersion} (target v${targetVersion}). ` +
           `Did you forget to add a migration after bumping the schema version?`
+      )
+    }
+    if (m.to !== m.from + 1) {
+      // 迁移必须 to === from + 1。跳跃式声明（比如 from:1, to:3）会导致
+      // v2 永远跑不到、字段差异被默默吞掉。在跑前显式拒绝
+      throw new Error(
+        `Migration v${m.from} → v${m.to} is not adjacent. Migrations must step by 1.`
       )
     }
     current = m.migrate(current)

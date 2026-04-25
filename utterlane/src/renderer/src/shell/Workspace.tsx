@@ -6,7 +6,11 @@ import { SegmentTimelineView } from '@renderer/views/SegmentTimelineView'
 import { ProjectTimelineView } from '@renderer/views/ProjectTimelineView'
 import { LevelMeterView } from '@renderer/views/LevelMeterView'
 import { usePreferencesStore } from '@renderer/store/preferencesStore'
-import { DEFAULT_PREFERENCES } from '@shared/preferences'
+import {
+  DEFAULT_PREFERENCES,
+  DOCK_LAYOUT_SCHEMA_VERSION,
+  type DockLayoutEnvelope
+} from '@shared/preferences'
 import { getThemeByKey } from './themes'
 import { applyDefaultLayout, setWorkspaceApi } from './workspaceHandle'
 import { DockTab } from './DockTab'
@@ -23,29 +27,19 @@ const components: Record<string, React.FunctionComponent<IDockviewPanelProps>> =
 
 /**
  * 检查 saved layout 是否仍然与当前 panel 集匹配。
- * 不匹配直接返回 false，让上层丢弃 saved 回落到默认布局。
  *
- * 判定规则：
- *   - 出现历史遗留 ID（比如旧版的单一 `timeline` 面板）→ 不兼容
- *   - 缺任何当前必须的面板（新加面板例如 levelMeter 时触发） → 不兼容
+ * 判定规则：单纯比对 schemaVersion——dockview 自己不知道我们怎么定义
+ * 「兼容」（panel id 改动、新增 / 删除 panel 都属于破坏性变化），所以
+ * 由我们维护一个外层版本号。每次默认布局结构变就在 shared/preferences.ts
+ * 里 +1，旧持久化数据自动作废。
+ *
+ * 旧版本（直接存 dockview 序列化原 JSON、没有信封）会因为 schemaVersion
+ * 字段缺失被识别为 0，同样回落默认。
  */
-const REQUIRED_PANELS = [
-  'segments',
-  'inspector',
-  'projectSettings',
-  'segmentTimeline',
-  'projectTimeline',
-  'levelMeter'
-] as const
-
-function isLayoutCompatible(saved: unknown): boolean {
+function isLayoutCompatible(saved: DockLayoutEnvelope | undefined): boolean {
   if (!saved || typeof saved !== 'object') return false
-  const panels = (saved as { panels?: Record<string, unknown> }).panels
-  if (!panels) return false
-  if ('timeline' in panels) return false
-  for (const id of REQUIRED_PANELS) {
-    if (!(id in panels)) return false
-  }
+  if (saved.schemaVersion !== DOCK_LAYOUT_SCHEMA_VERSION) return false
+  if (!saved.layout || typeof saved.layout !== 'object') return false
   return true
 }
 
@@ -53,7 +47,8 @@ function isLayoutCompatible(saved: unknown): boolean {
  * onReady 流程：
  *   1. 登记 api 到模块句柄，菜单等命令式入口可以通过它触发 Reset Layout
  *   2. 有持久化布局且兼容当前版本 → fromJSON；否则应用默认布局
- *   3. 订阅 onDidLayoutChange → 把最新 toJSON 快照写回 preferences.layout.dockLayout
+ *   3. 订阅 onDidLayoutChange → 把最新 toJSON 快照 + schemaVersion 写回
+ *      preferences.layout.dockLayout
  *
  * 持久化由 preferencesStore 主侧 debounce，renderer 侧无需再限流。
  */
@@ -62,9 +57,9 @@ function onWorkspaceReady(event: DockviewReadyEvent): void {
   setWorkspaceApi(api)
 
   const saved = usePreferencesStore.getState().prefs.layout?.dockLayout
-  if (saved && isLayoutCompatible(saved)) {
+  if (isLayoutCompatible(saved)) {
     try {
-      api.fromJSON(saved as never)
+      api.fromJSON(saved!.layout as never)
     } catch (err) {
       // 持久化布局解析失败：app 会回落到默认布局继续工作，属于诊断信息
       // 而非用户可见错误——只在 dev 模式下打印
@@ -77,7 +72,11 @@ function onWorkspaceReady(event: DockviewReadyEvent): void {
   }
 
   api.onDidLayoutChange(() => {
-    usePreferencesStore.getState().update({ layout: { dockLayout: api.toJSON() } })
+    const envelope: DockLayoutEnvelope = {
+      schemaVersion: DOCK_LAYOUT_SCHEMA_VERSION,
+      layout: api.toJSON()
+    }
+    usePreferencesStore.getState().update({ layout: { dockLayout: envelope } })
   })
 }
 
