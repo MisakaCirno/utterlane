@@ -8,7 +8,8 @@ import {
   Check,
   Circle,
   AlertTriangle,
-  Scissors
+  Scissors,
+  Pilcrow
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { cn } from '@renderer/lib/cn'
@@ -22,7 +23,7 @@ import { subscribeLevel } from '@renderer/services/recorder'
 import * as player from '@renderer/services/player'
 import { amplitudeToDb, dbToFill, formatDb } from '@renderer/lib/audio'
 import { DEFAULT_PREFERENCES } from '@shared/preferences'
-import { takeEffectiveRange } from '@shared/project'
+import { takeEffectiveDurationMs, takeEffectiveRange } from '@shared/project'
 
 /**
  * 录音输入电平条（横向）。订阅 recorder.subscribeLevel 获取实时 RMS，
@@ -161,6 +162,9 @@ export function InspectorView(): React.JSX.Element {
   }
 
   const index = order.indexOf(selectedId)
+  const isLast = index === order.length - 1
+  // 段首：order 第 0 个恒为段首；其他看显式 paragraphStart 标志
+  const isParagraphHead = index === 0 || !!segment.paragraphStart
 
   // 只有这条 Segment 正在被录音时才把按钮切换成「停止 / 取消」；
   // 其他 Segment 被录音时，当前这条按钮保持 idle 状态但整体 disabled
@@ -209,6 +213,38 @@ export function InspectorView(): React.JSX.Element {
             recommendedMaxChars={recommendedMaxChars}
             textAlign={textAlign}
           />
+        </Field>
+        <Field label={t('inspector.field_paragraph')}>
+          {isParagraphHead ? (
+            <span className="inline-flex items-center gap-1 text-fg">
+              <Pilcrow size={11} className="text-accent" />
+              {t('inspector.paragraph_head_yes')}
+            </span>
+          ) : (
+            <span className="text-fg-dim">{t('inspector.paragraph_head_no')}</span>
+          )}
+        </Field>
+        <Field label={t('inspector.field_gap_after')}>
+          {isLast ? (
+            // 最后一段后面没有「下一段」，gap 在导出 / 时间轴里都没意义
+            <span className="text-fg-dim" title={t('inspector.gap_after_last_hint')}>
+              {t('inspector.gap_after_last')}
+            </span>
+          ) : segment.gapAfter ? (
+            <span className="font-mono tabular-nums text-fg">
+              {segment.gapAfter.ms} ms
+              <span className="ml-2 text-2xs text-fg-dim">
+                {segment.gapAfter.manual
+                  ? t('inspector.gap_after_manual')
+                  : t('inspector.gap_after_auto')}
+              </span>
+            </span>
+          ) : (
+            // 未设置：导出时按 ExportEffects.silencePaddingMs 兜底，UI 用占位符
+            <span className="text-fg-dim" title={t('inspector.gap_after_unset_hint')}>
+              {t('inspector.gap_after_unset')}
+            </span>
+          )}
         </Field>
       </div>
 
@@ -289,22 +325,42 @@ export function InspectorView(): React.JSX.Element {
           segment.takes.map((take, i) => {
             const isCurrent = take.id === segment.selectedTakeId
             const isMissing = missingTakeIds.has(take.id)
+            // 节选信息：trim 字段缺失 → 整段，UI 不显示 trim 行 / 仅显示
+            // 单一时长。trim 设置过 → 显示「有效 / 原始」两个数字 + 起止
+            // 时间，让用户在 list 里就能看清裁了多少
+            const effectiveRange = takeEffectiveRange(take)
+            const isTrimmed = effectiveRange.startMs > 0 || effectiveRange.endMs < take.durationMs
+            const effectiveDur = takeEffectiveDurationMs(take)
             return (
               <div
                 key={take.id}
                 className={cn(
-                  'flex h-8 items-center gap-2 border-b border-border-subtle px-3 text-xs',
+                  // h-8 → min-h-8 + auto：trim 时多一行 trim 范围，整体高度
+                  // 自适应而不是把第二行裁掉
+                  'flex min-h-8 items-center gap-2 border-b border-border-subtle px-3 py-1 text-xs',
                   isCurrent ? 'bg-accent-soft/40' : 'hover:bg-bg-raised'
                 )}
               >
-                <div className="flex w-4 items-center justify-center">
+                <div className="flex w-4 items-center justify-center self-start pt-1">
                   {isCurrent ? (
                     <Check size={12} className="text-accent" />
                   ) : (
                     <Circle size={8} className="text-fg-dim" />
                   )}
                 </div>
-                <div className="flex-1 truncate">{t('inspector.take_item', { index: i + 1 })}</div>
+                <div className="flex min-w-0 flex-1 flex-col">
+                  <div className="truncate">{t('inspector.take_item', { index: i + 1 })}</div>
+                  {isTrimmed && (
+                    <div className="flex items-center gap-1 font-mono text-2xs tabular-nums text-fg-dim">
+                      <Scissors size={9} />
+                      <span>
+                        {formatDuration(effectiveRange.startMs)}
+                        <span className="px-0.5 text-fg-muted">→</span>
+                        {formatDuration(effectiveRange.endMs)}
+                      </span>
+                    </div>
+                  )}
+                </div>
                 {isMissing && (
                   <div
                     className="flex items-center gap-0.5 rounded-sm border border-rec/60 bg-rec/10 px-1 text-2xs text-rec"
@@ -314,8 +370,27 @@ export function InspectorView(): React.JSX.Element {
                     {t('audit_dialog.inspector_missing_badge')}
                   </div>
                 )}
-                <div className="w-16 text-right font-mono text-2xs tabular-nums text-fg-muted">
-                  {formatDuration(take.durationMs)}
+                <div
+                  className="w-24 text-right font-mono text-2xs tabular-nums text-fg-muted"
+                  title={
+                    isTrimmed
+                      ? t('inspector.take_duration_trimmed_hint', {
+                          effective: formatDuration(effectiveDur),
+                          total: formatDuration(take.durationMs)
+                        })
+                      : undefined
+                  }
+                >
+                  {isTrimmed ? (
+                    <>
+                      {formatDuration(effectiveDur)}
+                      <span className="ml-1 text-fg-dim/70">
+                        / {formatDuration(take.durationMs)}
+                      </span>
+                    </>
+                  ) : (
+                    formatDuration(take.durationMs)
+                  )}
                 </div>
                 <button
                   // 单 take 试听：直接走 player.playFile，不走 store 的
