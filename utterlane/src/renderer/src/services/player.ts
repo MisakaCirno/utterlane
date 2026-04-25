@@ -28,9 +28,34 @@ type PositionListener = (playingPath: string | null, positionMs: number) => void
 
 let currentAudio: HTMLAudioElement | null = null
 let currentObjectUrl: string | null = null
-let currentAudioContext: AudioContext | null = null
 let currentAnalyser: AnalyserNode | null = null
+let currentSource: MediaElementAudioSourceNode | null = null
 let levelRafId: number | null = null
+
+/**
+ * 共享 AudioContext。
+ *
+ * 浏览器对单页面内 AudioContext 数量有上限（Chrome ~6），原实现每次
+ * playFile 都 new 一个并在结束时 close()——连读 100 段就是 100 次创建/
+ * 销毁，触发警告甚至 throw。改为模块级单例，懒初始化（first user gesture
+ * 后再创建，避免 autoplay policy 阻塞），整个 app 生命周期内只用一个。
+ *
+ * 副作用：每段播放都会用 createMediaElementSource(audio) 把 HTMLAudio 接
+ * 进同一份 graph。规范要求同一 audio 元素只能 createMediaElementSource
+ * 一次——但我们每段都 new Audio()，所以不冲突。
+ */
+let sharedContext: AudioContext | null = null
+function getContext(): AudioContext {
+  if (!sharedContext) {
+    sharedContext = new AudioContext()
+  }
+  if (sharedContext.state === 'suspended') {
+    void sharedContext.resume().catch((err) => {
+      devLog('[player] AudioContext resume failed:', err)
+    })
+  }
+  return sharedContext
+}
 
 /** 连读播放时被 stop 打断的标记。下一次进 loop 循环体时用它跳出。 */
 let sequenceAborted = false
@@ -67,23 +92,13 @@ function emitPosition(path: string | null, positionMs: number): void {
  * 合成到一个 RAF 循环里，避免开两个 rAF 互相竞争 + 浪费唤醒。
  */
 function startAnalysis(audio: HTMLAudioElement, relativePath: string): void {
-  const ctx = new AudioContext()
-  // 保险：用户手势经过 IPC 等 await 后 Chromium 可能判定 user gesture 链
-  // 失效，新建的 AudioContext 处于 suspended 状态。显式 resume 一次让
-  // 后面 audio 经 MediaElementSource 的数据能走到 destination
-  if (ctx.state === 'suspended') {
-    void ctx.resume().catch((err) => {
-      // resume 失败不影响应用主流程（声音可能播不出来，但状态机继续走），
-      // 只是诊断信息——dev 模式下打印
-      devLog('[player] AudioContext resume failed:', err)
-    })
-  }
+  const ctx = getContext()
   const source = ctx.createMediaElementSource(audio)
   const analyser = ctx.createAnalyser()
   analyser.fftSize = 512
   source.connect(analyser)
   analyser.connect(ctx.destination)
-  currentAudioContext = ctx
+  currentSource = source
   currentAnalyser = analyser
 
   const buf = new Float32Array(analyser.fftSize)
@@ -104,10 +119,25 @@ function stopAnalysis(): void {
     cancelAnimationFrame(levelRafId)
     levelRafId = null
   }
-  currentAnalyser = null
-  if (currentAudioContext) {
-    void currentAudioContext.close()
-    currentAudioContext = null
+  // 断开 source → analyser → destination：context 不关，留给下次 playFile
+  // 复用。analyser 也直接置空——下一段会创建新的 analyser 接到同一 ctx 上。
+  // currentSource 随 audio 元素一起被 GC（HTMLMediaElement 销毁后
+  // MediaElementSource 自动失效）
+  if (currentAnalyser) {
+    try {
+      currentAnalyser.disconnect()
+    } catch {
+      /* 已断开 */
+    }
+    currentAnalyser = null
+  }
+  if (currentSource) {
+    try {
+      currentSource.disconnect()
+    } catch {
+      /* 已断开 */
+    }
+    currentSource = null
   }
   // UI 归零 + 通知「没有活跃播放」
   emitLevel(0)
