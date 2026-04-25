@@ -15,6 +15,20 @@ import type { SegmentsFile } from '@shared/project'
  *   - 一个 Segment 对应一条字幕
  *   - 时间按当前 Take 的时长顺序累加
  *   - 没有 selectedTakeId 的 Segment 跳过（和导出音频时的跳过规则一致）
+ *
+ * === 行尾用 CRLF ===
+ *
+ * SubRip 规范要求 \r\n。多数播放器（VLC / mpv / ffmpeg）也接受 \n，但
+ * Aegisub 早期版本 / 部分硬件解码器（DVD 字幕硬字幕烧录工具）严格要求
+ * CRLF——为了最大兼容性统一用 \r\n。
+ *
+ * === 文本内不允许空行 ===
+ *
+ * SRT 用「空行」做条目边界。如果 segment.text 自己包含空行（即两个连续
+ * \n），解析器会把后半截当成新条目的 index 来读，结果错位甚至崩溃。
+ * 当前 sanitizeSegmentText 已把 \r / \n / \t 折成空格，所以到这里的
+ * text 一定单行；但若未来允许多行 segment text，必须在这一层显式 escape
+ * （把 \n 替换成 \r\n 之外的占位，比如 ' ' 或 '\\n'）。
  */
 export function buildSrt(segments: SegmentsFile): string {
   const lines: string[] = []
@@ -38,8 +52,8 @@ export function buildSrt(segments: SegmentsFile): string {
     index++
   }
 
-  // 末尾留一个空行；多数播放器能容忍也能接受
-  return lines.join('\n')
+  // CRLF 行尾，规范一致
+  return lines.join('\r\n')
 }
 
 function formatSrtTime(ms: number): string {
