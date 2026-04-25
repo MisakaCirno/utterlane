@@ -1,9 +1,12 @@
 import { promises as fs } from 'fs'
 import { basename, join } from 'path'
 import { BrowserWindow, dialog, ipcMain } from 'electron'
+import type { ExportAudioOptions } from '@shared/export'
+import type { Segment } from '@shared/project'
 import { projectSession } from '../project-storage'
 import { loadSegmentsFile, loadProjectFile } from '../project-storage/io'
-import { readWav, writeWav } from './wav'
+import { readWav, decodeWavToFloat32, buildWavFromChannels } from './wav'
+import { resampleChannels } from './resample'
 import { buildSrt } from './srt'
 
 /**
@@ -11,13 +14,20 @@ import { buildSrt } from './srt'
  *   - 按 segments.order 遍历
  *   - 只取每个 Segment 的 selectedTakeId 对应的 Take
  *   - 没有 selectedTakeId 的 Segment 跳过（预检时提示用户）
- *   - 音频：把所有选中 Take 的 WAV 拼成一个 WAV
- *   - 字幕：按累积 durationMs 生成 SRT
+ *
+ * 音频导出选项：
+ *   - sampleRate / format（pcm16 / pcm24 / float32）：用户在 ExportDialog 选择
+ *   - mode = 'concat'：所有 Take 拼成一个 WAV
+ *   - mode = 'split'：每个 Take 单独一个 WAV，文件名 `<index>_<text>.wav`
+ *
+ * 字幕导出独立于音频，不接收选项；时间轴用累积 durationMs 生成（不受重采样影响）。
  *
  * 导出前检查：
  *   - 至少存在一个可导出 Segment
  *   - 缺失 Take 文件（segments.json 引用但磁盘没有）时拒绝并告知
  *   - Take 文件之间 sampleRate / channels / bitsPerSample 必须一致
+ *     （这是「单一工程内所有录音参数一致」这一约束的延伸；source 端不一致
+ *     不在 MVP 处理范围）
  */
 
 export const EXPORT_IPC = {
@@ -29,15 +39,26 @@ export type ExportResult =
   | { ok: true; filePath: string; skipped: number }
   | { ok: false; message: string; canceled?: boolean }
 
-async function getTakeFilesInOrder(
-  projectDir: string
-): Promise<{ files: string[]; skipped: number; projectTitle: string }> {
+type SegmentExportItem = {
+  /** 在 segments.order 中的 0-based 下标，用于拆分模式生成文件名 */
+  index: number
+  segment: Segment
+  /** Take 的绝对文件路径 */
+  filePath: string
+}
+
+async function getExportItems(projectDir: string): Promise<{
+  items: SegmentExportItem[]
+  skipped: number
+  projectTitle: string
+}> {
   const projectFile = await loadProjectFile(projectDir)
   const segments = await loadSegmentsFile(projectDir)
 
-  const files: string[] = []
+  const items: SegmentExportItem[] = []
   let skipped = 0
-  for (const segId of segments.order) {
+  for (let i = 0; i < segments.order.length; i++) {
+    const segId = segments.order[i]
     const seg = segments.segmentsById[segId]
     if (!seg?.selectedTakeId) {
       skipped++
@@ -48,58 +69,175 @@ async function getTakeFilesInOrder(
       skipped++
       continue
     }
-    // Take.filePath 是工程相对路径
-    files.push(join(projectDir, take.filePath))
+    items.push({
+      index: i,
+      segment: seg,
+      filePath: join(projectDir, take.filePath)
+    })
   }
-  return { files, skipped, projectTitle: projectFile.title }
+  return { items, skipped, projectTitle: projectFile.title }
+}
+
+/**
+ * 拆分模式下的文件名生成。规则：
+ *   - 前缀 3 位序号（按 segments.order 1-based）
+ *   - 跟一段从 segment.text 提取的安全字符串，最多 20 个字符
+ *   - 去掉文件系统不允许的字符（< > : " / \ | ? *）和控制字符
+ *   - 中间空白合并成单个下划线
+ *   - 抽完是空的话退化成 `segment`
+ */
+// 文件系统不允许的字符 + ASCII 控制字符；放到外层是为了让 eslint-disable
+// 注释紧贴 regex 字面量，避免 prettier 把 disable 注释和实际行分开
+// eslint-disable-next-line no-control-regex
+const ILLEGAL_FILENAME_CHARS = /[<>:"/\\|?*\x00-\x1f]/g
+
+function makeSplitFileName(index: number, text: string): string {
+  const orderNum = String(index + 1).padStart(3, '0')
+  const sanitized = text
+    .replace(ILLEGAL_FILENAME_CHARS, '')
+    .trim()
+    .replace(/\s+/g, '_')
+    .slice(0, 20)
+  const tail = sanitized.length > 0 ? sanitized : 'segment'
+  return `${orderNum}_${tail}.wav`
+}
+
+/**
+ * 把一组 Take WAV 文件读出来 → 解码 → 按需重采样，返回每段对应的 Float32 多声道
+ * 数组。在这一步统一好采样率，下游无论是拼接还是拆分写盘都用同一份数据。
+ *
+ * 抛错的几种场景：
+ *   - 任何文件的 channels / sampleRate / bitsPerSample 与第一份不一致
+ *   - 任何文件读取失败
+ */
+async function decodeAndResampleAll(
+  items: SegmentExportItem[],
+  targetRate: number
+): Promise<{
+  perItemChannels: Float32Array[][]
+  channels: number
+}> {
+  const infos = await Promise.all(items.map((it) => readWav(it.filePath)))
+  const ref = infos[0]
+  for (let i = 1; i < infos.length; i++) {
+    const info = infos[i]
+    if (
+      info.sampleRate !== ref.sampleRate ||
+      info.channels !== ref.channels ||
+      info.bitsPerSample !== ref.bitsPerSample ||
+      info.formatCode !== ref.formatCode
+    ) {
+      throw new Error(
+        `Take 之间音频参数不一致（${basename(items[i].filePath)} 与 ${basename(items[0].filePath)}）。需要先统一工程设置或重录。`
+      )
+    }
+  }
+
+  // 解码每份 WAV 到 Float32 deinterleaved
+  const decoded = infos.map(decodeWavToFloat32)
+  // 按需重采样：源 rate 与目标 rate 一致时 resampleChannels 会原样返回
+  const perItemChannels = decoded.map((channels) =>
+    resampleChannels(channels, ref.sampleRate, targetRate)
+  )
+  return { perItemChannels, channels: ref.channels }
+}
+
+/**
+ * 拼接模式：把每段的 Float32 channels 合成一份长 channels，再写一个 WAV。
+ */
+function concatChannelData(
+  perItemChannels: Float32Array[][],
+  channelCount: number
+): Float32Array[] {
+  const out: Float32Array[] = []
+  for (let c = 0; c < channelCount; c++) {
+    const totalLen = perItemChannels.reduce((sum, item) => sum + item[c].length, 0)
+    const merged = new Float32Array(totalLen)
+    let offset = 0
+    for (const item of perItemChannels) {
+      merged.set(item[c], offset)
+      offset += item[c].length
+    }
+    out.push(merged)
+  }
+  return out
 }
 
 export function registerExportIpc(): void {
-  ipcMain.handle(EXPORT_IPC.audioWav, async (event): Promise<ExportResult> => {
-    const projectDir = projectSession.path
-    if (!projectDir) return { ok: false, message: '没有活动工程' }
-    const parent = BrowserWindow.fromWebContents(event.sender)
-    if (!parent) return { ok: false, message: '找不到窗口' }
+  ipcMain.handle(
+    EXPORT_IPC.audioWav,
+    async (event, options: ExportAudioOptions): Promise<ExportResult> => {
+      const projectDir = projectSession.path
+      if (!projectDir) return { ok: false, message: '没有活动工程' }
+      const parent = BrowserWindow.fromWebContents(event.sender)
+      if (!parent) return { ok: false, message: '找不到窗口' }
 
-    const { files, skipped, projectTitle } = await getTakeFilesInOrder(projectDir)
-    if (files.length === 0) {
-      return { ok: false, message: '没有可导出的 Segment（全部未录制或 Take 丢失）' }
-    }
+      const { items, skipped, projectTitle } = await getExportItems(projectDir)
+      if (items.length === 0) {
+        return { ok: false, message: '没有可导出的 Segment（全部未录制或 Take 丢失）' }
+      }
 
-    const save = await dialog.showSaveDialog(parent, {
-      title: '导出音频',
-      defaultPath: `${projectTitle}.wav`,
-      filters: [{ name: 'WAV Audio', extensions: ['wav'] }]
-    })
-    if (save.canceled || !save.filePath) return { ok: false, message: '已取消', canceled: true }
-
-    // 读所有 WAV，顺便校验参数一致性
-    const infos = await Promise.all(files.map((f) => readWav(f)))
-    const ref = infos[0]
-    for (let i = 1; i < infos.length; i++) {
-      const info = infos[i]
-      if (
-        info.sampleRate !== ref.sampleRate ||
-        info.channels !== ref.channels ||
-        info.bitsPerSample !== ref.bitsPerSample
-      ) {
-        return {
-          ok: false,
-          message: `Take 之间音频参数不一致（${basename(files[i])} 与 ${basename(files[0])}）。需要先统一工程设置或重录。`
+      // 拼接模式弹文件保存对话框；拆分模式弹文件夹选择对话框
+      let outputPath: string
+      if (options.mode === 'concat') {
+        const save = await dialog.showSaveDialog(parent, {
+          title: '导出音频',
+          defaultPath: `${projectTitle}.wav`,
+          filters: [{ name: 'WAV Audio', extensions: ['wav'] }]
+        })
+        if (save.canceled || !save.filePath) {
+          return { ok: false, message: '已取消', canceled: true }
         }
+        outputPath = save.filePath
+      } else {
+        const pick = await dialog.showOpenDialog(parent, {
+          title: '选择拆分输出目录',
+          properties: ['openDirectory', 'createDirectory'],
+          defaultPath: projectDir
+        })
+        if (pick.canceled || pick.filePaths.length === 0) {
+          return { ok: false, message: '已取消', canceled: true }
+        }
+        outputPath = pick.filePaths[0]
+      }
+
+      // 解码 + 重采样统一到目标 rate；任一步失败直接抛错
+      let prepared: { perItemChannels: Float32Array[][]; channels: number }
+      try {
+        prepared = await decodeAndResampleAll(items, options.sampleRate)
+      } catch (err) {
+        return { ok: false, message: (err as Error).message }
+      }
+
+      try {
+        if (options.mode === 'concat') {
+          const merged = concatChannelData(prepared.perItemChannels, prepared.channels)
+          const wav = buildWavFromChannels({
+            sampleRate: options.sampleRate,
+            format: options.format,
+            channels: merged
+          })
+          await fs.writeFile(outputPath, wav)
+          return { ok: true, filePath: outputPath, skipped }
+        } else {
+          // 拆分模式：每段单独写一个 WAV
+          for (let i = 0; i < items.length; i++) {
+            const item = items[i]
+            const wav = buildWavFromChannels({
+              sampleRate: options.sampleRate,
+              format: options.format,
+              channels: prepared.perItemChannels[i]
+            })
+            const fileName = makeSplitFileName(item.index, item.segment.text)
+            await fs.writeFile(join(outputPath, fileName), wav)
+          }
+          return { ok: true, filePath: outputPath, skipped }
+        }
+      } catch (err) {
+        return { ok: false, message: `写入文件失败：${(err as Error).message}` }
       }
     }
-
-    const merged = writeWav({
-      sampleRate: ref.sampleRate,
-      channels: ref.channels,
-      bitsPerSample: ref.bitsPerSample,
-      pcmSegments: infos.map((i) => i.pcm)
-    })
-    await fs.writeFile(save.filePath, merged)
-
-    return { ok: true, filePath: save.filePath, skipped }
-  })
+  )
 
   ipcMain.handle(EXPORT_IPC.subtitlesSrt, async (event): Promise<ExportResult> => {
     const projectDir = projectSession.path
@@ -129,7 +267,7 @@ export function registerExportIpc(): void {
 
     const content = buildSrt(segments)
     // UTF-8 with BOM 能让部分播放器 / 编辑器更好地识别；BOM 不会影响正常 SRT 解析
-    const withBom = '\uFEFF' + content
+    const withBom = '﻿' + content
     await fs.writeFile(save.filePath, withBom, 'utf8')
 
     // skipped 数量：未选中 Take 的段数

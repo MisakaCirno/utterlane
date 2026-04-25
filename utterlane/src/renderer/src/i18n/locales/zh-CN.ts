@@ -236,6 +236,23 @@ export const zhCN = {
     import_script: '导入文案'
   },
 
+  export_dialog: {
+    title: '导出音频',
+    section_mode: '导出方式',
+    mode_concat: '拼接为单个 WAV',
+    mode_concat_hint: '所有 Segment 按顺序合并到一个文件',
+    mode_split: '每段单独导出',
+    mode_split_hint: '每个 Segment 一个 WAV，文件名带序号 + 文案前缀',
+    section_format: '音频格式',
+    label_sample_rate: '采样率',
+    label_bit_depth: '位深',
+    sample_rate_match_project: '跟随工程（{{rate}} Hz）',
+    bit_depth_pcm16: '16-bit PCM（兼容性最好）',
+    bit_depth_pcm24: '24-bit PCM（更高动态范围）',
+    bit_depth_float32: '32-bit IEEE 浮点（DAW 友好）',
+    btn_export: '导出'
+  },
+
   tab_menu: {
     header_position: 'Tab 栏位置',
     position_top: '上方',

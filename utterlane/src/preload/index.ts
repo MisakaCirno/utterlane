@@ -5,6 +5,7 @@ import type { ProjectBundle, SegmentsFile, WorkspaceFile } from '@shared/project
 import type { WriteTakeResult } from '@shared/recording'
 import type { AppInfo } from '@shared/appInfo'
 import type { CrashInfo } from '@shared/crash'
+import type { ExportAudioOptions } from '@shared/export'
 
 // IPC 通道名需要和 main 侧保持一致。
 // 这里复制字面量而不是 import 主进程的常量，是因为 preload 打包时
@@ -134,8 +135,12 @@ const api = {
   },
 
   export: {
-    /** 弹保存对话框，按 order + selectedTakeId 拼接所有 Take 到一个 WAV */
-    audioWav: (): Promise<ExportResult> => ipcRenderer.invoke(EXPORT_AUDIO_WAV),
+    /**
+     * 导出音频。options 决定输出采样率 / 位深格式 / 拼接还是拆分。
+     * concat 模式弹文件保存对话框；split 模式弹文件夹选择对话框。
+     */
+    audioWav: (options: ExportAudioOptions): Promise<ExportResult> =>
+      ipcRenderer.invoke(EXPORT_AUDIO_WAV, options),
     /** 弹保存对话框，按 order + selectedTakeId 生成 SRT 字幕 */
     subtitlesSrt: (): Promise<ExportResult> => ipcRenderer.invoke(EXPORT_SUBTITLES_SRT)
   },

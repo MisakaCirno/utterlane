@@ -237,6 +237,23 @@ export const enUS: TranslationSchema = {
     import_script: 'Import Script'
   },
 
+  export_dialog: {
+    title: 'Export Audio',
+    section_mode: 'Export Mode',
+    mode_concat: 'Concatenate into one WAV',
+    mode_concat_hint: 'All segments merged into a single file in order',
+    mode_split: 'One WAV per segment',
+    mode_split_hint: 'Each segment becomes its own WAV, filename prefixed with index + text',
+    section_format: 'Audio Format',
+    label_sample_rate: 'Sample rate',
+    label_bit_depth: 'Bit depth',
+    sample_rate_match_project: 'Match project ({{rate}} Hz)',
+    bit_depth_pcm16: '16-bit PCM (best compatibility)',
+    bit_depth_pcm24: '24-bit PCM (higher dynamic range)',
+    bit_depth_float32: '32-bit IEEE float (DAW friendly)',
+    btn_export: 'Export'
+  },
+
   tab_menu: {
     header_position: 'Tab bar position',
     position_top: 'Top',

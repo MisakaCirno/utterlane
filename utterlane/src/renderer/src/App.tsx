@@ -10,6 +10,7 @@ import { ImportScriptDialog } from './dialogs/ImportScriptDialog'
 import { PreferencesDialog } from './dialogs/PreferencesDialog'
 import { AboutDialog } from './dialogs/AboutDialog'
 import { CrashDialog } from './dialogs/CrashDialog'
+import { ExportDialog } from './dialogs/ExportDialog'
 import { reportCrash } from './store/crashStore'
 import { useEditorStore } from './store/editorStore'
 import { connectPreferencesStore, usePreferencesStore } from './store/preferencesStore'
@@ -29,6 +30,8 @@ function App(): React.JSX.Element {
   const closePreferences = useDialogStore((s) => s.closePreferences)
   const aboutOpen = useDialogStore((s) => s.aboutOpen)
   const closeAbout = useDialogStore((s) => s.closeAbout)
+  const exportAudioOpen = useDialogStore((s) => s.exportAudioOpen)
+  const closeExportAudio = useDialogStore((s) => s.closeExportAudio)
 
   // 跟随 preferences 切换 UI 语言。hydrate 后至少触发一次确保和存储值一致。
   useEffect(() => {
@@ -125,6 +128,7 @@ function App(): React.JSX.Element {
         onOpenChange={(open) => !open && closePreferences()}
       />
       <AboutDialog open={aboutOpen} onOpenChange={(open) => !open && closeAbout()} />
+      <ExportDialog open={exportAudioOpen} onOpenChange={(open) => !open && closeExportAudio()} />
       <CrashDialog />
       <ConfirmHost />
       <ToastHost />
