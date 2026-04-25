@@ -3,6 +3,7 @@ import { basename, join } from 'path'
 import { BrowserWindow, dialog, ipcMain } from 'electron'
 import type { ExportAudioOptions } from '@shared/export'
 import type { Segment } from '@shared/project'
+import { takeEffectiveRange } from '@shared/project'
 import { EXPORT_IPC } from '@shared/ipc'
 import { projectSession } from '../project-storage'
 
@@ -44,6 +45,10 @@ type SegmentExportItem = {
   segment: Segment
   /** Take 的绝对文件路径 */
   filePath: string
+  /** 节选起点（毫秒，相对文件起点）。无 trim 时为 0 */
+  trimStartMs: number
+  /** 节选终点（毫秒，相对文件起点）。无 trim 时为 take.durationMs */
+  trimEndMs: number
 }
 
 async function getExportItems(projectDir: string): Promise<{
@@ -68,10 +73,13 @@ async function getExportItems(projectDir: string): Promise<{
       skipped++
       continue
     }
+    const range = takeEffectiveRange(take)
     items.push({
       index: i,
       segment: seg,
-      filePath: join(projectDir, take.filePath)
+      filePath: join(projectDir, take.filePath),
+      trimStartMs: range.startMs,
+      trimEndMs: range.endMs
     })
   }
   return { items, skipped, projectTitle: projectFile.title }
@@ -134,8 +142,20 @@ async function decodeAndResampleAll(
 
   // 解码每份 WAV 到 Float32 deinterleaved
   const decoded = infos.map(decodeWavToFloat32)
+  // 节选切片：在源采样率上把 [trimStartMs, trimEndMs] 截出来，再重采样。
+  // 切片在源 rate 上做避免「重采到目标 rate 后才切」造成的边界 fractional
+  // 误差，同时减少要重采的样本量
+  const trimmed = decoded.map((channels, i) => {
+    const item = items[i]
+    const startFrame = Math.floor((item.trimStartMs / 1000) * ref.sampleRate)
+    const endFrame = Math.floor((item.trimEndMs / 1000) * ref.sampleRate)
+    if (startFrame === 0 && endFrame >= channels[0].length) return channels
+    return channels.map((ch) =>
+      ch.slice(Math.max(0, startFrame), Math.min(ch.length, Math.max(startFrame, endFrame)))
+    )
+  })
   // 按需重采样：源 rate 与目标 rate 一致时 resampleChannels 会原样返回
-  const perItemChannels = decoded.map((channels) =>
+  const perItemChannels = trimmed.map((channels) =>
     resampleChannels(channels, ref.sampleRate, targetRate)
   )
   return { perItemChannels, channels: ref.channels }

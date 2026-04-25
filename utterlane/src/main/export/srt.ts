@@ -1,4 +1,5 @@
 import type { SegmentsFile } from '@shared/project'
+import { takeEffectiveDurationMs } from '@shared/project'
 
 /**
  * 按 order + selectedTakeId 生成 SRT 字幕内容。
@@ -41,8 +42,12 @@ export function buildSrt(segments: SegmentsFile): string {
     const take = seg.takes.find((t) => t.id === seg.selectedTakeId)
     if (!take) continue
 
+    // 时间轴用「节选后有效时长」累加——和音频导出 / 工程时间轴保持一致：
+    // SRT 字幕的 in/out 时间反映的是「这条字幕在导出音频里出现的时刻」，
+    // 不是 take 文件的原时长
+    const effectiveMs = takeEffectiveDurationMs(take)
     const start = cursor
-    const end = cursor + take.durationMs
+    const end = cursor + effectiveMs
     cursor = end
 
     lines.push(String(index))
