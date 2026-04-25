@@ -76,6 +76,15 @@ export type AppPreferences = {
      * 取值约束在 0 / 1 / 3 / 5 之中（见 PreferencesDialog 的选项）。
      */
     countdownSeconds?: number
+
+    /**
+     * 录音输入设备 ID（来自 navigator.mediaDevices.enumerateDevices）。
+     * undefined / 空字符串 = 系统默认设备。
+     *
+     * deviceId 在同一应用安装内通常稳定，但跨设备拔插 / 系统重启后可能失效；
+     * 录音启动时若约束失败（OverconstrainedError），会提示用户重新选择
+     */
+    inputDeviceId?: string
   }
 }
 

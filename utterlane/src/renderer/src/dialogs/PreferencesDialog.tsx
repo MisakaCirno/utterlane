@@ -1,11 +1,13 @@
 import * as Dialog from '@radix-ui/react-dialog'
 import { AlignCenter, AlignLeft, AlignRight, X } from 'lucide-react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { DEFAULT_PREFERENCES, type DockThemeKey, type TextAlign } from '@shared/preferences'
 import { usePreferencesStore } from '@renderer/store/preferencesStore'
 import { themeRegistry } from '@renderer/shell/themes'
 import { cn } from '@renderer/lib/cn'
 import { SUPPORTED_LOCALES, type SupportedLocale } from '@renderer/i18n'
+import { enumerateInputDevices, type AudioInputDevice } from '@renderer/services/recorder'
 
 /**
  * 设置对话框。把分散在菜单里的 App 级偏好集中在一个地方。
@@ -49,6 +51,21 @@ export function PreferencesDialog({
   const appearance = prefs.appearance ?? DEFAULT_PREFERENCES.appearance!
   const projectDefaults = prefs.projectDefaults ?? DEFAULT_PREFERENCES.projectDefaults!
   const recording = prefs.recording ?? DEFAULT_PREFERENCES.recording!
+
+  // 输入设备列表只在对话框打开时拉取一次。设备热插拔不算高频事件，用户
+  // 重开对话框就能刷新。如果以后要做 hot-reload，订阅
+  // navigator.mediaDevices.devicechange 即可
+  const [inputDevices, setInputDevices] = useState<AudioInputDevice[]>([])
+  useEffect(() => {
+    if (!open) return
+    let cancelled = false
+    void enumerateInputDevices().then((devices) => {
+      if (!cancelled) setInputDevices(devices)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [open])
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -162,6 +179,19 @@ export function PreferencesDialog({
             </Section>
 
             <Section title={t('preferences.section_recording')}>
+              <Row label={t('preferences.label_input_device')}>
+                <Select
+                  value={recording.inputDeviceId ?? ''}
+                  onChange={(v) =>
+                    // 选「(默认)」时存空字符串，对应 startRecording 走默认设备路径
+                    update({ recording: { inputDeviceId: v || undefined } })
+                  }
+                  options={[
+                    { value: '', label: t('preferences.input_device_default') },
+                    ...inputDevices.map((d) => ({ value: d.deviceId, label: d.label }))
+                  ]}
+                />
+              </Row>
               <Row label={t('preferences.label_countdown')}>
                 <Select
                   value={String(recording.countdownSeconds ?? 1)}

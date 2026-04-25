@@ -193,7 +193,8 @@ export const enUS: TranslationSchema = {
     save_segments_description: 'Error writing segments.json: {{message}}',
     recording_start_title: 'Cannot start recording',
     recording_stop_title: 'Failed to stop recording',
-    recording_persist_title: 'Failed to save recording'
+    recording_persist_title: 'Failed to save recording',
+    recording_device_missing: 'Recording device unavailable. Pick a different input in Preferences.'
   },
 
   export: {
@@ -306,6 +307,8 @@ export const enUS: TranslationSchema = {
     section_appearance: 'Appearance',
     section_project_defaults: 'New project defaults',
     section_recording: 'Recording',
+    label_input_device: 'Input device',
+    input_device_default: '(System default)',
     label_countdown: 'Pre-recording countdown',
     countdown_off: 'Off',
     countdown_seconds: '{{count}} sec',

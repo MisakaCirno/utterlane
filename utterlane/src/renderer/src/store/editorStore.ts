@@ -221,8 +221,11 @@ async function beginRecordingFlow(
   takeId: string,
   channels: 1 | 2
 ): Promise<void> {
-  // 从 preferences 取倒计时秒数。0 = 关闭，跳过 countdown 直接开录
-  const countdownSeconds = usePreferencesStore.getState().prefs.recording?.countdownSeconds ?? 0
+  // 从 preferences 取倒计时秒数与输入设备。两者都可能不存在——倒计时回落 0
+  // （= 关闭），deviceId 回落 undefined（= 系统默认设备）
+  const recordingPrefs = usePreferencesStore.getState().prefs.recording
+  const countdownSeconds = recordingPrefs?.countdownSeconds ?? 0
+  const deviceId = recordingPrefs?.inputDeviceId
 
   if (countdownSeconds > 0) {
     useEditorStore.setState({
@@ -250,14 +253,21 @@ async function beginRecordingFlow(
   })
 
   try {
-    await recorder.startRecording({ channels })
+    await recorder.startRecording({ channels, deviceId })
   } catch (err) {
     useEditorStore.setState({
       playback: 'idle',
       recordingSegmentId: null,
       recordingTakeId: null
     })
-    showError(i18n.t('errors.recording_start_title'), (err as Error).message)
+    // OverconstrainedError 通常意味着用户偏好里存的 deviceId 已经不在场
+    // （设备被拔了 / 改名了 / 驱动重置）。给一条更明确的提示让用户去重选
+    const e = err as Error
+    const isDeviceMissing = e.name === 'OverconstrainedError' || e.name === 'NotFoundError'
+    showError(
+      i18n.t('errors.recording_start_title'),
+      isDeviceMissing ? i18n.t('errors.recording_device_missing') : e.message
+    )
   }
 }
 

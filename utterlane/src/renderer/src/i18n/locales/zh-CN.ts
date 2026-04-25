@@ -193,7 +193,8 @@ export const zhCN = {
     save_segments_description: 'segments.json 写入出错：{{message}}',
     recording_start_title: '无法开始录音',
     recording_stop_title: '停止录音失败',
-    recording_persist_title: '录音落盘失败'
+    recording_persist_title: '录音落盘失败',
+    recording_device_missing: '录音设备已不可用，请在偏好设置里重新选择输入设备'
   },
 
   export: {
@@ -305,6 +306,8 @@ export const zhCN = {
     section_appearance: '外观',
     section_project_defaults: '新工程默认',
     section_recording: '录音',
+    label_input_device: '输入设备',
+    input_device_default: '（系统默认）',
     label_countdown: '录音前倒计时',
     countdown_off: '关闭',
     countdown_seconds: '{{count}} 秒',

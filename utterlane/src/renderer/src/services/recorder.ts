@@ -57,24 +57,57 @@ function computeLevel(chunk: Float32Array): number {
 }
 
 /**
+ * 输入设备清单条目。deviceId === '' 时表示该设备属于「默认通信设备」类的
+ * 占位，不需要在 UI 上单独列；调用方可以选择过滤
+ */
+export type AudioInputDevice = { deviceId: string; label: string }
+
+/**
+ * 列出所有音频输入设备。需要先获得过麦克风权限才能拿到非空 label——
+ * Electron 内一般在第一次 getUserMedia 后就长期持有，正常使用不会出现
+ * 空 label。万一空了，我们用 deviceId 前缀做兜底标签
+ */
+export async function enumerateInputDevices(): Promise<AudioInputDevice[]> {
+  const devices = await navigator.mediaDevices.enumerateDevices()
+  return devices
+    .filter((d) => d.kind === 'audioinput')
+    .map((d) => ({
+      deviceId: d.deviceId,
+      label: d.label || `Device ${d.deviceId.slice(0, 8) || '(unknown)'}`
+    }))
+}
+
+/**
  * 开始录音。默认采集单声道，最接近人声场景；
  * 如果项目设置是立体声，可以在 options 里传 channels: 2。
+ *
+ * deviceId 来自 preferences.recording.inputDeviceId。空 / undefined 时
+ * 使用系统默认设备。指定 deviceId 但设备已经不在场（拔了 / 改名了）时
+ * Chromium 会抛 OverconstrainedError，调用方据此提示用户重新选择
  */
-export async function startRecording(options: { channels: 1 | 2 }): Promise<void> {
+export async function startRecording(options: {
+  channels: 1 | 2
+  deviceId?: string
+}): Promise<void> {
   if (current) {
     throw new Error('已经在录音中，请先停止当前录音')
   }
 
-  const stream = await navigator.mediaDevices.getUserMedia({
-    audio: {
-      channelCount: options.channels,
-      // 关掉浏览器的自动处理以拿到「干净」的原始采集——
-      // 后续如果要做降噪 / AGC，应该走我们自己的 DSP 链路而不是依赖浏览器
-      echoCancellation: false,
-      noiseSuppression: false,
-      autoGainControl: false
-    }
-  })
+  const audioConstraints: MediaTrackConstraints = {
+    channelCount: options.channels,
+    // 关掉浏览器的自动处理以拿到「干净」的原始采集——
+    // 后续如果要做降噪 / AGC，应该走我们自己的 DSP 链路而不是依赖浏览器
+    echoCancellation: false,
+    noiseSuppression: false,
+    autoGainControl: false
+  }
+  // exact 约束：设备不在时直接抛错，UI 据此提示用户。如果用 ideal 会
+  // 静默回落到默认设备，用户搞不清自己选的麦到底有没有生效
+  if (options.deviceId) {
+    audioConstraints.deviceId = { exact: options.deviceId }
+  }
+
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints })
 
   const context = new AudioContext()
   const source = context.createMediaStreamSource(stream)
