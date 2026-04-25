@@ -20,11 +20,17 @@ import { Field } from '@renderer/components/Field'
 import { TextEditorWithCount } from '@renderer/components/TextEditorWithCount'
 import { subscribeLevel } from '@renderer/services/recorder'
 import * as player from '@renderer/services/player'
+import { amplitudeToDb, dbToFill, formatDb } from '@renderer/lib/audio'
 import { DEFAULT_PREFERENCES } from '@shared/preferences'
 
 /**
- * 输入电平条。订阅 recorder.subscribeLevel 获取实时 RMS，
- * 用 CSS transform scaleX 做条形指示；切 0.6 之上变黄、0.85 以上变红提示削波风险。
+ * 录音输入电平条（横向）。订阅 recorder.subscribeLevel 获取实时 RMS，
+ * 转 dBFS 后映射到 [0, 1] 填充比例。
+ *
+ * 显示：
+ *   - 条：左边到 fillRatio 的彩色填充。色带是从左到右的绿→黄→红渐变，
+ *     mask 只露出当前 fill 之内的部分
+ *   - 数值：dBFS。voice 通常 -30 ~ -10 dB；越接近 0 越响
  *
  * RAF 节流：回调可能每 ~20ms 触发一次，靠 requestAnimationFrame 合并到下一帧渲染，
  * 避免 React 高频重渲染。
@@ -50,19 +56,30 @@ function LevelMeter(): React.JSX.Element {
     }
   }, [])
 
-  // 视觉范围扩大一下（RMS 普通讲话 0.05~0.2），0.5 ≈ 满刻度的 100%
-  const scaled = Math.min(1, level * 2)
-  const color = scaled > 0.85 ? 'bg-rec' : scaled > 0.6 ? 'bg-yellow-500' : 'bg-ok'
+  const db = amplitudeToDb(level)
+  const fillRatio = dbToFill(db)
 
   return (
     <div className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2">
       <span className="text-2xs text-fg-muted">{t('inspector.level_label')}</span>
       <div className="relative h-2 flex-1 overflow-hidden rounded-sm bg-bg-deep">
+        {/* 色带打底：左→右 绿→黄→红渐变。位置 75% / 90% 与 LevelMeterView 一致 */}
         <div
-          className={cn('h-full origin-left transition-[width] duration-75', color)}
-          style={{ width: `${Math.round(scaled * 100)}%` }}
+          className="absolute inset-0"
+          style={{
+            background:
+              'linear-gradient(to right, rgb(34 197 94) 0%, rgb(34 197 94) 60%, rgb(234 179 8) 75%, rgb(234 179 8) 85%, rgb(239 68 68) 95%)'
+          }}
+        />
+        {/* 反向遮罩：从右往左盖住超出 fill 的部分 */}
+        <div
+          className="absolute right-0 top-0 bottom-0 bg-bg-deep transition-[width] duration-75"
+          style={{ width: `${(1 - fillRatio) * 100}%` }}
         />
       </div>
+      <span className="w-14 text-right font-mono text-2xs tabular-nums text-fg-dim">
+        {formatDb(db)}
+      </span>
     </div>
   )
 }
