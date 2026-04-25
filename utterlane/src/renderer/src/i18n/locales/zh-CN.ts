@@ -92,6 +92,9 @@ export const zhCN = {
     btn_cancel: '取消',
     btn_rerecord: '重录',
     btn_delete_segment: '删除 Segment',
+    btn_split: '拆分',
+    btn_split_hint: '把光标停在文案中要拆分的位置，再点这里',
+    btn_merge_prev: '合并到前一段',
     takes_label: 'Takes',
     takes_count: '{{count}} 个',
     takes_empty: '还没有录音',
@@ -239,7 +242,9 @@ export const zhCN = {
     delete_segment: '删除 Segment',
     delete_take: '删除 Take',
     set_selected_take: '切换当前 Take',
-    import_script: '导入文案'
+    import_script: '导入文案',
+    split_segment: '拆分 Segment',
+    merge_segment: '合并 Segment'
   },
 
   audit_dialog: {

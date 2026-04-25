@@ -111,6 +111,40 @@ export type Command =
       afterSegmentsById: Record<string, Segment>
       afterSelectedSegmentId: string | undefined
     }
+  | {
+      type: 'splitSegment'
+      /** 被拆分的源 Segment ID（apply 后保留前半段文本） */
+      sourceSegmentId: string
+      /** 拆分前的完整文本 */
+      sourceTextBefore: string
+      /** 拆分位置（字符索引） */
+      splitAt: number
+      /** 新生成的后半段 Segment ID（apply 时用，revert 时删它） */
+      newSegmentId: string
+      /** 新 Segment 在 order 中的插入位置（一般是 source 的下一位） */
+      newSegmentIndex: number
+      /** 拆分前后的选中 Segment（拆完默认仍选 source） */
+      prevSelectedSegmentId: string | undefined
+      nextSelectedSegmentId: string | undefined
+    }
+  | {
+      type: 'mergeSegment'
+      /** 接收方 Segment ID（合并后留下的那个，一般是前一段） */
+      targetSegmentId: string
+      /** 合并前接收方的文本 */
+      targetTextBefore: string
+      /** 合并后接收方的完整文本（targetTextBefore + 分隔符 + mergedSegment.text） */
+      targetTextAfter: string
+      /** 合并前接收方的 takes 列表 */
+      targetTakesBefore: Take[]
+      /** 被合并掉、在合并后从 segmentsById 中删除的源 Segment（含 takes） */
+      mergedSegment: Segment
+      /** mergedSegment 在原 order 里的下标 */
+      mergedIndex: number
+      /** 合并前后的选中 Segment（合并后默认选 target） */
+      prevSelectedSegmentId: string | undefined
+      nextSelectedSegmentId: string | undefined
+    }
 
 export type HistoryEntry = {
   command: Command
@@ -276,6 +310,49 @@ function applyCommand(cmd: Command): void {
         selectedSegmentId: cmd.afterSelectedSegmentId
       }))
       return
+    case 'splitSegment':
+      editor.applyHistoryPatch((s) => {
+        const source = s.segmentsById[cmd.sourceSegmentId]
+        if (!source) return null
+        const beforeText = cmd.sourceTextBefore.slice(0, cmd.splitAt).trimEnd()
+        const afterText = cmd.sourceTextBefore.slice(cmd.splitAt).trimStart()
+        const newSegment: Segment = {
+          id: cmd.newSegmentId,
+          text: afterText,
+          takes: []
+        }
+        const nextOrder = s.order.slice()
+        nextOrder.splice(cmd.newSegmentIndex, 0, cmd.newSegmentId)
+        return {
+          order: nextOrder,
+          segmentsById: {
+            ...s.segmentsById,
+            [cmd.sourceSegmentId]: { ...source, text: beforeText },
+            [cmd.newSegmentId]: newSegment
+          },
+          selectedSegmentId: cmd.nextSelectedSegmentId
+        }
+      })
+      return
+    case 'mergeSegment':
+      editor.applyHistoryPatch((s) => {
+        const target = s.segmentsById[cmd.targetSegmentId]
+        if (!target) return null
+        const nextOrder = s.order.filter((id) => id !== cmd.mergedSegment.id)
+        const nextById = { ...s.segmentsById }
+        delete nextById[cmd.mergedSegment.id]
+        nextById[cmd.targetSegmentId] = {
+          ...target,
+          text: cmd.targetTextAfter,
+          takes: [...cmd.targetTakesBefore, ...cmd.mergedSegment.takes]
+        }
+        return {
+          order: nextOrder,
+          segmentsById: nextById,
+          selectedSegmentId: cmd.nextSelectedSegmentId
+        }
+      })
+      return
   }
 }
 
@@ -346,6 +423,44 @@ function revertCommand(cmd: Command): void {
         segmentsById: { ...cmd.beforeSegmentsById },
         selectedSegmentId: cmd.beforeSelectedSegmentId
       }))
+      return
+    case 'splitSegment':
+      editor.applyHistoryPatch((s) => {
+        const source = s.segmentsById[cmd.sourceSegmentId]
+        if (!source) return null
+        // revert 拆分：删掉新 Segment，把 source.text 还原成原始完整文本
+        const nextOrder = s.order.filter((id) => id !== cmd.newSegmentId)
+        const nextById = { ...s.segmentsById }
+        delete nextById[cmd.newSegmentId]
+        nextById[cmd.sourceSegmentId] = { ...source, text: cmd.sourceTextBefore }
+        return {
+          order: nextOrder,
+          segmentsById: nextById,
+          selectedSegmentId: cmd.prevSelectedSegmentId
+        }
+      })
+      return
+    case 'mergeSegment':
+      editor.applyHistoryPatch((s) => {
+        const target = s.segmentsById[cmd.targetSegmentId]
+        if (!target) return null
+        // revert 合并：把 mergedSegment 重新插回 order，target 的 text / takes 还原
+        const nextOrder = s.order.slice()
+        nextOrder.splice(cmd.mergedIndex, 0, cmd.mergedSegment.id)
+        return {
+          order: nextOrder,
+          segmentsById: {
+            ...s.segmentsById,
+            [cmd.targetSegmentId]: {
+              ...target,
+              text: cmd.targetTextBefore,
+              takes: cmd.targetTakesBefore
+            },
+            [cmd.mergedSegment.id]: cmd.mergedSegment
+          },
+          selectedSegmentId: cmd.prevSelectedSegmentId
+        }
+      })
       return
   }
 }

@@ -90,6 +90,9 @@ export const enUS: TranslationSchema = {
     btn_cancel: 'Cancel',
     btn_rerecord: 'Re-record',
     btn_delete_segment: 'Delete Segment',
+    btn_split: 'Split',
+    btn_split_hint: 'Place the cursor inside the text where to split, then click here',
+    btn_merge_prev: 'Merge into previous',
     takes_label: 'Takes',
     takes_count: '{{count}}',
     takes_empty: 'No recordings yet',
@@ -240,7 +243,9 @@ export const enUS: TranslationSchema = {
     delete_segment: 'Delete Segment',
     delete_take: 'Delete Take',
     set_selected_take: 'Switch Current Take',
-    import_script: 'Import Script'
+    import_script: 'Import Script',
+    split_segment: 'Split Segment',
+    merge_segment: 'Merge Segment'
   },
 
   audit_dialog: {

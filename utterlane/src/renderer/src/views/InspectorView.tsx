@@ -1,5 +1,16 @@
-import { useEffect, useState } from 'react'
-import { Play, Square, Mic, RotateCcw, Trash2, Check, Circle, AlertTriangle } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import {
+  Play,
+  Square,
+  Mic,
+  RotateCcw,
+  Trash2,
+  Check,
+  Circle,
+  AlertTriangle,
+  Scissors,
+  ArrowUpToLine
+} from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { cn } from '@renderer/lib/cn'
 import { useEditorStore } from '@renderer/store/editorStore'
@@ -64,18 +75,21 @@ function ToolbarButton({
   onClick,
   active,
   danger,
-  disabled
+  disabled,
+  title
 }: {
   children: React.ReactNode
   onClick?: () => void
   active?: boolean
   danger?: boolean
   disabled?: boolean
+  title?: string
 }): React.JSX.Element {
   return (
     <button
       onClick={onClick}
       disabled={disabled}
+      title={title}
       className={cn(
         'flex h-6 items-center gap-1 rounded-sm border px-2 text-2xs',
         'disabled:cursor-not-allowed disabled:opacity-40',
@@ -100,6 +114,8 @@ export function InspectorView(): React.JSX.Element {
   )
   const editSegmentText = useEditorStore((s) => s.editSegmentText)
   const deleteSegment = useEditorStore((s) => s.deleteSegment)
+  const splitSegmentAt = useEditorStore((s) => s.splitSegmentAt)
+  const mergeSegmentWithPrevious = useEditorStore((s) => s.mergeSegmentWithPrevious)
   const setSelectedTake = useEditorStore((s) => s.setSelectedTake)
   const deleteTake = useEditorStore((s) => s.deleteTake)
   const playback = useEditorStore((s) => s.playback)
@@ -115,6 +131,11 @@ export function InspectorView(): React.JSX.Element {
     (s) =>
       s.prefs.appearance?.inspectorTextAlign ?? DEFAULT_PREFERENCES.appearance!.inspectorTextAlign!
   )
+
+  // hooks 必须在早返回之前注册，所以 ref / focus state 都搬到这里——
+  // 即便没有选中 Segment 时也调用一次，保持 hook 顺序稳定
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null)
+  const [hasTextFocus, setHasTextFocus] = useState(false)
 
   if (!segment || !selectedId) {
     return (
@@ -141,6 +162,21 @@ export function InspectorView(): React.JSX.Element {
     if (ok) deleteSegment(selectedId)
   }
 
+  // 拆分按钮：从 textarea 取当前光标位置（selectionStart）。
+  // 用户得先聚焦 textarea 把光标放到拆分点，再点这个按钮。
+  // 失焦时禁用按钮——避免点了不知道从哪拆。光标在两端时 splitSegmentAt
+  // 内部会 no-op，无需在这里再判定（cursor 位置不进 React state，免得
+  // 每次 selectionchange 都触发渲染）
+  const onSplit = (): void => {
+    const ta = textareaRef.current
+    if (!ta) return
+    const at = ta.selectionStart
+    if (at == null) return
+    splitSegmentAt(selectedId, at)
+  }
+  const canSplit = hasTextFocus && playback === 'idle' && segment.text.length > 1
+  const canMerge = playback === 'idle' && index > 0
+
   return (
     <div className="flex h-full flex-col bg-bg">
       <div className="border-b border-border px-3 py-2">
@@ -151,8 +187,11 @@ export function InspectorView(): React.JSX.Element {
         </Field>
         <Field label={t('inspector.field_text')}>
           <textarea
+            ref={textareaRef}
             value={segment.text}
             onChange={(e) => editSegmentText(selectedId, e.target.value)}
+            onFocus={() => setHasTextFocus(true)}
+            onBlur={() => setHasTextFocus(false)}
             className={cn(
               'w-full resize-none rounded-sm border border-border bg-bg-deep px-2 py-1',
               'text-xs leading-5 outline-none focus:border-accent',
@@ -205,6 +244,23 @@ export function InspectorView(): React.JSX.Element {
             </ToolbarButton>
           </>
         )}
+        <div className="mx-1 h-4 w-px bg-border" />
+        {/*
+          拆分 / 合并：纯 segments.json 操作，不动音频文件。
+          - 拆分：textarea 必须聚焦才启用，由光标位置决定拆点
+          - 合并：当前不是首段才启用，目标是「合并到前一段」
+          以鼠标移到按钮时通过 title 解释「为什么禁用」（onMouseDown 时
+          textarea 会先 blur 然后再 click，所以光标位置仍是 textarea 失焦
+          那一刻的位置——浏览器原生行为，不用特殊处理）
+        */}
+        <ToolbarButton onClick={onSplit} disabled={!canSplit} title={t('inspector.btn_split_hint')}>
+          <Scissors size={11} />
+          {t('inspector.btn_split')}
+        </ToolbarButton>
+        <ToolbarButton onClick={() => mergeSegmentWithPrevious(selectedId)} disabled={!canMerge}>
+          <ArrowUpToLine size={11} />
+          {t('inspector.btn_merge_prev')}
+        </ToolbarButton>
         <div className="ml-auto" />
         <ToolbarButton danger onClick={onDeleteSegment} disabled={isRecordingThis}>
           <Trash2 size={11} />

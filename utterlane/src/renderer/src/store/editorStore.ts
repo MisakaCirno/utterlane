@@ -103,6 +103,18 @@ type EditorState = {
   reorderSegments: (nextOrder: string[]) => void
   setSelectedTake: (segmentId: string, takeId: string) => void
   deleteTake: (segmentId: string, takeId: string) => void
+  /**
+   * 在 splitAt 字符位置把指定 Segment 拆成两个。
+   * 前半段保留原 Segment（含所有 Take）；后半段是新建空 Take 的 Segment，
+   * 紧跟原 Segment 在 order 中的下一位插入
+   */
+  splitSegmentAt: (segmentId: string, splitAt: number) => void
+  /**
+   * 把指定 Segment 合并到它的前一段。文本拼接（中间加空格），
+   * takes 列表 append 到前一段。前一段的 selectedTakeId 不变；
+   * 当前段不存在前一段（已经是首段）时 no-op
+   */
+  mergeSegmentWithPrevious: (segmentId: string) => void
 
   // 音频文件审计
   /** 用 audit 扫描结果覆盖 missingTakeIds，集合会被 UI 用作缺失徽标的依据 */
@@ -620,6 +632,106 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       ...markDirty()
     })
     scheduleSegmentsSave()
+  },
+
+  /**
+   * 拆分行为：
+   *   - splitAt 落在 [1, text.length-1] 才有意义；落在两端会产生空 Segment，no-op
+   *   - 前半段（保留原 ID）：text[0..splitAt]，takes / selectedTakeId 不动
+   *   - 后半段（新 ID）：text[splitAt..]，无 takes，紧跟原段插入
+   *   - selectedSegmentId 保持原段（用户拆分通常是想精修前半段）
+   * 拆分动作进 undo 栈，inverse 直接把后半段删除并合并文本回去
+   */
+  splitSegmentAt: (segmentId, splitAt) => {
+    const prev = get()
+    const seg = prev.segmentsById[segmentId]
+    if (!seg) return
+    const text = seg.text
+    // 越界保护：拆分点必须落在文本中段，否则一段空一段全的拆没意义
+    if (splitAt <= 0 || splitAt >= text.length) return
+    const sourceIdx = prev.order.indexOf(segmentId)
+    if (sourceIdx < 0) return
+
+    const newSegmentId = crypto.randomUUID()
+    const beforeText = text.slice(0, splitAt).trimEnd()
+    const afterText = text.slice(splitAt).trimStart()
+    if (beforeText.length === 0 || afterText.length === 0) return
+
+    useHistoryStore.getState().push(`splitSegment:${segmentId}`, 'history.split_segment', {
+      type: 'splitSegment',
+      sourceSegmentId: segmentId,
+      sourceTextBefore: text,
+      splitAt,
+      newSegmentId,
+      newSegmentIndex: sourceIdx + 1,
+      prevSelectedSegmentId: prev.selectedSegmentId,
+      nextSelectedSegmentId: prev.selectedSegmentId
+    })
+
+    const nextOrder = prev.order.slice()
+    nextOrder.splice(sourceIdx + 1, 0, newSegmentId)
+    set({
+      order: nextOrder,
+      segmentsById: {
+        ...prev.segmentsById,
+        [segmentId]: { ...seg, text: beforeText },
+        [newSegmentId]: { id: newSegmentId, text: afterText, takes: [] }
+      },
+      ...markDirty()
+    })
+    scheduleSegmentsSave()
+  },
+
+  /**
+   * 合并行为：
+   *   - 必须存在「前一段」（segmentId 在 order 中 idx > 0），否则 no-op
+   *   - 文本：`${prev.text} ${curr.text}`（中间加空格；不区分中英文，
+   *     用户合完可以再编辑）。两端先 trim 避免多余空白
+   *   - takes：append curr.takes 到 prev.takes 末尾。selectedTakeId 不动
+   *     （前一段原本选哪个还选哪个）
+   *   - selectedSegmentId 切到 target（前一段），让 Inspector 立刻显示合完的文本
+   */
+  mergeSegmentWithPrevious: (segmentId) => {
+    const prev = get()
+    const idx = prev.order.indexOf(segmentId)
+    if (idx <= 0) return // 已经是首段，无前一段可合
+    const targetId = prev.order[idx - 1]
+    const target = prev.segmentsById[targetId]
+    const curr = prev.segmentsById[segmentId]
+    if (!target || !curr) return
+
+    const targetTextBefore = target.text
+    const targetTakesBefore = target.takes
+    const mergedText = `${target.text.trim()} ${curr.text.trim()}`.trim()
+
+    useHistoryStore.getState().push(`mergeSegment:${segmentId}`, 'history.merge_segment', {
+      type: 'mergeSegment',
+      targetSegmentId: targetId,
+      targetTextBefore,
+      targetTextAfter: mergedText,
+      targetTakesBefore,
+      mergedSegment: curr,
+      mergedIndex: idx,
+      prevSelectedSegmentId: prev.selectedSegmentId,
+      nextSelectedSegmentId: targetId
+    })
+
+    const nextOrder = prev.order.filter((id) => id !== segmentId)
+    const nextById = { ...prev.segmentsById }
+    delete nextById[segmentId]
+    nextById[targetId] = {
+      ...target,
+      text: mergedText,
+      takes: [...targetTakesBefore, ...curr.takes]
+    }
+    set({
+      order: nextOrder,
+      segmentsById: nextById,
+      selectedSegmentId: targetId,
+      ...markDirty()
+    })
+    scheduleSegmentsSave()
+    pushWorkspace(get())
   },
 
   // -------- 录音 --------
