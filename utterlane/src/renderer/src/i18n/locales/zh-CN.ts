@@ -124,6 +124,7 @@ export const zhCN = {
     gap_after_last: '— （末段）',
     gap_after_last_hint: '末段没有「下一段」，尾部间隔无意义',
     take_duration_trimmed_hint: '节选后 {{effective}} / 原始 {{total}}',
+    col_enable: '启用',
     col_take: 'Take',
     col_trim_start: '起点 (ms)',
     col_trim_end: '终点 (ms)',

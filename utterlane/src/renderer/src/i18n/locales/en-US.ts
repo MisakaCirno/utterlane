@@ -122,6 +122,7 @@ export const enUS: TranslationSchema = {
     gap_after_last: '— (last segment)',
     gap_after_last_hint: 'Trailing gap is meaningless for the last segment',
     take_duration_trimmed_hint: 'Effective {{effective}} of original {{total}}',
+    col_enable: 'On',
     col_take: 'Take',
     col_trim_start: 'Start (ms)',
     col_trim_end: 'End (ms)',

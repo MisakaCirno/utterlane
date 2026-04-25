@@ -269,7 +269,10 @@ export function InspectorView(): React.JSX.Element {
                     }}
                     disabled={playback !== 'idle'}
                     className={cn(
-                      'w-20 rounded-sm border border-border bg-bg-deep px-1.5 py-0.5',
+                      // pr-5 给浏览器原生 spinner 让位，否则数字会跟上下
+                      // 箭头挤在一起。w-24 比 w-20 略宽，配合 pr-5 后数字
+                      // 区与之前视觉宽度相当
+                      'w-24 rounded-sm border border-border bg-bg-deep py-0.5 pr-5 pl-1.5',
                       'text-right font-mono text-xs tabular-nums text-fg',
                       'outline-none focus:border-accent disabled:cursor-not-allowed disabled:opacity-50'
                     )}
@@ -476,8 +479,9 @@ function TakesTable({
   })
 
   // 注意 col 5（duration）用 minmax(N, 1fr)：当 Inspector 比 grid 自身宽
-  // 还宽时，duration 列吃掉富余空间；窄时被父级 overflow-auto 接管成横滚
-  const gridTemplateColumns = `20px minmax(48px,auto) ${widths.trimStart}px ${widths.trimEnd}px minmax(${widths.duration}px,1fr) 24px 24px 24px`
+  // 还宽时，duration 列吃掉富余空间；窄时被父级 overflow-auto 接管成横滚。
+  // col 1 给到 36px 让「启用 / Enable」表头能完整显示，checkbox 居中
+  const gridTemplateColumns = `36px minmax(48px,auto) ${widths.trimStart}px ${widths.trimEnd}px minmax(${widths.duration}px,1fr) 24px 24px 24px`
 
   // 拖动状态。pointermove 在 window 级监听，避免指针离开 handle 时丢更新
   const dragRef = useRef<{ col: TakeColKey; startX: number; startW: number } | null>(null)
@@ -534,7 +538,7 @@ function TakesTable({
         )}
         style={{ gridTemplateColumns }}
       >
-        <span />
+        <span className="text-center">{t('inspector.col_enable')}</span>
         <span>{t('inspector.col_take')}</span>
         <ResizableHeaderCell
           label={t('inspector.col_trim_start')}
@@ -585,18 +589,23 @@ function TakesTable({
             style={{ gridTemplateColumns }}
           >
             {/* 1. 启用：实际是 selectedTakeId 单选，按 user 要求用 checkbox
-                  外观。点击当前选中的不会取消（store 不接受 undefined） */}
-            <input
-              type="checkbox"
-              checked={isCurrent}
-              onChange={() => {
-                if (!isCurrent) setSelectedTake(segmentId, take.id)
-              }}
-              disabled={!isIdle || isCurrent}
-              aria-label={isCurrent ? t('inspector.take_current') : t('inspector.take_set_current')}
-              title={isCurrent ? t('inspector.take_current') : t('inspector.take_set_current')}
-              className="h-3 w-3 cursor-pointer accent-accent disabled:cursor-default"
-            />
+                  外观。点击当前选中的不会取消（store 不接受 undefined）。
+                  外面包一层 flex 把 checkbox 在 36px 宽的列里水平居中 */}
+            <div className="flex justify-center">
+              <input
+                type="checkbox"
+                checked={isCurrent}
+                onChange={() => {
+                  if (!isCurrent) setSelectedTake(segmentId, take.id)
+                }}
+                disabled={!isIdle || isCurrent}
+                aria-label={
+                  isCurrent ? t('inspector.take_current') : t('inspector.take_set_current')
+                }
+                title={isCurrent ? t('inspector.take_current') : t('inspector.take_set_current')}
+                className="h-3 w-3 cursor-pointer accent-accent disabled:cursor-default"
+              />
+            </div>
 
             {/* 2. 名称 + 缺失徽标 */}
             <div className="flex min-w-0 items-center gap-1">
@@ -725,7 +734,9 @@ function NumInput({
         onChange(Number.isFinite(raw) ? Math.max(0, raw) : 0)
       }}
       className={cn(
-        'w-full rounded-sm border border-border bg-bg-deep px-1 py-0.5',
+        // pr-5 留给原生 spinner，避免数字跟上下箭头视觉粘连；列宽不够
+        // 时由调用方通过列宽 state 拉宽
+        'w-full rounded-sm border border-border bg-bg-deep py-0.5 pr-5 pl-1',
         'text-right font-mono text-2xs tabular-nums text-fg',
         'outline-none focus:border-accent disabled:cursor-not-allowed disabled:opacity-50'
       )}
