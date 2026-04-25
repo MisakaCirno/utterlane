@@ -23,6 +23,39 @@ export type Take = {
   filePath: string
   /** 录音时长（毫秒），用于 UI 显示和时间轴布局 */
   durationMs: number
+  /**
+   * 节选起点（毫秒）。undefined 等价于 0——从文件起点播放。
+   *
+   * 节选语义是「非破坏性」：原 WAV 文件不动，trimStartMs / trimEndMs
+   * 只在播放 / 导出时生效。这样可以反复调整 / 撤销 trim，永远不丢
+   * 录音原始数据。重录会清空 trim（durationMs 变了，旧 trim 可能越界）
+   */
+  trimStartMs?: number
+  /**
+   * 节选终点（毫秒，相对文件起点）。undefined 等价于 durationMs——
+   * 一直播到文件末尾。要求 trimEndMs > trimStartMs，否则视为无效配置
+   * 由调用方 clamp / 忽略
+   */
+  trimEndMs?: number
+}
+
+/**
+ * 计算 Take 的有效播放区间（毫秒，相对文件起点）。
+ *   - trimStartMs / trimEndMs 缺失 → 取 0 / durationMs 的默认
+ *   - clamp 到 [0, durationMs]
+ *   - end <= start 时退化为整段（视作 trim 配置无效）
+ */
+export function takeEffectiveRange(take: Take): { startMs: number; endMs: number } {
+  const start = Math.max(0, Math.min(take.trimStartMs ?? 0, take.durationMs))
+  const end = Math.max(0, Math.min(take.trimEndMs ?? take.durationMs, take.durationMs))
+  if (end <= start) return { startMs: 0, endMs: take.durationMs }
+  return { startMs: start, endMs: end }
+}
+
+/** 节选后剩余的有效时长（毫秒）。导出 / SRT / timeline 总时长都用这个 */
+export function takeEffectiveDurationMs(take: Take): number {
+  const { startMs, endMs } = takeEffectiveRange(take)
+  return endMs - startMs
 }
 
 export type Segment = {

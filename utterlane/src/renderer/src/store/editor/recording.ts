@@ -205,16 +205,22 @@ export const createRecordingSlice: SliceCreator<
       }
 
       // 写盘成功后更新 segments：
-      //   - 如果 takeId 在 takes 里已经存在 → 重录：原地替换 durationMs（文件已被覆盖），selectedTakeId 不变
-      //   - 否则 → 新录：追加 Take，selectedTakeId 指向它
+      //   - 如果 takeId 在 takes 里已经存在 → 重录：原地替换 filePath /
+      //     durationMs（文件已被覆盖）；trim 字段一并清掉，因为新录音的
+      //     时长可能与旧 take 不同，旧 trim 越界毫无意义。selectedTakeId
+      //     不变
+      //   - 否则 → 新录：追加 Take（无 trim 字段），selectedTakeId 指向它
       set((s: EditorState) => {
         const seg = s.segmentsById[segmentId]
         if (!seg) return s
         const existingIdx = seg.takes.findIndex((t) => t.id === takeId)
         if (existingIdx >= 0) {
           const nextTakes = seg.takes.slice()
+          // 重录：保留 id，filePath / durationMs 用新值，trim 字段彻底删除
+          // （不能 spread 旧 take 后只设新字段，否则 trimStartMs / trimEndMs
+          // 会被原样保留）
           nextTakes[existingIdx] = {
-            ...nextTakes[existingIdx],
+            id: nextTakes[existingIdx].id,
             filePath: writeRes.filePath,
             durationMs: result.durationMs
           }

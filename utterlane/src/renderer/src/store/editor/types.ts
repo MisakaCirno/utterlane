@@ -141,6 +141,18 @@ export type EditorActions = {
   setSelectedTake: (segmentId: string, takeId: string) => void
   deleteTake: (segmentId: string, takeId: string) => void
   /**
+   * 设置 Take 的节选区间（毫秒，相对文件起点）。
+   *
+   *   - trim === undefined：清除节选，恢复整段播放（字段从 Take 上删除）
+   *   - 其他：写入 trimStartMs / trimEndMs。end <= start / 越界由调用方
+   *     已 clamp 后传入；进 undo 栈
+   */
+  setTakeTrim: (
+    segmentId: string,
+    takeId: string,
+    trim: { startMs: number; endMs: number } | undefined
+  ) => void
+  /**
    * 在 splitAt 字符位置把指定 Segment 拆成两个。
    * 前半段保留原 Segment（含所有 Take）；后半段是新建空 Take 的 Segment，
    * 紧跟原 Segment 在 order 中的下一位插入

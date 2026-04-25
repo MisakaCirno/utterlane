@@ -320,7 +320,8 @@ export const zhCN = {
     set_segment_gap: '调整段后间隔',
     apply_default_gaps: '应用默认间隔',
     reset_gaps_to_default: '重置为默认间隔',
-    clear_auto_gaps: '清除自动间隔'
+    clear_auto_gaps: '清除自动间隔',
+    set_take_trim: '调整 Take 节选'
   },
 
   audit_dialog: {

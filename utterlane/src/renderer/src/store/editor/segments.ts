@@ -118,6 +118,7 @@ export const createSegmentsSlice: SliceCreator<
     | 'reorderSegments'
     | 'setSelectedTake'
     | 'deleteTake'
+    | 'setTakeTrim'
     | 'splitSegmentAt'
     | 'mergeSegmentWithPrevious'
     | 'newSegment'
@@ -404,6 +405,88 @@ export const createSegmentsSlice: SliceCreator<
           takes: nextTakes,
           selectedTakeId: nextSelectedTakeId
         }
+      },
+      ...markDirty()
+    })
+    scheduleSegmentsSave()
+  },
+
+  /**
+   * 设置 Take 的节选区间。trim === undefined 时清掉字段，恢复整段播放。
+   *
+   * 进 undo 栈，但 mergeable: true ——连续拖拽 trim 手柄会合并成一格 undo，
+   * 与 setSegmentGap / editText 同样的「连续小步修改」语义
+   */
+  setTakeTrim: (segmentId, takeId, trim) => {
+    const prev = get()
+    const seg = prev.segmentsById[segmentId]
+    if (!seg) return
+    const idx = seg.takes.findIndex((t) => t.id === takeId)
+    if (idx < 0) return
+    const take = seg.takes[idx]
+    const before: { start: number | undefined; end: number | undefined } = {
+      start: take.trimStartMs,
+      end: take.trimEndMs
+    }
+    // 把传入的 trim 也 clamp 一遍：start ≥ 0、end ≤ durationMs、end > start，
+    // 否则按「无 trim」处理。store 层做清洗让 UI 拖拽时不必反复防御
+    let nextStart: number | undefined
+    let nextEnd: number | undefined
+    if (trim) {
+      const s = Math.max(0, Math.min(trim.startMs, take.durationMs))
+      const e = Math.max(0, Math.min(trim.endMs, take.durationMs))
+      // start === 0 && end === durationMs 等价于无 trim，落字段会浪费空间
+      if (e > s && !(s === 0 && e === take.durationMs)) {
+        nextStart = s === 0 ? undefined : s
+        nextEnd = e === take.durationMs ? undefined : e
+      }
+    }
+    if (nextStart === before.start && nextEnd === before.end) return
+    const after = { start: nextStart, end: nextEnd }
+
+    const writeTrim = (
+      val: { start: number | undefined; end: number | undefined }
+    ): void =>
+      patch((s) => {
+        const cur = s.segmentsById[segmentId]
+        if (!cur) return null
+        const i = cur.takes.findIndex((t) => t.id === takeId)
+        if (i < 0) return null
+        const nextTakes = cur.takes.slice()
+        const nextTake = { ...nextTakes[i] }
+        if (val.start === undefined) delete nextTake.trimStartMs
+        else nextTake.trimStartMs = val.start
+        if (val.end === undefined) delete nextTake.trimEndMs
+        else nextTake.trimEndMs = val.end
+        nextTakes[i] = nextTake
+        return {
+          segmentsById: {
+            ...s.segmentsById,
+            [segmentId]: { ...cur, takes: nextTakes }
+          }
+        }
+      })
+
+    useHistoryStore.getState().push({
+      coalesceKey: `setTakeTrim:${segmentId}:${takeId}`,
+      labelKey: 'history.set_take_trim',
+      apply: () => writeTrim(after),
+      revert: () => writeTrim(before),
+      mergeable: true
+    })
+
+    // 落初始 mutation
+    const nextTakes = seg.takes.slice()
+    const nextTake = { ...take }
+    if (nextStart === undefined) delete nextTake.trimStartMs
+    else nextTake.trimStartMs = nextStart
+    if (nextEnd === undefined) delete nextTake.trimEndMs
+    else nextTake.trimEndMs = nextEnd
+    nextTakes[idx] = nextTake
+    set({
+      segmentsById: {
+        ...prev.segmentsById,
+        [segmentId]: { ...seg, takes: nextTakes }
       },
       ...markDirty()
     })

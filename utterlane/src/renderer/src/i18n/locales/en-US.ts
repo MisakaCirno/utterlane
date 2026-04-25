@@ -325,7 +325,8 @@ export const enUS: TranslationSchema = {
     set_segment_gap: 'Adjust Trailing Gap',
     apply_default_gaps: 'Apply Default Gaps',
     reset_gaps_to_default: 'Reset Gaps to Default',
-    clear_auto_gaps: 'Clear Auto Gaps'
+    clear_auto_gaps: 'Clear Auto Gaps',
+    set_take_trim: 'Adjust Take Trim'
   },
 
   audit_dialog: {
