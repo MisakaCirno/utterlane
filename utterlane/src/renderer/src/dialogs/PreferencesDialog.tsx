@@ -21,15 +21,17 @@ import { SUPPORTED_LOCALES, type SupportedLocale } from '@renderer/i18n'
 import { enumerateInputDevices, type AudioInputDevice } from '@renderer/services/recorder'
 
 /**
- * 设置对话框。把分散在菜单里的 App 级偏好集中在一个地方。
+ * 设置对话框。
  *
- * 所有字段都是「改完立即生效 + 立即写回 preferences」——
- * 没有「应用 / 取消」按钮：用户的任何调整都已经通过 preferences 写盘，
- * 关对话框本身是无副作用的。
+ * === 分页布局 ===
  *
- * 分组：
- *   - 外观：Dock 主题、字体缩放、界面语言
- *   - 新工程默认：新建工程时的采样率 / 声道数
+ * 旧版本是一长条向下滚动，4 个分组上下排开。新版本左侧是分页列表，
+ * 右侧渲染当前页内容——更接近 IDE / OS 系统设置的常见样式，方便后续
+ * 加入新页（每加一个 PAGES 条目即可，无需调整对话框其它部分）。
+ *
+ * 所有字段都是「改完立即生效 + 立即写回 preferences」——没有「应用 /
+ * 取消」按钮：用户的任何调整都已经通过 preferences 写盘，关对话框本身
+ * 是无副作用的。
  */
 
 /**
@@ -51,6 +53,15 @@ const SAMPLE_RATE_OPTIONS = [44100, 48000] as const
  */
 const COUNTDOWN_OPTIONS = [0, 1, 3, 5] as const
 
+type PageId = 'appearance' | 'projectDefaults' | 'recording' | 'keyboard'
+
+const PAGES: Array<{ id: PageId; labelKey: string }> = [
+  { id: 'appearance', labelKey: 'preferences.section_appearance' },
+  { id: 'projectDefaults', labelKey: 'preferences.section_project_defaults' },
+  { id: 'recording', labelKey: 'preferences.section_recording' },
+  { id: 'keyboard', labelKey: 'preferences.section_keyboard' }
+]
+
 export function PreferencesDialog({
   open,
   onOpenChange
@@ -59,11 +70,178 @@ export function PreferencesDialog({
   onOpenChange: (open: boolean) => void
 }): React.JSX.Element {
   const { t } = useTranslation()
+  const [page, setPage] = useState<PageId>('appearance')
+
+  return (
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
+        <Dialog.Content
+          className={cn(
+            'fixed left-1/2 top-1/2 z-50 -translate-x-1/2 -translate-y-1/2',
+            // 固定高度避免切页时对话框上下抖动；分页内容更长时由右侧
+            // overflow-y-auto 接管成纵向滚动
+            'flex h-[480px] w-[640px] max-h-[85vh] max-w-[92vw] flex-col rounded-sm border border-border bg-bg-panel shadow-2xl',
+            'focus:outline-none'
+          )}
+        >
+          <div className="flex h-9 shrink-0 items-center justify-between border-b border-border px-3">
+            <Dialog.Title className="text-xs text-fg">{t('preferences.title')}</Dialog.Title>
+            <Dialog.Close
+              className="rounded-sm p-1 text-fg-muted hover:bg-chrome-hover hover:text-fg"
+              aria-label={t('common.close')}
+            >
+              <X size={12} />
+            </Dialog.Close>
+          </div>
+
+          {/* 主体：左 = 分页列表（固定宽），右 = 当前页内容（独立纵向滚动） */}
+          <div className="flex min-h-0 flex-1">
+            <nav className="flex w-36 shrink-0 flex-col border-r border-border bg-bg py-2">
+              {PAGES.map((p) => {
+                const isActive = page === p.id
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => setPage(p.id)}
+                    className={cn(
+                      'flex h-7 items-center px-3 text-left text-xs',
+                      isActive
+                        ? 'border-l-2 border-accent bg-accent-soft/40 pl-[10px] text-fg'
+                        : 'border-l-2 border-transparent text-fg-muted hover:bg-chrome-hover hover:text-fg'
+                    )}
+                  >
+                    {t(p.labelKey)}
+                  </button>
+                )
+              })}
+            </nav>
+
+            <div className="flex min-w-0 flex-1 flex-col overflow-y-auto px-4 py-3">
+              {page === 'appearance' && <AppearancePage />}
+              {page === 'projectDefaults' && <ProjectDefaultsPage />}
+              {page === 'recording' && <RecordingPage open={open} />}
+              {page === 'keyboard' && <KeyboardPage />}
+            </div>
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  )
+}
+
+// ===========================================================================
+// 各分页内容
+// ===========================================================================
+
+function AppearancePage(): React.JSX.Element {
+  const { t } = useTranslation()
   const prefs = usePreferencesStore((s) => s.prefs)
   const update = usePreferencesStore((s) => s.update)
-
   const appearance = prefs.appearance ?? DEFAULT_PREFERENCES.appearance!
+
+  return (
+    <PageBody>
+      <Row label={t('preferences.label_dock_theme')}>
+        <Select
+          value={appearance.dockTheme ?? 'dark'}
+          onChange={(v) => update({ appearance: { dockTheme: v as DockThemeKey } })}
+          options={themeRegistry.map((th) => ({ value: th.key, label: th.label }))}
+        />
+      </Row>
+
+      <Row label={t('preferences.label_font_scale')}>
+        <div className="flex gap-1">
+          {FONT_SCALE_OPTIONS.map((value) => {
+            const isCurrent = (appearance.fontScale ?? 1) === value
+            const labelKey = FONT_SCALE_LABEL_KEYS[value] ?? 'preferences.font_scale_default'
+            return (
+              <button
+                key={value}
+                onClick={() => update({ appearance: { fontScale: value } })}
+                className={cn(
+                  'h-6 flex-1 rounded-sm border px-2 text-2xs',
+                  isCurrent
+                    ? 'border-accent bg-accent text-white'
+                    : 'border-border bg-bg-raised text-fg hover:border-border-strong'
+                )}
+              >
+                {t(labelKey)}
+              </button>
+            )
+          })}
+        </div>
+      </Row>
+
+      <Row label={t('preferences.label_language')}>
+        <Select
+          value={appearance.locale ?? 'zh-CN'}
+          onChange={(v) => update({ appearance: { locale: v as SupportedLocale } })}
+          options={SUPPORTED_LOCALES.map((loc) => ({
+            value: loc,
+            label:
+              loc === 'zh-CN' ? t('preferences.language_zh_cn') : t('preferences.language_en_us')
+          }))}
+        />
+      </Row>
+
+      <Row label={t('preferences.label_segment_text_align')}>
+        <AlignPicker
+          value={appearance.segmentTextAlign ?? DEFAULT_PREFERENCES.appearance!.segmentTextAlign!}
+          onChange={(v) => update({ appearance: { segmentTextAlign: v } })}
+        />
+      </Row>
+
+      <Row label={t('preferences.label_inspector_text_align')}>
+        <AlignPicker
+          value={
+            appearance.inspectorTextAlign ?? DEFAULT_PREFERENCES.appearance!.inspectorTextAlign!
+          }
+          onChange={(v) => update({ appearance: { inspectorTextAlign: v } })}
+        />
+      </Row>
+    </PageBody>
+  )
+}
+
+function ProjectDefaultsPage(): React.JSX.Element {
+  const { t } = useTranslation()
+  const prefs = usePreferencesStore((s) => s.prefs)
+  const update = usePreferencesStore((s) => s.update)
   const projectDefaults = prefs.projectDefaults ?? DEFAULT_PREFERENCES.projectDefaults!
+
+  return (
+    <PageBody>
+      <Row label={t('preferences.label_sample_rate')}>
+        <Select
+          value={String(projectDefaults.sampleRate ?? 48000)}
+          onChange={(v) => update({ projectDefaults: { sampleRate: Number(v) } })}
+          options={SAMPLE_RATE_OPTIONS.map((sr) => ({
+            value: String(sr),
+            label: `${sr} Hz`
+          }))}
+        />
+      </Row>
+
+      <Row label={t('preferences.label_channels')}>
+        <Select
+          value={String(projectDefaults.channels ?? 1)}
+          onChange={(v) => update({ projectDefaults: { channels: Number(v) as 1 | 2 } })}
+          options={[
+            { value: '1', label: t('project_settings.channel_mono') },
+            { value: '2', label: t('project_settings.channel_stereo') }
+          ]}
+        />
+      </Row>
+    </PageBody>
+  )
+}
+
+function RecordingPage({ open }: { open: boolean }): React.JSX.Element {
+  const { t } = useTranslation()
+  const prefs = usePreferencesStore((s) => s.prefs)
+  const update = usePreferencesStore((s) => s.update)
   const recording = prefs.recording ?? DEFAULT_PREFERENCES.recording!
 
   // 输入设备列表只在对话框打开时拉取一次。设备热插拔不算高频事件，用户
@@ -82,157 +260,39 @@ export function PreferencesDialog({
   }, [open])
 
   return (
-    <Dialog.Root open={open} onOpenChange={onOpenChange}>
-      <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
-        <Dialog.Content
-          className={cn(
-            'fixed left-1/2 top-1/2 z-50 -translate-x-1/2 -translate-y-1/2',
-            'flex w-[560px] max-w-[90vw] flex-col rounded-sm border border-border bg-bg-panel shadow-2xl',
-            'focus:outline-none'
-          )}
-        >
-          <div className="flex h-9 shrink-0 items-center justify-between border-b border-border px-3">
-            <Dialog.Title className="text-xs text-fg">{t('preferences.title')}</Dialog.Title>
-            <Dialog.Close
-              className="rounded-sm p-1 text-fg-muted hover:bg-chrome-hover hover:text-fg"
-              aria-label={t('common.close')}
-            >
-              <X size={12} />
-            </Dialog.Close>
-          </div>
-
-          <div className="flex flex-col gap-5 overflow-y-auto px-4 py-3">
-            <Section title={t('preferences.section_appearance')}>
-              <Row label={t('preferences.label_dock_theme')}>
-                <Select
-                  value={appearance.dockTheme ?? 'dark'}
-                  onChange={(v) => update({ appearance: { dockTheme: v as DockThemeKey } })}
-                  options={themeRegistry.map((th) => ({ value: th.key, label: th.label }))}
-                />
-              </Row>
-
-              <Row label={t('preferences.label_font_scale')}>
-                <div className="flex gap-1">
-                  {FONT_SCALE_OPTIONS.map((value) => {
-                    const isCurrent = (appearance.fontScale ?? 1) === value
-                    const labelKey =
-                      FONT_SCALE_LABEL_KEYS[value] ?? 'preferences.font_scale_default'
-                    return (
-                      <button
-                        key={value}
-                        onClick={() => update({ appearance: { fontScale: value } })}
-                        className={cn(
-                          'h-6 flex-1 rounded-sm border px-2 text-2xs',
-                          isCurrent
-                            ? 'border-accent bg-accent text-white'
-                            : 'border-border bg-bg-raised text-fg hover:border-border-strong'
-                        )}
-                      >
-                        {t(labelKey)}
-                      </button>
-                    )
-                  })}
-                </div>
-              </Row>
-
-              <Row label={t('preferences.label_language')}>
-                <Select
-                  value={appearance.locale ?? 'zh-CN'}
-                  onChange={(v) => update({ appearance: { locale: v as SupportedLocale } })}
-                  options={SUPPORTED_LOCALES.map((loc) => ({
-                    value: loc,
-                    label:
-                      loc === 'zh-CN'
-                        ? t('preferences.language_zh_cn')
-                        : t('preferences.language_en_us')
-                  }))}
-                />
-              </Row>
-
-              <Row label={t('preferences.label_segment_text_align')}>
-                <AlignPicker
-                  value={
-                    appearance.segmentTextAlign ?? DEFAULT_PREFERENCES.appearance!.segmentTextAlign!
-                  }
-                  onChange={(v) => update({ appearance: { segmentTextAlign: v } })}
-                />
-              </Row>
-
-              <Row label={t('preferences.label_inspector_text_align')}>
-                <AlignPicker
-                  value={
-                    appearance.inspectorTextAlign ??
-                    DEFAULT_PREFERENCES.appearance!.inspectorTextAlign!
-                  }
-                  onChange={(v) => update({ appearance: { inspectorTextAlign: v } })}
-                />
-              </Row>
-            </Section>
-
-            <Section title={t('preferences.section_project_defaults')}>
-              <Row label={t('preferences.label_sample_rate')}>
-                <Select
-                  value={String(projectDefaults.sampleRate ?? 48000)}
-                  onChange={(v) => update({ projectDefaults: { sampleRate: Number(v) } })}
-                  options={SAMPLE_RATE_OPTIONS.map((sr) => ({
-                    value: String(sr),
-                    label: `${sr} Hz`
-                  }))}
-                />
-              </Row>
-
-              <Row label={t('preferences.label_channels')}>
-                <Select
-                  value={String(projectDefaults.channels ?? 1)}
-                  onChange={(v) => update({ projectDefaults: { channels: Number(v) as 1 | 2 } })}
-                  options={[
-                    { value: '1', label: t('project_settings.channel_mono') },
-                    { value: '2', label: t('project_settings.channel_stereo') }
-                  ]}
-                />
-              </Row>
-            </Section>
-
-            <Section title={t('preferences.section_recording')}>
-              <Row label={t('preferences.label_input_device')}>
-                <Select
-                  value={recording.inputDeviceId ?? ''}
-                  onChange={(v) =>
-                    // 选「(默认)」时存空字符串，对应 startRecording 走默认设备路径
-                    update({ recording: { inputDeviceId: v || undefined } })
-                  }
-                  options={[
-                    { value: '', label: t('preferences.input_device_default') },
-                    ...inputDevices.map((d) => ({ value: d.deviceId, label: d.label }))
-                  ]}
-                />
-              </Row>
-              <Row label={t('preferences.label_countdown')}>
-                <Select
-                  value={String(recording.countdownSeconds ?? 1)}
-                  onChange={(v) => update({ recording: { countdownSeconds: Number(v) } })}
-                  options={COUNTDOWN_OPTIONS.map((sec) => ({
-                    value: String(sec),
-                    label:
-                      sec === 0
-                        ? t('preferences.countdown_off')
-                        : t('preferences.countdown_seconds', { count: sec })
-                  }))}
-                />
-              </Row>
-            </Section>
-
-            <KeyboardSection />
-          </div>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
+    <PageBody>
+      <Row label={t('preferences.label_input_device')}>
+        <Select
+          value={recording.inputDeviceId ?? ''}
+          onChange={(v) =>
+            // 选「(默认)」时存空字符串，对应 startRecording 走默认设备路径
+            update({ recording: { inputDeviceId: v || undefined } })
+          }
+          options={[
+            { value: '', label: t('preferences.input_device_default') },
+            ...inputDevices.map((d) => ({ value: d.deviceId, label: d.label }))
+          ]}
+        />
+      </Row>
+      <Row label={t('preferences.label_countdown')}>
+        <Select
+          value={String(recording.countdownSeconds ?? 1)}
+          onChange={(v) => update({ recording: { countdownSeconds: Number(v) } })}
+          options={COUNTDOWN_OPTIONS.map((sec) => ({
+            value: String(sec),
+            label:
+              sec === 0
+                ? t('preferences.countdown_off')
+                : t('preferences.countdown_seconds', { count: sec })
+          }))}
+        />
+      </Row>
+    </PageBody>
   )
 }
 
 /**
- * 快捷键自定义分区。
+ * 快捷键自定义页。
  *
  * 每行展示一个动作 + 当前绑定 + 「重新绑定 / 重置」按钮。点重新绑定后
  * 进入「按键捕获模式」：行内显示「请按下新键…」并监听 keydown，捕获到
@@ -242,7 +302,7 @@ export function PreferencesDialog({
  * 分支会竞争，但每个分支自带 playback 状态守卫，实际并不会重复执行）。
  * UI 上对显式冲突视而不见，倾向「让用户掌控」而不是「替用户拒绝」
  */
-function KeyboardSection(): React.JSX.Element {
+function KeyboardPage(): React.JSX.Element {
   const { t } = useTranslation()
   const prefs = usePreferencesStore((s) => s.prefs)
   const update = usePreferencesStore((s) => s.update)
@@ -280,7 +340,7 @@ function KeyboardSection(): React.JSX.Element {
   }, [capturing, update])
 
   return (
-    <Section title={t('preferences.section_keyboard')}>
+    <PageBody>
       {CUSTOMIZABLE_ACTIONS.map((id) => {
         const current = bindings[id]
         const isDefault = bindingsEqual(current, DEFAULT_KEYBINDINGS[id])
@@ -320,7 +380,7 @@ function KeyboardSection(): React.JSX.Element {
           </div>
         )
       })}
-    </Section>
+    </PageBody>
   )
 }
 
@@ -329,25 +389,19 @@ function bindingsEqual(a: KeyBinding | null, b: KeyBinding | null): boolean {
   return a.key === b.key && !!a.ctrl === !!b.ctrl && !!a.alt === !!b.alt && !!a.shift === !!b.shift
 }
 
-function Section({
-  title,
-  children
-}: {
-  title: string
-  children: React.ReactNode
-}): React.JSX.Element {
-  return (
-    <div className="flex flex-col gap-2">
-      <div className="text-2xs font-semibold uppercase tracking-wider text-fg-dim">{title}</div>
-      <div className="flex flex-col gap-2">{children}</div>
-    </div>
-  )
+// ===========================================================================
+// 共用 sub-components
+// ===========================================================================
+
+/** 分页内容的统一外壳。各页只需关心自己的 Row 列表 */
+function PageBody({ children }: { children: React.ReactNode }): React.JSX.Element {
+  return <div className="flex flex-col gap-2">{children}</div>
 }
 
 function Row({ label, children }: { label: string; children: React.ReactNode }): React.JSX.Element {
   return (
     <div className="flex items-center gap-3">
-      <div className="w-24 shrink-0 text-right text-2xs text-fg-muted">{label}</div>
+      <div className="w-28 shrink-0 text-right text-2xs text-fg-muted">{label}</div>
       <div className="flex-1">{children}</div>
     </div>
   )
