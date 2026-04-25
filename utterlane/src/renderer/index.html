@@ -3,10 +3,17 @@
   <head>
     <meta charset="UTF-8" />
     <title>Electron</title>
-    <!-- https://developer.mozilla.org/en-US/docs/Web/HTTP/CSP -->
+    <!--
+      https://developer.mozilla.org/en-US/docs/Web/HTTP/CSP
+
+      media-src 必须显式包含 blob:，否则 default-src 'self' 会拦掉
+      <audio> 加载 blob URL（player.ts 通过 IPC 读 WAV 文件 → Blob →
+      URL.createObjectURL → audio.src）。漏掉这一项会让录音 / 播放
+      在 audio 元素层报「Media load rejected by URL safety check」（code 4）
+    -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' blob:"
     />
   </head>
 
