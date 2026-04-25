@@ -102,13 +102,36 @@ function startAnalysis(audio: HTMLAudioElement, relativePath: string): void {
   currentAnalyser = analyser
 
   const buf = new Float32Array(analyser.fftSize)
+  // currentTime 在 HTMLMediaElement 内不是每帧都更新——Chromium 实际以
+  // ~30Hz 或与硬件 callback 同步的粗粒度推进。RAF 60Hz 读会得到许多重复
+  // 值再突然跳一段，视觉就是「停一下、跳一段、停一下、跳一段」。
+  //
+  // 解法：在 currentTime 不变的帧用 wall-clock 外推「这一帧应该到哪里
+  // 了」，让游标平滑前进。currentTime 真正更新时把累积漂移清零，
+  // 不会偏离实际播放位置
+  let lastAudioMs = audio.currentTime * 1000
+  let lastWallMs = performance.now()
+  const MAX_DRIFT_MS = 50
+
   const tick = (): void => {
     if (!currentAnalyser) return
     currentAnalyser.getFloatTimeDomainData(buf)
     let sum = 0
     for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i]
     emitLevel(Math.sqrt(sum / buf.length))
-    emitPosition(relativePath, audio.currentTime * 1000)
+
+    const audioMs = audio.currentTime * 1000
+    const wallMs = performance.now()
+    if (audioMs !== lastAudioMs) {
+      lastAudioMs = audioMs
+      lastWallMs = wallMs
+    }
+    // audio.paused 时不外推（暂停期间 wall-clock 仍在走，但音频没动）。
+    // MAX_DRIFT_MS 上限：万一 currentTime 连续多帧不更新（比如缓冲 / 设备
+    // 切换），不让游标无限制跑到前面去
+    const drift = audio.paused ? 0 : Math.min(MAX_DRIFT_MS, wallMs - lastWallMs)
+    emitPosition(relativePath, lastAudioMs + drift)
+
     levelRafId = requestAnimationFrame(tick)
   }
   levelRafId = requestAnimationFrame(tick)
