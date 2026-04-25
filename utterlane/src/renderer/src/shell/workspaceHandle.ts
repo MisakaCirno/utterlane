@@ -77,12 +77,18 @@ export function applyDefaultLayout(api: DockviewApi): void {
     position: { referencePanel: segmentTimeline.id, direction: 'right' }
   })
 
-  api.addPanel({
+  const projectTimeline = api.addPanel({
     id: 'projectTimeline',
     component: 'projectTimeline',
     title: 'Project Timeline',
     position: { referencePanel: segmentTimeline.id, direction: 'below' }
   })
+
+  // 默认把两个 Timeline 的 tab 放到左侧——它们的工具栏内容横向密集，
+  // 顶部 tab 占用的横向空间在窄面板下不划算；侧边 tab 让纵向稍占一点
+  // 换出更多横向。用户可以拖回顶部 / 底部 / 右侧改变这个偏好
+  segmentTimeline.group?.api.setHeaderPosition('left')
+  projectTimeline.group?.api.setHeaderPosition('left')
 
   const inspector = api.addPanel({
     id: 'inspector',
