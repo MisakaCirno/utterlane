@@ -108,25 +108,48 @@ function RecentProjectItem({
   const { t } = useTranslation()
   // 从绝对路径中拆出目录名作为主标题，完整路径作为副标题
   const name = path.split(/[\\/]/).filter(Boolean).pop() ?? path
+
+  // 之前用嵌套 <button>（外层打开工程，内层 X 删除）。HTML 不允许 button
+  // 嵌套：浏览器会自动拆 DOM、a11y 树错乱、点击事件冒泡也无法用 button 的
+  // 默认语义阻断。改成外层 div role="button" + tabIndex + 键盘 handler，
+  // 删除按钮独立浮在右侧
+  const onActivate = (): void => {
+    void openProjectPath(path)
+  }
+  const onKeyDown = (e: React.KeyboardEvent): void => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault()
+      onActivate()
+    }
+  }
+  const onRemoveClick = (e: React.MouseEvent): void => {
+    e.stopPropagation()
+    onRemove()
+  }
+
   return (
-    <li className="group flex items-center">
-      <button
-        onClick={() => openProjectPath(path)}
+    <li className="group relative flex items-center">
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={onActivate}
+        onKeyDown={onKeyDown}
         className={cn(
-          'flex flex-1 flex-col items-start gap-0.5 rounded-sm px-2 py-1.5',
-          'hover:bg-bg-raised'
+          'flex flex-1 cursor-pointer flex-col items-start gap-0.5 rounded-sm px-2 py-1.5',
+          'pr-8 hover:bg-bg-raised focus:bg-bg-raised focus:outline-none'
         )}
       >
         <span className="text-xs text-fg">{name}</span>
         <span className="max-w-full truncate text-2xs text-fg-dim" title={path}>
           {path}
         </span>
-      </button>
+      </div>
       <button
-        onClick={onRemove}
+        onClick={onRemoveClick}
         className={cn(
-          'ml-1 rounded-sm p-1 text-fg-dim opacity-0 transition-opacity',
-          'hover:bg-bg-raised hover:text-rec group-hover:opacity-100'
+          'absolute right-1 top-1/2 -translate-y-1/2 rounded-sm p-1 text-fg-dim',
+          'opacity-0 transition-opacity hover:bg-bg-raised hover:text-rec',
+          'group-hover:opacity-100 focus:opacity-100'
         )}
         title={t('welcome.remove_recent')}
         aria-label={t('welcome.remove_recent')}

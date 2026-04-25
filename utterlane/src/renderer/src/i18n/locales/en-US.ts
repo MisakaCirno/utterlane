@@ -129,6 +129,7 @@ export const enUS: TranslationSchema = {
     take_set_current: 'Set as current',
     take_current: 'Current',
     take_delete_aria: 'Delete Take',
+    take_play_aria: 'Preview Take',
     level_label: 'Level'
   },
 

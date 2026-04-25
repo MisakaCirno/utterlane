@@ -19,6 +19,7 @@ import { formatDuration } from '@renderer/lib/format'
 import { Field } from '@renderer/components/Field'
 import { TextEditorWithCount } from '@renderer/components/TextEditorWithCount'
 import { subscribeLevel } from '@renderer/services/recorder'
+import * as player from '@renderer/services/player'
 import { DEFAULT_PREFERENCES } from '@shared/preferences'
 
 /**
@@ -298,7 +299,19 @@ export function InspectorView(): React.JSX.Element {
                 <div className="w-16 text-right font-mono text-2xs tabular-nums text-fg-muted">
                   {formatDuration(take.durationMs)}
                 </div>
-                <button className="rounded-sm p-1 text-fg-muted hover:bg-bg-raised hover:text-fg">
+                <button
+                  // 单 take 试听：直接走 player.playFile，不走 store 的
+                  // playCurrentSegment——后者只播 selectedTakeId，这里允许
+                  // 用户预览非当前 take 而不必先「设为当前」
+                  onClick={() => void player.playFile(take.filePath)}
+                  disabled={isMissing || playback !== 'idle'}
+                  aria-label={t('inspector.take_play_aria')}
+                  title={t('inspector.take_play_aria')}
+                  className={cn(
+                    'rounded-sm p-1 text-fg-muted hover:bg-bg-raised hover:text-fg',
+                    'disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-fg-muted'
+                  )}
+                >
                   <Play size={11} />
                 </button>
                 <button

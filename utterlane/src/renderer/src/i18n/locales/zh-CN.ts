@@ -131,6 +131,7 @@ export const zhCN = {
     take_set_current: '设为当前',
     take_current: '当前',
     take_delete_aria: '删除 Take',
+    take_play_aria: '试听 Take',
     level_label: '电平'
   },
 
