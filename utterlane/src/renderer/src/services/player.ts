@@ -16,6 +16,8 @@
  * 同一时刻只允许一个播放会话；新的 play 请求会先停掉旧的。
  */
 
+import { devLog } from '@renderer/lib/devLog'
+
 type LevelListener = (level: number) => void
 
 /**
@@ -43,7 +45,7 @@ async function loadBlobUrl(relativePath: string): Promise<string> {
   const buffer = await window.api.project.readTakeFile(relativePath)
   // 诊断：buffer 长度是否符合预期。3 秒 48kHz mono 16-bit ≈ 288KB；
   // 如果显示几百字节甚至 0，说明 IPC / 文件读取有问题
-  console.log(`[player] readTakeFile ${relativePath} → ${buffer.byteLength} bytes`)
+  devLog(`[player] readTakeFile ${relativePath} → ${buffer.byteLength} bytes`)
   const blob = new Blob([buffer], { type: 'audio/wav' })
   return URL.createObjectURL(blob)
 }
@@ -71,7 +73,9 @@ function startAnalysis(audio: HTMLAudioElement, relativePath: string): void {
   // 后面 audio 经 MediaElementSource 的数据能走到 destination
   if (ctx.state === 'suspended') {
     void ctx.resume().catch((err) => {
-      console.error('[player] AudioContext resume failed:', err)
+      // resume 失败不影响应用主流程（声音可能播不出来，但状态机继续走），
+      // 只是诊断信息——dev 模式下打印
+      devLog('[player] AudioContext resume failed:', err)
     })
   }
   const source = ctx.createMediaElementSource(audio)
@@ -138,7 +142,7 @@ export function stop(): void {
  * 不区分「是否被打断」——调用方通过 stop() 之后的状态自己感知。
  */
 export async function playFile(relativePath: string): Promise<void> {
-  console.log(`[player] playFile START ${relativePath}`)
+  devLog(`[player] playFile START ${relativePath}`)
   stop()
   sequenceAborted = false
 
@@ -146,7 +150,7 @@ export async function playFile(relativePath: string): Promise<void> {
   // 窄口竞态守卫：用户在 IPC 读文件期间又点了 stop，这里直接丢弃本次播放
   if (sequenceAborted) {
     URL.revokeObjectURL(url)
-    console.log(`[player] aborted before play() ${relativePath}`)
+    devLog(`[player] aborted before play() ${relativePath}`)
     return
   }
   const audio = new Audio(url)
@@ -160,7 +164,7 @@ export async function playFile(relativePath: string): Promise<void> {
   // 诊断：duration 何时拿到、是不是 NaN / 0。正常情况下 play() 之前不一定
   // 有 duration（metadata 可能还没加载），但 loadedmetadata 触发后必有
   audio.addEventListener('loadedmetadata', () => {
-    console.log(`[player] loadedmetadata ${relativePath} duration=${audio.duration}s`)
+    devLog(`[player] loadedmetadata ${relativePath} duration=${audio.duration}s`)
   })
 
   return new Promise<void>((resolve) => {
@@ -172,6 +176,10 @@ export async function playFile(relativePath: string): Promise<void> {
     const onEnded = (): void => done('ended')
     const onError = (): void => {
       const err = audio.error
+      // 用 console.error 而不是 devError——audio 真正出错（解码失败 /
+      // CSP 拦截 / 文件损坏等）需要在生产环境也留痕，方便用户报 bug
+      // 时能附上日志（electron-log 会把 console.error 转发到 main 的
+      // 日志文件）
       console.error(
         `[player] audio element error for ${relativePath}: code=${err?.code} message=${err?.message ?? '(none)'}`
       )
@@ -182,7 +190,7 @@ export async function playFile(relativePath: string): Promise<void> {
       resolved = true
       audio.removeEventListener('ended', onEnded)
       audio.removeEventListener('error', onError)
-      console.log(
+      devLog(
         `[player] done(${reason}) ${relativePath} currentTime=${audio.currentTime}s duration=${audio.duration}s`
       )
       // 只有当前这个 audio 还是活跃会话时才清理——
@@ -194,8 +202,10 @@ export async function playFile(relativePath: string): Promise<void> {
     audio.addEventListener('error', onError)
     void audio
       .play()
-      .then(() => console.log(`[player] play() resolved ${relativePath}`))
+      .then(() => devLog(`[player] play() resolved ${relativePath}`))
       .catch((err) => {
+        // play() 真被拒（NotAllowedError / NotSupportedError 等）也要在
+        // 生产留痕——同 audio error 的理由
         console.error(`[player] play() rejected for ${relativePath}:`, err)
         done('play-reject')
       })

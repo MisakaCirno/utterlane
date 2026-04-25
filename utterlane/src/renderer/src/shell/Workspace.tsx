@@ -10,6 +10,7 @@ import { DEFAULT_PREFERENCES } from '@shared/preferences'
 import { getThemeByKey } from './themes'
 import { applyDefaultLayout, setWorkspaceApi } from './workspaceHandle'
 import { DockTab } from './DockTab'
+import { devWarn } from '@renderer/lib/devLog'
 
 const components: Record<string, React.FunctionComponent<IDockviewPanelProps>> = {
   segments: () => <SegmentsView />,
@@ -65,7 +66,9 @@ function onWorkspaceReady(event: DockviewReadyEvent): void {
     try {
       api.fromJSON(saved as never)
     } catch (err) {
-      console.warn('[workspace] fromJSON failed, falling back to default layout:', err)
+      // 持久化布局解析失败：app 会回落到默认布局继续工作，属于诊断信息
+      // 而非用户可见错误——只在 dev 模式下打印
+      devWarn('[workspace] fromJSON failed, falling back to default layout:', err)
       api.clear()
       applyDefaultLayout(api)
     }
