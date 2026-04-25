@@ -19,9 +19,17 @@ import { TextEditorWithCount } from '@renderer/components/TextEditorWithCount'
 import { ZoomSlider } from '@renderer/components/ZoomSlider'
 import { DEFAULT_PREFERENCES } from '@shared/preferences'
 
-/** 横向缩放档位上下限。1 = 自适应铺满宽度；超过 1 = 内容比可视区宽 */
+/**
+ * 横向缩放档位上下限。1 = 自适应铺满宽度；超过 1 = 内容比可视区宽。
+ *
+ * 上限定 8 是为了避开 Chromium 的 canvas 尺寸限制（单轴 32767px / 总像素
+ * ~268MB）。波形 canvas 宽度 = innerWidth × dpr = (viewport × zoomH) × dpr。
+ * 4K 显示器（≈3840 viewport）+ 高 DPR + zoomH 取太大时会越界，触发静默
+ * 失败 / 渲染卡顿。8x 在常见分辨率下都安全，且对 trim 微调精度已经够用
+ * （1 秒在 ~12000 像素里展开成 1500px，10ms 大约 15px）
+ */
 const ZOOM_H_MIN = 1
-const ZOOM_H_MAX = 32
+const ZOOM_H_MAX = 8
 /** 纵向缩放档位上下限。1 = 默认振幅；< 1 压低、> 1 拉高 */
 const ZOOM_V_MIN = 0.25
 const ZOOM_V_MAX = 8
@@ -358,9 +366,14 @@ export function SegmentTimelineView(): React.JSX.Element {
 
   // 缩放档位走 editorStore（持久化到 workspace.json）。两个轴独立：zoomH
   // 影响波形横向密度 + trim 拖拽精度，zoomV 影响振幅高度——典型用法是
-  // 「先 zoomH 定位起 / 终点，再 zoomV 看振幅细节」这种正交操作
-  const zoomH = useEditorStore((s) => s.waveformZoomH)
-  const zoomV = useEditorStore((s) => s.waveformZoomV)
+  // 「先 zoomH 定位起 / 终点，再 zoomV 看振幅细节」这种正交操作。
+  //
+  // 读取时即夹一遍：以前版本的 ZOOM_H_MAX 是 32，可能在 workspace.json
+  // 里残留 >8 的值——直接拿去算 innerWidth 会触碰 canvas 尺寸限制；夹住
+  // 即可在不改持久化数据的前提下恢复正常渲染（用户下次拖 slider 时
+  // 自然把存的值也修正）
+  const zoomH = useEditorStore((s) => clampZoomH(s.waveformZoomH))
+  const zoomV = useEditorStore((s) => clampZoomV(s.waveformZoomV))
   const setWaveformZoom = useEditorStore((s) => s.setWaveformZoom)
 
   // 滚轮策略，与 ProjectTimeline 同款：

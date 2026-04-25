@@ -33,6 +33,7 @@ import { formatDuration } from '@renderer/lib/format'
 import { subscribePosition } from '@renderer/services/player'
 import { takeEffectiveDurationMs, takeEffectiveRange } from '@shared/project'
 import { ZoomSlider } from '@renderer/components/ZoomSlider'
+import { TimeRuler } from '@renderer/components/TimeRuler'
 
 /**
  * ProjectTimelineView — 整个项目的横向时间轴。
@@ -495,11 +496,16 @@ function TimelineContent({ pxPerMs }: { pxPerMs: number }): React.JSX.Element {
   //
   // 顺手建 filePath → { segStart, trimStartMs } 的反查表给播放游标用：
   // subscribePosition 给的是文件相对位置（含 trim 起点），需要减掉
-  // trimStart 后再加 segStart 才对齐工程时间轴
-  const { startMsById, totalMs, startMsByFilePath } = useMemo(() => {
+  // trimStart 后再加 segStart 才对齐工程时间轴。
+  //
+  // 第三个产物 contentWidthPx 是「视觉上时间轴有多宽」（含未录段
+  // placeholder 与间隔），ruler / 滚动容器都按它定宽——只用 totalMs * pxPerMs
+  // 会让 ruler 在未录段后突然停掉，比真实视觉内容短一截
+  const { startMsById, startMsByFilePath, contentWidthPx } = useMemo(() => {
     const idMap = new Map<string, number>()
     const pathMap = new Map<string, { segStart: number; trimStartMs: number }>()
     let acc = 0
+    let layoutPx = 32 // p-2 内边距 + 末尾缓冲
     for (const id of order) {
       idMap.set(id, acc)
       const seg = segmentsById[id]
@@ -507,12 +513,27 @@ function TimelineContent({ pxPerMs }: { pxPerMs: number }): React.JSX.Element {
       if (take) {
         const range = takeEffectiveRange(take)
         pathMap.set(take.filePath, { segStart: acc, trimStartMs: range.startMs })
-        acc += range.endMs - range.startMs
+        const dur = range.endMs - range.startMs
+        acc += dur
+        layoutPx += dur * pxPerMs
+      } else {
+        // 未录段视觉宽度与 TimelineClip 内部 placeholderWidth 公式同步——
+        // 两边脱钩会让 ruler 与 clip 边界对不齐
+        layoutPx += Math.max(
+          40,
+          UNRECORDED_CLIP_WIDTH_AT_1X * Math.min(1, pxPerMs / BASE_PX_PER_MS)
+        )
       }
-      acc += seg?.gapAfter?.ms ?? 0
+      const gapMs = seg?.gapAfter?.ms ?? 0
+      acc += gapMs
+      layoutPx += gapMs * pxPerMs
     }
-    return { startMsById: idMap, totalMs: acc, startMsByFilePath: pathMap }
-  }, [order, segmentsById])
+    return {
+      startMsById: idMap,
+      startMsByFilePath: pathMap,
+      contentWidthPx: Math.ceil(layoutPx)
+    }
+  }, [order, segmentsById, pxPerMs])
 
   // 游标命令式更新：避开 React 重渲染。
   //
@@ -644,10 +665,6 @@ function TimelineContent({ pxPerMs }: { pxPerMs: number }): React.JSX.Element {
     return () => el.removeEventListener('wheel', onWheel)
   }, [timelineZoom, setTimelineScroll])
 
-  // 内容总宽度：所有 clip 的占位宽度 + 间隔。pxPerMs 用浮点，做一次 ceil
-  // 让滚动条容纳尾部那一两个像素的舍入误差
-  const contentWidthPx = Math.ceil(totalMs * pxPerMs) + 32 // 32 = 内边距与缓冲
-
   // 用户点击 ruler → 把游标设到点击位置。仅 idle 时响应：播放期间游标
   // 跟随实际进度，点击设位置语义会和正在播的 take 起冲突；要 seek 先停
   const onRulerClick = (e: React.MouseEvent<HTMLDivElement>): void => {
@@ -674,6 +691,9 @@ function TimelineContent({ pxPerMs }: { pxPerMs: number }): React.JSX.Element {
             contentWidthPx={contentWidthPx}
             onClick={onRulerClick}
             clickable={playback === 'idle'}
+            // sticky 让 ruler 在垂直方向（万一有的话）粘顶；当前竖直没滚动
+            // 也不影响。z-30 高于游标 / clip，让数字盖在它们上方依然可读
+            className="sticky top-0 z-30"
           />
           <div className="relative h-24 p-2">
             <DndContext
@@ -724,103 +744,6 @@ function TimelineContent({ pxPerMs }: { pxPerMs: number }): React.JSX.Element {
       </div>
     </div>
   )
-}
-
-/**
- * 时间标尺。tick 间距按当前 pxPerMs 自适应：
- *   - 主 tick 间距尽量保持在 80~160 px 之间
- *   - 候选间距集见 TICK_CANDIDATES_MS
- *
- * === 虚拟化 ===
- *
- * 旧实现硬编码 3000 个 tick div 一次性渲染——zoom 变化 / 任何重渲染都是
- * 3000 次 DOM diff，且大多数是不可见的浪费。改成「只渲染当前 scrollLeft +
- * viewportWidth 覆盖到的那段」。tickPx = tickIntervalMs * pxPerMs 用作
- * 单 tick 宽度，按 scrollLeft 算 startTickIndex / endTickIndex，再用绝对
- * 定位让标尺紧贴可见区。content scrollLeft 变化时 ruler 自然跟随。
- */
-function TimeRuler({
-  pxPerMs,
-  scrollLeft,
-  viewportWidth,
-  contentWidthPx,
-  onClick,
-  clickable
-}: {
-  pxPerMs: number
-  scrollLeft: number
-  viewportWidth: number
-  contentWidthPx: number
-  onClick: (e: React.MouseEvent<HTMLDivElement>) => void
-  clickable: boolean
-}): React.JSX.Element {
-  const tickIntervalMs = pickTickInterval(pxPerMs)
-  const tickPx = tickIntervalMs * pxPerMs
-  // viewport 还没测到时退化为渲染前 24 个 tick（约一屏内的合理量）
-  const effectiveWidth = viewportWidth > 0 ? viewportWidth : 24 * tickPx
-  // 多渲染左右各 4 个 tick 作为缓冲，避免快速滚动时露出空白
-  const overscan = 4
-  const startTick = Math.max(0, Math.floor(scrollLeft / tickPx) - overscan)
-  // 上限是 contentWidthPx 对应的最大 tick 数——超过这个边界的 tick 即便
-  // 渲染了也是空白格，更关键是它会撑大父级的 scrollWidth（即便父级显式
-  // 设了 width，绝对定位子元素仍计入 scrollWidth）。让 scrollerRef 的
-  // 滚动条尺寸保持稳定，不随滚动位置抖动
-  const maxTick = Math.ceil(contentWidthPx / tickPx)
-  const endTick = Math.min(maxTick, Math.ceil((scrollLeft + effectiveWidth) / tickPx) + overscan)
-
-  const ticks: React.JSX.Element[] = []
-  for (let i = startTick; i < endTick; i++) {
-    ticks.push(
-      <div
-        key={i}
-        style={{ position: 'absolute', left: i * tickPx, width: tickPx }}
-        className="flex h-full items-end border-r border-border-subtle pb-0.5 pl-1 font-mono text-[9px] text-fg-dim"
-      >
-        {formatRulerLabel(i * tickIntervalMs)}
-      </div>
-    )
-  }
-
-  // ruler 自身处理点击 → 把屏幕坐标转换成时间轴 ms 的工作放在父级
-  // onRulerClick 里。这里只负责挂事件 + 视觉上提示「可点」（idle 时
-  // 用 cursor-pointer，播放中改成 default 暗示不接受 seek）
-  return (
-    <div
-      onClick={onClick}
-      className={cn(
-        'sticky top-0 z-30 h-6 border-b border-border bg-bg-deep select-none',
-        clickable ? 'cursor-pointer' : 'cursor-default'
-      )}
-      style={{ width: contentWidthPx }}
-    >
-      {/* overflow-hidden 兜底：即便 endTick 算多了一两个 tick 越界，也
-          不会让绝对定位子元素影响外层 scrollerRef 的 scrollWidth */}
-      <div className="relative h-full overflow-hidden" style={{ width: contentWidthPx }}>
-        {ticks}
-      </div>
-    </div>
-  )
-}
-
-/** ruler 用的 mm:ss 标签，尽量短，不显示毫秒 */
-function formatRulerLabel(ms: number): string {
-  const totalSec = Math.floor(ms / 1000)
-  const m = Math.floor(totalSec / 60)
-  const s = totalSec % 60
-  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
-}
-
-const TICK_CANDIDATES_MS = [
-  50, 100, 200, 250, 500, 1000, 2000, 5000, 10000, 15000, 30000, 60000, 120000, 300000
-]
-
-function pickTickInterval(pxPerMs: number): number {
-  // 期望主 tick 落在 80~160 px。从最小开始挑第一个 ≥ 80px 的；如果都不够
-  // 大就退到最大档位
-  for (const ms of TICK_CANDIDATES_MS) {
-    if (ms * pxPerMs >= 80) return ms
-  }
-  return TICK_CANDIDATES_MS[TICK_CANDIDATES_MS.length - 1]
 }
 
 export function ProjectTimelineView(): React.JSX.Element {

@@ -3,6 +3,10 @@ import { useTranslation } from 'react-i18next'
 import { cn } from '@renderer/lib/cn'
 import { computePeaks, loadSamples } from '@renderer/services/waveform'
 import { subscribePosition } from '@renderer/services/player'
+import { TimeRuler } from '@renderer/components/TimeRuler'
+
+/** 顶部时间标尺高度。drawing useEffect 用它从 size.h 里扣掉，得出 canvas 实际高度 */
+const RULER_H = 20
 
 /**
  * 当前选中 Take 的波形显示。
@@ -92,6 +96,8 @@ export function WaveformView({
   const [entry, setEntry] = useState<CacheEntry | null>(null)
   // 容器尺寸——影响波形 / trim 手柄定位
   const [size, setSize] = useState<{ w: number; h: number }>({ w: 0, h: 0 })
+  // 横向滚动偏移：传给 TimeRuler 用于 tick 虚拟化（zoomH=1 时一直是 0）
+  const [scrollLeft, setScrollLeft] = useState(0)
 
   useEffect(() => {
     if (!filePath) return
@@ -116,8 +122,10 @@ export function WaveformView({
   const errorMessage = matches && 'errorMessage' in result ? result.errorMessage : null
   const loading = filePath !== null && !matches
 
-  // 总时长（毫秒），用于把 playheadMs 映射到 x 坐标
-  const totalMs = samples && entry ? (samples.length / entry.sampleRate) * 1000 : 0
+  // 总时长（毫秒），用于把 playheadMs 映射到 x 坐标。
+  // durationMs（来自 Take 元数据）在 samples 解码完成前就可用，可以提前
+  // 让 ruler 渲染——纯显示用 ruler 拿不到真实采样精度也没关系
+  const totalMs = samples && entry ? (samples.length / entry.sampleRate) * 1000 : (durationMs ?? 0)
 
   // === 缩放后的内层宽度 ===
   // size.w 是外层 scroll container 的可见宽度（viewport）。inner 内容
@@ -165,21 +173,28 @@ export function WaveformView({
     return () => ro.disconnect()
   }, [])
 
-  // 波形层：依赖 samples + innerWidth + size.h + zoomV。innerWidth 已经
+  // 是否显示 ruler：必须有有效时长 + 已知 inner 宽度。两者缺一就回退到
+  // 「波形铺满容器」的旧布局（避免 ruler 渲染了但内部一片空白）
+  const showRuler = totalMs > 0 && innerWidth > 0
+  // 波形 canvas 的实际可用高度：ruler 显示时从容器扣掉 ruler 自己那
+  // 部分，否则就是整个容器高度
+  const waveH = showRuler ? Math.max(0, size.h - RULER_H) : size.h
+
+  // 波形层：依赖 samples + innerWidth + waveH + zoomV。innerWidth 已经
   // 包含 zoomH 因素；zoomV 影响绘制时的振幅高度
   useEffect(() => {
     const canvas = waveCanvasRef.current
-    if (!canvas || innerWidth === 0 || size.h === 0) return
+    if (!canvas || innerWidth === 0 || waveH === 0) return
     const dpr = window.devicePixelRatio || 1
     canvas.width = Math.floor(innerWidth * dpr)
-    canvas.height = Math.floor(size.h * dpr)
+    canvas.height = Math.floor(waveH * dpr)
     canvas.style.width = `${innerWidth}px`
-    canvas.style.height = `${size.h}px`
+    canvas.style.height = `${waveH}px`
 
     const ctx = canvas.getContext('2d')
     if (!ctx) return
     ctx.scale(dpr, dpr)
-    ctx.clearRect(0, 0, innerWidth, size.h)
+    ctx.clearRect(0, 0, innerWidth, waveH)
 
     if (!samples) return
 
@@ -187,8 +202,8 @@ export function WaveformView({
     // 重绘时间跟 buckets 成线性，但 zoomH 变化不频繁，可接受
     const buckets = Math.max(1, Math.floor(innerWidth))
     const peaks = computePeaks(samples, buckets)
-    const midY = size.h / 2
-    // zoomV 缩放振幅。zoomV > 1 时波形可能超出 [0, size.h]，被外层
+    const midY = waveH / 2
+    // zoomV 缩放振幅。zoomV > 1 时波形可能超出 [0, waveH]，被外层
     // overflow-y-hidden 裁——这是预期行为（用户拉高纵向缩放就是要看
     // 低音量细节，不在乎高音量峰值视觉上"出框"）
     const maxHalfHeight = (midY - 4) * zoomV
@@ -214,7 +229,7 @@ export function WaveformView({
     ctx.moveTo(0, midY)
     ctx.lineTo(innerWidth, midY)
     ctx.stroke()
-  }, [samples, innerWidth, size.h, zoomV])
+  }, [samples, innerWidth, waveH, zoomV])
 
   // ========================================================================
   // Trim 编辑：手柄 + 遮罩
@@ -287,16 +302,22 @@ export function WaveformView({
     return () => el.removeEventListener('wheel', handler)
   }, [onWheel])
 
+  // ruler 用 px/ms = innerWidth / totalMs（仅在 showRuler 时取值才有意义）。
+  // 与 player.ts 的时间单位（毫秒）保持一致
+  const rulerPxPerMs = showRuler ? innerWidth / totalMs : 0
+
   return (
     <div
       ref={containerRef}
+      onScroll={(e) => setScrollLeft(e.currentTarget.scrollLeft)}
       className={cn(
         // overflow-x-auto 让 zoomH > 1 时出现横向滚动条；overflow-y-hidden
         // 防止 zoomV > 1 时波形纵向溢出导致的纵向滚动（纵向方向用户没法
         // 滚动也无意义）
         'relative flex-1 overflow-x-auto overflow-y-hidden bg-bg-deep',
-        // 最小高度保证切空段时布局不坍塌
-        'min-h-[80px]'
+        // 最小高度保证切空段时布局不坍塌；提到 100px 给 ruler + 波形
+        // 各自留出可用空间
+        'min-h-[100px]'
       )}
     >
       {!filePath && <Placeholder>{t('timeline.waveform_unrecorded')}</Placeholder>}
@@ -305,61 +326,75 @@ export function WaveformView({
         <Placeholder>{t('timeline.waveform_error', { message: errorMessage })}</Placeholder>
       )}
       {filePath && !errorMessage && (
-        // inner 容器：宽度 = innerWidth（=viewport×zoomH），absolute 子元素
-        // 都以这个 inner 为定位基准。container 是 scroll outer，inner 超出
-        // viewport 部分由 outer 的 overflow-x-auto 接管成横向滚动条
-        <div className="relative h-full" style={{ width: innerWidth || '100%' }}>
-          <canvas ref={waveCanvasRef} className="absolute inset-y-0 left-0" />
-          {/* 节选 trim 遮罩：手柄外的区域用半透明黑覆盖，视觉上提示
-              「这段不会被播放 / 导出」。pointer-events-none 不挡 click /
-              hover */}
-          {showTrimUi && startX > 0 && (
-            <div
-              aria-hidden
-              className="pointer-events-none absolute top-0 bottom-0 left-0 bg-bg-deep/70"
-              style={{ width: startX }}
+        // inner 容器：flex column 把 ruler 与波形区垂直排开。宽度 =
+        // innerWidth（=viewport×zoomH），absolute 子元素都以波形区为
+        // 定位基准。container 是 scroll outer，inner 超出 viewport 部分
+        // 由 outer 的 overflow-x-auto 接管成横向滚动条
+        <div className="flex h-full flex-col" style={{ width: innerWidth || '100%' }}>
+          {showRuler && (
+            <TimeRuler
+              pxPerMs={rulerPxPerMs}
+              contentWidthPx={innerWidth}
+              scrollLeft={scrollLeft}
+              viewportWidth={size.w}
+              height={RULER_H}
             />
           )}
-          {showTrimUi && endX < innerWidth && (
+          {/* 波形区：absolute 子元素的定位基准，flex-1 吃掉 ruler 之外的
+              所有高度 */}
+          <div className="relative flex-1">
+            <canvas ref={waveCanvasRef} className="absolute top-0 left-0" />
+            {/* 节选 trim 遮罩：手柄外的区域用半透明黑覆盖，视觉上提示
+                「这段不会被播放 / 导出」。pointer-events-none 不挡 click /
+                hover */}
+            {showTrimUi && startX > 0 && (
+              <div
+                aria-hidden
+                className="pointer-events-none absolute top-0 bottom-0 left-0 bg-bg-deep/70"
+                style={{ width: startX }}
+              />
+            )}
+            {showTrimUi && endX < innerWidth && (
+              <div
+                aria-hidden
+                className="pointer-events-none absolute top-0 bottom-0 bg-bg-deep/70"
+                style={{ left: endX, width: innerWidth - endX }}
+              />
+            )}
+            {/* 播放游标：1px 红色竖线。位置由命令式 useEffect 写
+                transform，不走 React 重渲染。z 叠在波形之上、trim 手柄
+                之下——播放时游标在「裁掉段」上也能看见进度。
+                初始 display: none，subscribePosition 命中本 take 时才显示 */}
             <div
+              ref={playheadRef}
               aria-hidden
-              className="pointer-events-none absolute top-0 bottom-0 bg-bg-deep/70"
-              style={{ left: endX, width: innerWidth - endX }}
+              className="pointer-events-none absolute top-0 bottom-0 left-0 z-10 w-px bg-rec/85 will-change-transform"
+              style={{ display: 'none' }}
             />
-          )}
-          {/* 播放游标：1px 红色竖线。位置由命令式 useEffect 写
-              transform，不走 React 重渲染。z 叠在波形之上、trim 手柄
-              之下——播放时游标在「裁掉段」上也能看见进度。
-              初始 display: none，subscribePosition 命中本 take 时才显示 */}
-          <div
-            ref={playheadRef}
-            aria-hidden
-            className="pointer-events-none absolute top-0 bottom-0 left-0 z-10 w-px bg-rec/85 will-change-transform"
-            style={{ display: 'none' }}
-          />
-          {/* trim 手柄：只在传入 onTrimChange 且 innerWidth > 0 时渲染 */}
-          {showTrimUi && (
-            <>
-              <TrimHandle
-                side="start"
-                x={startX}
-                title={t('timeline.trim_start_handle')}
-                onPointerDown={(e) => startDrag('start', e)}
-                onPointerMove={onDragMove}
-                onPointerUp={endDrag}
-                onPointerCancel={endDrag}
-              />
-              <TrimHandle
-                side="end"
-                x={endX}
-                title={t('timeline.trim_end_handle')}
-                onPointerDown={(e) => startDrag('end', e)}
-                onPointerMove={onDragMove}
-                onPointerUp={endDrag}
-                onPointerCancel={endDrag}
-              />
-            </>
-          )}
+            {/* trim 手柄：只在传入 onTrimChange 且 innerWidth > 0 时渲染 */}
+            {showTrimUi && (
+              <>
+                <TrimHandle
+                  side="start"
+                  x={startX}
+                  title={t('timeline.trim_start_handle')}
+                  onPointerDown={(e) => startDrag('start', e)}
+                  onPointerMove={onDragMove}
+                  onPointerUp={endDrag}
+                  onPointerCancel={endDrag}
+                />
+                <TrimHandle
+                  side="end"
+                  x={endX}
+                  title={t('timeline.trim_end_handle')}
+                  onPointerDown={(e) => startDrag('end', e)}
+                  onPointerMove={onDragMove}
+                  onPointerUp={endDrag}
+                  onPointerCancel={endDrag}
+                />
+              </>
+            )}
+          </div>
         </div>
       )}
     </div>
