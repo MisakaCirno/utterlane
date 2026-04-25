@@ -6,6 +6,7 @@ import { preferencesStore, registerPreferencesIpc } from './preferences'
 import { projectSession, registerProjectIpc } from './project-storage'
 import { registerRecordingIpc } from './recording'
 import { registerExportIpc } from './export'
+import { registerAudioAuditIpc } from './audio-audit'
 import { initLogger } from './logger'
 import { registerLogsIpc } from './logger/ipc'
 import { registerAppInfoIpc } from './app-info/ipc'
@@ -129,6 +130,7 @@ app.whenReady().then(async () => {
   registerProjectIpc()
   registerRecordingIpc()
   registerExportIpc()
+  registerAudioAuditIpc()
   registerLogsIpc()
   registerAppInfoIpc()
 

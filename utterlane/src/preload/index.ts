@@ -6,6 +6,12 @@ import type { WriteTakeResult } from '@shared/recording'
 import type { AppInfo } from '@shared/appInfo'
 import type { CrashInfo } from '@shared/crash'
 import type { ExportAudioOptions } from '@shared/export'
+import type {
+  AuditScanResult,
+  DeleteOrphanResult,
+  RemapTakeResult,
+  SaveOrphanAsTakeResult
+} from '@shared/audio-audit'
 
 // IPC 通道名需要和 main 侧保持一致。
 // 这里复制字面量而不是 import 主进程的常量，是因为 preload 打包时
@@ -27,6 +33,11 @@ const RECORDING_WRITE_TAKE = 'recording:write-take'
 
 const EXPORT_AUDIO_WAV = 'export:audio-wav'
 const EXPORT_SUBTITLES_SRT = 'export:subtitles-srt'
+
+const AUDIO_AUDIT_SCAN = 'audio-audit:scan'
+const AUDIO_AUDIT_REMAP = 'audio-audit:remap'
+const AUDIO_AUDIT_SAVE_ORPHAN_AS_TAKE = 'audio-audit:save-orphan-as-take'
+const AUDIO_AUDIT_DELETE_ORPHAN = 'audio-audit:delete-orphan'
 
 const LOGS_OPEN_FOLDER = 'logs:open-folder'
 
@@ -143,6 +154,33 @@ const api = {
       ipcRenderer.invoke(EXPORT_AUDIO_WAV, options),
     /** 弹保存对话框，按 order + selectedTakeId 生成 SRT 字幕 */
     subtitlesSrt: (): Promise<ExportResult> => ipcRenderer.invoke(EXPORT_SUBTITLES_SRT)
+  },
+
+  audioAudit: {
+    /** 扫描当前工程的缺失 Take 与孤儿 WAV。无活动工程时返回空结果 */
+    scan: (): Promise<AuditScanResult> => ipcRenderer.invoke(AUDIO_AUDIT_SCAN),
+
+    /**
+     * 缺失 Take 修复：弹文件选择对话框让用户挑一个 WAV，复制到该 Take 的
+     * 期望路径并解码新时长。renderer 拿到结果后更新 Take.durationMs
+     * 并把 takeId 从 missingTakeIds 集合里移掉
+     */
+    remap: (segmentId: string, takeId: string): Promise<RemapTakeResult> =>
+      ipcRenderer.invoke(AUDIO_AUDIT_REMAP, { segmentId, takeId }),
+
+    /**
+     * 把孤儿 WAV 转入指定 Segment 名下作为新 Take。main 侧 rename 后返回
+     * 新 takeId / 路径 / 时长，renderer 据此往 segmentsById 追加新 Take
+     */
+    saveOrphanAsTake: (
+      orphanRelativePath: string,
+      segmentId: string
+    ): Promise<SaveOrphanAsTakeResult> =>
+      ipcRenderer.invoke(AUDIO_AUDIT_SAVE_ORPHAN_AS_TAKE, { orphanRelativePath, segmentId }),
+
+    /** 把孤儿 WAV 移到操作系统回收站（不直接 unlink） */
+    deleteOrphan: (relativePath: string): Promise<DeleteOrphanResult> =>
+      ipcRenderer.invoke(AUDIO_AUDIT_DELETE_ORPHAN, relativePath)
   },
 
   logs: {

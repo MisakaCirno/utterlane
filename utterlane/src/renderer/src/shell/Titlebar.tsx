@@ -38,6 +38,7 @@ function buildMenus(
   openImportScript: () => void,
   openPreferences: () => void,
   openAbout: () => void,
+  openAudioAudit: () => void,
   history: HistoryMenuCtx
 ): MenuDef[] {
   // undo / redo 动态标签：可用时显示「撤销：编辑文案」让用户知道会撤销什么；
@@ -88,6 +89,13 @@ function buildMenus(
               onSelect: exportSubtitlesSrt
             }
           ]
+        },
+        { kind: 'separator' },
+        {
+          kind: 'item',
+          label: t('menu.file_audit'),
+          disabled: !hasProject,
+          onSelect: openAudioAudit
         },
         { kind: 'separator' },
         {
@@ -279,6 +287,7 @@ export function Titlebar(): React.JSX.Element {
   const openImportScript = useDialogStore((s) => s.openImportScript)
   const openPreferences = useDialogStore((s) => s.openPreferences)
   const openAbout = useDialogStore((s) => s.openAbout)
+  const openAudioAudit = useDialogStore((s) => s.openAudioAudit)
 
   // 订阅历史栈长度与栈顶 labelKey：两者变化时菜单应重新计算。
   // 只取我们需要的标量 / 字符串，避免订阅整条 entry 对象引发不必要的重渲染
@@ -300,7 +309,16 @@ export function Titlebar(): React.JSX.Element {
 
   // 依赖 i18n.language 而不是 t：t 引用在语言切换时也会变，但 language 更明确
   const menus = useMemo(
-    () => buildMenus(t, hasProject, openImportScript, openPreferences, openAbout, historyCtx),
+    () =>
+      buildMenus(
+        t,
+        hasProject,
+        openImportScript,
+        openPreferences,
+        openAbout,
+        openAudioAudit,
+        historyCtx
+      ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [
       t,
@@ -309,6 +327,7 @@ export function Titlebar(): React.JSX.Element {
       openImportScript,
       openPreferences,
       openAbout,
+      openAudioAudit,
       historyCtx.canUndo,
       historyCtx.canRedo,
       historyCtx.undoLabelKey,

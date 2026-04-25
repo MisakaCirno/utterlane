@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Play, Square, Mic, RotateCcw, Trash2, Check, Circle } from 'lucide-react'
+import { Play, Square, Mic, RotateCcw, Trash2, Check, Circle, AlertTriangle } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { cn } from '@renderer/lib/cn'
 import { useEditorStore } from '@renderer/store/editorStore'
@@ -104,6 +104,7 @@ export function InspectorView(): React.JSX.Element {
   const deleteTake = useEditorStore((s) => s.deleteTake)
   const playback = useEditorStore((s) => s.playback)
   const recordingSegmentId = useEditorStore((s) => s.recordingSegmentId)
+  const missingTakeIds = useEditorStore((s) => s.missingTakeIds)
   const startRecording = useEditorStore((s) => s.startRecordingForSelected)
   const startRerecording = useEditorStore((s) => s.startRerecordingSelected)
   const stopRecording = useEditorStore((s) => s.stopRecordingAndSave)
@@ -228,6 +229,7 @@ export function InspectorView(): React.JSX.Element {
         ) : (
           segment.takes.map((take, i) => {
             const isCurrent = take.id === segment.selectedTakeId
+            const isMissing = missingTakeIds.has(take.id)
             return (
               <div
                 key={take.id}
@@ -244,6 +246,15 @@ export function InspectorView(): React.JSX.Element {
                   )}
                 </div>
                 <div className="flex-1 truncate">{t('inspector.take_item', { index: i + 1 })}</div>
+                {isMissing && (
+                  <div
+                    className="flex items-center gap-0.5 rounded-sm border border-rec/60 bg-rec/10 px-1 text-2xs text-rec"
+                    title={t('audit_dialog.inspector_missing_tooltip')}
+                  >
+                    <AlertTriangle size={9} />
+                    {t('audit_dialog.inspector_missing_badge')}
+                  </div>
+                )}
                 <div className="w-16 text-right font-mono text-2xs tabular-nums text-fg-muted">
                   {formatDuration(take.durationMs)}
                 </div>

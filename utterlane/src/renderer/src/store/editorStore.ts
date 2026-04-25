@@ -5,7 +5,7 @@ import {
   type SegmentsFile,
   type WorkspaceFile
 } from '@shared/project'
-import type { PlaybackMode, Project, Segment } from '@renderer/types/project'
+import type { PlaybackMode, Project, Segment, Take } from '@renderer/types/project'
 import * as recorder from '@renderer/services/recorder'
 import * as player from '@renderer/services/player'
 import { showError } from '@renderer/store/toastStore'
@@ -60,6 +60,16 @@ type EditorState = {
   recordingSegmentId: string | null
   recordingTakeId: string | null
 
+  /**
+   * 已知缺失文件的 Take ID 集合。在 applyBundle 之后由 audio-audit:scan 后台
+   * 填充，UI（Inspector / Segment 列表等）据此打缺失徽标。
+   *
+   * 维护策略：lazy。AudioAuditDialog 打开时会重扫并覆盖；remap 成功后从集合
+   * 里删除对应 takeId；其他 mutation 不维护此集合，标记可能短暂偏旧——
+   * 用户可以随时打开审计面板触发重扫修正。
+   */
+  missingTakeIds: ReadonlySet<string>
+
   // 生命周期
   applyBundle: (bundle: ProjectBundle) => void
   clear: () => void
@@ -86,6 +96,21 @@ type EditorState = {
   reorderSegments: (nextOrder: string[]) => void
   setSelectedTake: (segmentId: string, takeId: string) => void
   deleteTake: (segmentId: string, takeId: string) => void
+
+  // 音频文件审计
+  /** 用 audit 扫描结果覆盖 missingTakeIds，集合会被 UI 用作缺失徽标的依据 */
+  setMissingTakeIds: (takeIds: Iterable<string>) => void
+  /**
+   * 缺失 Take 修复成功后调用：把 Take.durationMs 同步成新文件的时长，
+   * 同时把 takeId 从 missingTakeIds 移除。filePath 不动——它由 takeId 决定，
+   * remap 把文件复制到了同一相对路径
+   */
+  applyRemapResult: (segmentId: string, takeId: string, durationMs: number) => void
+  /**
+   * 把孤儿 WAV 转为 Take 的反向操作：往指定 Segment 追加新 Take。
+   * 不进 undo 栈（修复性操作）
+   */
+  appendTakeFromOrphan: (segmentId: string, take: Take) => void
 
   // 录音
   startRecordingForSelected: () => Promise<void>
@@ -204,6 +229,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   saved: true,
   recordingSegmentId: null,
   recordingTakeId: null,
+  missingTakeIds: new Set<string>(),
 
   applyBundle: (bundle) => {
     // 切换工程必须清空 undo / redo 栈，否则新工程头一次按 Ctrl+Z 会把上个工程
@@ -223,7 +249,15 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       paused: false,
       saved: true,
       recordingSegmentId: null,
-      recordingTakeId: null
+      recordingTakeId: null,
+      missingTakeIds: new Set<string>()
+    })
+    // 后台扫一次缺失文件，不阻塞 UI。结果回填 missingTakeIds 让 Inspector 标徽
+    void window.api.audioAudit.scan().then((result) => {
+      // 期间用户可能已经关掉 / 切到别的工程；只在仍是同一工程时回填
+      const cur = useEditorStore.getState()
+      if (cur.projectPath !== bundle.path) return
+      cur.setMissingTakeIds(result.missing.map((m) => m.takeId))
     })
   },
 
@@ -249,8 +283,49 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       paused: false,
       saved: true,
       recordingSegmentId: null,
-      recordingTakeId: null
+      recordingTakeId: null,
+      missingTakeIds: new Set<string>()
     })
+  },
+
+  setMissingTakeIds: (takeIds) => set({ missingTakeIds: new Set(takeIds) }),
+
+  applyRemapResult: (segmentId, takeId, durationMs) => {
+    set((state) => {
+      const seg = state.segmentsById[segmentId]
+      if (!seg) return state
+      const idx = seg.takes.findIndex((t) => t.id === takeId)
+      if (idx < 0) return state
+      const nextTakes = seg.takes.slice()
+      nextTakes[idx] = { ...nextTakes[idx], durationMs }
+      // 从 missingTakeIds 移除：复制一份新 Set 以保持引用替换语义
+      const nextMissing = new Set(state.missingTakeIds)
+      nextMissing.delete(takeId)
+      return {
+        segmentsById: {
+          ...state.segmentsById,
+          [segmentId]: { ...seg, takes: nextTakes }
+        },
+        missingTakeIds: nextMissing,
+        ...markDirty()
+      }
+    })
+    scheduleSegmentsSave()
+  },
+
+  appendTakeFromOrphan: (segmentId, take) => {
+    set((state) => {
+      const seg = state.segmentsById[segmentId]
+      if (!seg) return state
+      return {
+        segmentsById: {
+          ...state.segmentsById,
+          [segmentId]: { ...seg, takes: [...seg.takes, take] }
+        },
+        ...markDirty()
+      }
+    })
+    scheduleSegmentsSave()
   },
 
   applyHistoryPatch: (patch) => {
