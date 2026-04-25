@@ -1,6 +1,5 @@
 import { BrowserWindow, dialog, ipcMain } from 'electron'
 import { promises as fs } from 'fs'
-import { isAbsolute, join, normalize, relative } from 'path'
 import {
   PROJECT_SCHEMA_VERSION,
   type Project,
@@ -9,7 +8,7 @@ import {
   type WorkspaceFile
 } from '@shared/project'
 import { projectSession, type OpenResult } from './session'
-import { projectPaths } from './paths'
+import { projectPaths, resolveProjectRelative } from './paths'
 
 /**
  * 集中定义的 IPC 通道名。preload 复制同名字符串，避免跨进程 import 耦合。
@@ -173,15 +172,7 @@ export function registerProjectIpc(): void {
     async (_e, relativePath: string): Promise<ArrayBuffer> => {
       const projectDir = projectSession.path
       if (!projectDir) throw new Error('没有活动工程')
-      if (isAbsolute(relativePath)) {
-        throw new Error('readTakeFile 只接受工程相对路径')
-      }
-      const absolute = normalize(join(projectDir, relativePath))
-      // path.relative 如果目标在 base 上层，结果会以 '..' 开头
-      const rel = relative(projectDir, absolute)
-      if (rel.startsWith('..') || isAbsolute(rel)) {
-        throw new Error('路径越界，拒绝读取')
-      }
+      const absolute = resolveProjectRelative(projectDir, relativePath)
       const buf = await fs.readFile(absolute)
       // Node 的 Buffer 底层是 ArrayBuffer 共享池；拷贝一份纯净 ArrayBuffer 避免 IPC 上的生命周期问题
       return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength)

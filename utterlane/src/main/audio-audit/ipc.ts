@@ -12,7 +12,7 @@ import type {
 } from '@shared/audio-audit'
 import { projectSession } from '../project-storage'
 import { loadSegmentsFile } from '../project-storage/io'
-import { projectPaths } from '../project-storage/paths'
+import { projectPaths, resolveProjectRelative } from '../project-storage/paths'
 import { readWav } from '../export/wav'
 
 /**
@@ -208,9 +208,15 @@ export function registerAudioAuditIpc(): void {
       const newTakeId = randomUUID()
       const paths = projectPaths(projectDir)
       const segmentDir = join(paths.audiosDir, payload.segmentId)
-      const sourceAbs = join(projectDir, payload.orphanRelativePath)
       const targetAbs = join(segmentDir, `${newTakeId}.wav`)
       const newRelativePath = `audios/${payload.segmentId}/${newTakeId}.wav`
+
+      let sourceAbs: string
+      try {
+        sourceAbs = resolveProjectRelative(projectDir, payload.orphanRelativePath)
+      } catch (err) {
+        return { ok: false, message: (err as Error).message }
+      }
 
       try {
         await fs.mkdir(segmentDir, { recursive: true })
@@ -235,7 +241,12 @@ export function registerAudioAuditIpc(): void {
       const projectDir = projectSession.path
       if (!projectDir) return { ok: false, message: '没有活动工程' }
 
-      const abs = join(projectDir, relativePath)
+      let abs: string
+      try {
+        abs = resolveProjectRelative(projectDir, relativePath)
+      } catch (err) {
+        return { ok: false, message: (err as Error).message }
+      }
       try {
         // shell.trashItem 把文件送进系统回收站，给用户后悔余地。
         // 平台行为：Windows / macOS 真回收站；Linux 取决于桌面环境
