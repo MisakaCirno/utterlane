@@ -295,6 +295,18 @@ export const enUS: TranslationSchema = {
     bit_depth_pcm16: '16-bit PCM (best compatibility)',
     bit_depth_pcm24: '24-bit PCM (higher dynamic range)',
     bit_depth_float32: '32-bit IEEE float (DAW friendly)',
+    section_effects: 'Post-processing',
+    label_silence_padding: 'Silence between segments',
+    silence_off: 'None',
+    silence_ms: '{{count}} ms',
+    silence_split_note:
+      'Silence padding has no effect in split mode (each segment is its own file)',
+    label_peak_normalize: 'Peak normalization',
+    peak_off: 'Off',
+    peak_minus_1: '-1 dB (near max)',
+    peak_minus_3: '-3 dB (recommended)',
+    peak_minus_6: '-6 dB (keep headroom)',
+    peak_minus_12: '-12 dB (plenty of headroom)',
     btn_export: 'Export'
   },
 

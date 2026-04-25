@@ -8,6 +8,24 @@ import {
   type ExportMode,
   type ExportSampleFormat
 } from '@shared/export'
+
+/**
+ * 静音填充档位：从「不填」到一秒。1 秒以上的需求很少（用户如果真要长间距
+ * 多半是在做章节切分，那种场景应当走拆分模式），不提供更长选项
+ */
+const SILENCE_OPTIONS = [0, 100, 250, 500, 1000] as const
+
+/**
+ * 峰值归一化目标 dB。-3 是最常用的「保留 headroom」档位；-1 接近最大化；
+ * -6 / -12 给希望在后期还有 headroom 的用户。0 = 不归一化
+ */
+const PEAK_TARGET_OPTIONS = [
+  { value: 0, labelKey: 'export_dialog.peak_off' as const },
+  { value: -1, labelKey: 'export_dialog.peak_minus_1' as const },
+  { value: -3, labelKey: 'export_dialog.peak_minus_3' as const },
+  { value: -6, labelKey: 'export_dialog.peak_minus_6' as const },
+  { value: -12, labelKey: 'export_dialog.peak_minus_12' as const }
+] as const
 import { useEditorStore } from '@renderer/store/editorStore'
 import { runExportAudioWav } from '@renderer/actions/export'
 import { cn } from '@renderer/lib/cn'
@@ -39,12 +57,19 @@ export function ExportDialog({
   const [format, setFormat] = useState<ExportSampleFormat>('pcm16')
   // 默认跟随工程采样率（用 0 作为 sentinel，提交时再用 projectSampleRate 替换）
   const [sampleRate, setSampleRate] = useState<number>(0)
+  const [silenceMs, setSilenceMs] = useState<number>(0)
+  // 0 = 不归一化的 sentinel（peakDb 取值范围本来就是负数 + 0 边界，0 表示「不做」）
+  const [peakDb, setPeakDb] = useState<number>(0)
 
   function handleExport(): void {
     const options: ExportAudioOptions = {
       sampleRate: sampleRate === 0 ? projectSampleRate : sampleRate,
       format,
-      mode
+      mode,
+      effects: {
+        silencePaddingMs: silenceMs > 0 ? silenceMs : undefined,
+        peakNormalizeDb: peakDb < 0 ? peakDb : undefined
+      }
     }
     onOpenChange(false)
     // 关对话框后再触发 IPC：IPC 内部还要弹原生 file picker，UI 层不要叠两个 modal
@@ -117,6 +142,42 @@ export function ExportDialog({
                     { value: 'pcm24', label: t('export_dialog.bit_depth_pcm24') },
                     { value: 'float32', label: t('export_dialog.bit_depth_float32') }
                   ]}
+                />
+              </Row>
+            </Section>
+
+            <Section title={t('export_dialog.section_effects')}>
+              <Row label={t('export_dialog.label_silence_padding')}>
+                <Select
+                  value={String(silenceMs)}
+                  onChange={(v) => setSilenceMs(Number(v))}
+                  options={SILENCE_OPTIONS.map((ms) => ({
+                    value: String(ms),
+                    label:
+                      ms === 0
+                        ? t('export_dialog.silence_off')
+                        : t('export_dialog.silence_ms', { count: ms })
+                  }))}
+                />
+              </Row>
+              {/*
+                拆分模式下 silence 不生效，给 UI 一行解释。
+                没有用 disabled 把字段灰掉，因为用户可能切回拼接模式时
+                还想沿用之前选的值，保留状态体验更连贯
+              */}
+              {mode === 'split' && silenceMs > 0 && (
+                <div className="pl-20 text-2xs text-fg-dim">
+                  {t('export_dialog.silence_split_note')}
+                </div>
+              )}
+              <Row label={t('export_dialog.label_peak_normalize')}>
+                <Select
+                  value={String(peakDb)}
+                  onChange={(v) => setPeakDb(Number(v))}
+                  options={PEAK_TARGET_OPTIONS.map((opt) => ({
+                    value: String(opt.value),
+                    label: t(opt.labelKey)
+                  }))}
                 />
               </Row>
             </Section>

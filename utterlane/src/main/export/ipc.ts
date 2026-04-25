@@ -7,6 +7,7 @@ import { projectSession } from '../project-storage'
 import { loadSegmentsFile, loadProjectFile } from '../project-storage/io'
 import { readWav, decodeWavToFloat32, buildWavFromChannels } from './wav'
 import { resampleChannels } from './resample'
+import { concatWithSilence, normalizePeak, normalizePeakAcrossItems } from './post-processing'
 import { buildSrt } from './srt'
 
 /**
@@ -142,27 +143,6 @@ async function decodeAndResampleAll(
   return { perItemChannels, channels: ref.channels }
 }
 
-/**
- * 拼接模式：把每段的 Float32 channels 合成一份长 channels，再写一个 WAV。
- */
-function concatChannelData(
-  perItemChannels: Float32Array[][],
-  channelCount: number
-): Float32Array[] {
-  const out: Float32Array[] = []
-  for (let c = 0; c < channelCount; c++) {
-    const totalLen = perItemChannels.reduce((sum, item) => sum + item[c].length, 0)
-    const merged = new Float32Array(totalLen)
-    let offset = 0
-    for (const item of perItemChannels) {
-      merged.set(item[c], offset)
-      offset += item[c].length
-    }
-    out.push(merged)
-  }
-  return out
-}
-
 export function registerExportIpc(): void {
   ipcMain.handle(
     EXPORT_IPC.audioWav,
@@ -209,9 +189,21 @@ export function registerExportIpc(): void {
         return { ok: false, message: (err as Error).message }
       }
 
+      const silenceMs = options.effects?.silencePaddingMs ?? 0
+      const peakDb = options.effects?.peakNormalizeDb
+
       try {
         if (options.mode === 'concat') {
-          const merged = concatChannelData(prepared.perItemChannels, prepared.channels)
+          // 拼接模式：先 concat（带可选静音填充）→ 整体峰值归一 → 编码 → 写盘。
+          // 归一化放在 concat 之后是因为目标是「整个工程峰值」而不是「每段峰值」
+          const merged = concatWithSilence(
+            prepared.perItemChannels,
+            prepared.channels,
+            options.sampleRate,
+            silenceMs
+          )
+          if (peakDb !== undefined) normalizePeak(merged, peakDb)
+
           const wav = buildWavFromChannels({
             sampleRate: options.sampleRate,
             format: options.format,
@@ -220,7 +212,12 @@ export function registerExportIpc(): void {
           await fs.writeFile(outputPath, wav)
           return { ok: true, filePath: outputPath, skipped }
         } else {
-          // 拆分模式：每段单独写一个 WAV
+          // 拆分模式：silence 不生效（各段独立文件没有段间概念），但峰值归一
+          // 必须用「所有段统一 gain」，否则各段独立归一会让响度相对关系丢失
+          if (peakDb !== undefined) {
+            normalizePeakAcrossItems(prepared.perItemChannels, peakDb)
+          }
+
           for (let i = 0; i < items.length; i++) {
             const item = items[i]
             const wav = buildWavFromChannels({

@@ -294,6 +294,17 @@ export const zhCN = {
     bit_depth_pcm16: '16-bit PCM（兼容性最好）',
     bit_depth_pcm24: '24-bit PCM（更高动态范围）',
     bit_depth_float32: '32-bit IEEE 浮点（DAW 友好）',
+    section_effects: '后处理',
+    label_silence_padding: '段间静音',
+    silence_off: '不填充',
+    silence_ms: '{{count}} 毫秒',
+    silence_split_note: '拆分模式下每段独立成文件，段间静音不生效',
+    label_peak_normalize: '峰值归一化',
+    peak_off: '关闭',
+    peak_minus_1: '-1 dB（接近最大）',
+    peak_minus_3: '-3 dB（推荐）',
+    peak_minus_6: '-6 dB（保留余量）',
+    peak_minus_12: '-12 dB（充足余量）',
     btn_export: '导出'
   },
 

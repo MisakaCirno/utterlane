@@ -15,11 +15,29 @@
 export type ExportSampleFormat = 'pcm16' | 'pcm24' | 'float32'
 export type ExportMode = 'concat' | 'split'
 
+/**
+ * 导出后处理效果集合。所有字段可选——未来加 LUFS 归一 / 限幅 / EQ 时
+ * 直接往这个对象里加字段，IPC 协议 / UI 字段都会自然扩展。
+ */
+export type ExportEffects = {
+  /** 段间静音填充（毫秒），0 / undefined = 不填 */
+  silencePaddingMs?: number
+  /** 峰值归一化的目标 dB（≤ 0），undefined = 不归一化 */
+  peakNormalizeDb?: number
+}
+
 export type ExportAudioOptions = {
   /** 输出采样率（Hz）。和工程采样率不同时由 main 侧重采样器处理 */
   sampleRate: number
   format: ExportSampleFormat
   mode: ExportMode
+  /**
+   * 后处理效果。可选——不传等于全部关闭。
+   * 拼接模式下：silence 在段间插入，归一化作用于整体；
+   * 拆分模式下：silence 不生效（各段独立文件，没有「段间」概念），
+   * 归一化用所有段的统一 gain factor 保持响度关系
+   */
+  effects?: ExportEffects
 }
 
 /** 各格式对应的 WAV 头里的 bitsPerSample 字段值，方便 UI 显示 */
