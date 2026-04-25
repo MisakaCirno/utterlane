@@ -75,6 +75,16 @@ export type Project = {
     audioFormat: 'wav'
     subtitleFormat: 'srt'
   }
+  /**
+   * 单 Segment 推荐最大字数。0 / undefined = 不限制。
+   *
+   * 超过推荐字数的 Segment 在 UI 上用红色提示（字数计数器、SegmentsView
+   * 行文字），但不阻止用户保存——只是「建议拆分」的视觉提醒。
+   *
+   * 不同项目可能有不同标准（字幕长度规范 / 单镜头时长上限 / 等），
+   * 所以放在 project.json 而不是 preferences.json
+   */
+  recommendedMaxChars?: number
 }
 
 // ---------------------------------------------------------------------------

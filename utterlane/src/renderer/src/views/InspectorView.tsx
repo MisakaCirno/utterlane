@@ -19,12 +19,9 @@ import { usePreferencesStore } from '@renderer/store/preferencesStore'
 import { confirm } from '@renderer/store/confirmStore'
 import { formatDuration } from '@renderer/lib/format'
 import { Field } from '@renderer/components/Field'
+import { TextEditorWithCount } from '@renderer/components/TextEditorWithCount'
 import { subscribeLevel } from '@renderer/services/recorder'
-import { DEFAULT_PREFERENCES, type TextAlign } from '@shared/preferences'
-
-function alignClass(align: TextAlign): string {
-  return align === 'center' ? 'text-center' : align === 'right' ? 'text-right' : 'text-left'
-}
+import { DEFAULT_PREFERENCES } from '@shared/preferences'
 
 /**
  * 输入电平条。订阅 recorder.subscribeLevel 获取实时 RMS，
@@ -118,6 +115,7 @@ export function InspectorView(): React.JSX.Element {
   const splitSegmentAt = useEditorStore((s) => s.splitSegmentAt)
   const mergeSegmentWithPrevious = useEditorStore((s) => s.mergeSegmentWithPrevious)
   const setParagraphStart = useEditorStore((s) => s.setParagraphStart)
+  const recommendedMaxChars = useEditorStore((s) => s.project?.recommendedMaxChars)
   const setSelectedTake = useEditorStore((s) => s.setSelectedTake)
   const deleteTake = useEditorStore((s) => s.deleteTake)
   const playback = useEditorStore((s) => s.playback)
@@ -136,7 +134,7 @@ export function InspectorView(): React.JSX.Element {
 
   // hooks 必须在早返回之前注册，所以 ref / focus state 都搬到这里——
   // 即便没有选中 Segment 时也调用一次，保持 hook 顺序稳定
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null)
+  const textInputRef = useRef<HTMLInputElement | null>(null)
   const [hasTextFocus, setHasTextFocus] = useState(false)
 
   if (!segment || !selectedId) {
@@ -170,7 +168,7 @@ export function InspectorView(): React.JSX.Element {
   // 内部会 no-op，无需在这里再判定（cursor 位置不进 React state，免得
   // 每次 selectionchange 都触发渲染）
   const onSplit = (): void => {
-    const ta = textareaRef.current
+    const ta = textInputRef.current
     if (!ta) return
     const at = ta.selectionStart
     if (at == null) return
@@ -191,28 +189,14 @@ export function InspectorView(): React.JSX.Element {
           </span>
         </Field>
         <Field label={t('inspector.field_text')}>
-          <textarea
-            ref={textareaRef}
+          <TextEditorWithCount
+            inputRef={textInputRef}
             value={segment.text}
-            onChange={(e) => editSegmentText(selectedId, e.target.value)}
+            onChange={(v) => editSegmentText(selectedId, v)}
             onFocus={() => setHasTextFocus(true)}
-            onBlur={(e) => {
-              setHasTextFocus(false)
-              // 提交时 trim：行内编辑过程中允许中间态有头尾空白
-              const trimmed = e.target.value.trim()
-              if (trimmed !== e.target.value) editSegmentText(selectedId, trimmed)
-            }}
-            onKeyDown={(e) => {
-              // 数据不变量：Segment.text 单行。textarea 拦截 Enter 阻止换行；
-              // store 层 sanitizeSegmentText 会把粘贴等带进来的 \n 也折成空格
-              if (e.key === 'Enter') e.preventDefault()
-            }}
-            className={cn(
-              'w-full resize-none rounded-sm border border-border bg-bg-deep px-2 py-1',
-              'text-xs leading-5 outline-none focus:border-accent',
-              alignClass(textAlign)
-            )}
-            rows={3}
+            onBlur={() => setHasTextFocus(false)}
+            recommendedMaxChars={recommendedMaxChars}
+            textAlign={textAlign}
           />
         </Field>
       </div>

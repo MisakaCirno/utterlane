@@ -1,7 +1,13 @@
 import { BrowserWindow, dialog, ipcMain } from 'electron'
 import { promises as fs } from 'fs'
 import { isAbsolute, join, normalize, relative } from 'path'
-import type { SegmentsFile, WorkspaceFile } from '@shared/project'
+import {
+  PROJECT_SCHEMA_VERSION,
+  type Project,
+  type ProjectFile,
+  type SegmentsFile,
+  type WorkspaceFile
+} from '@shared/project'
 import { projectSession, type OpenResult } from './session'
 import { projectPaths } from './paths'
 
@@ -16,11 +22,15 @@ export const PROJECT_IPC = {
   current: 'project:current',
   saveWorkspace: 'project:save-workspace',
   saveSegments: 'project:save-segments',
+  saveProject: 'project:save-project',
   readTakeFile: 'project:read-take-file'
 } as const
 
 /** saveSegments 的 IPC 返回值；renderer 侧据此切换 saved 标记。 */
 export type SaveSegmentsResult = { ok: true } | { ok: false; message: string }
+
+/** saveProject 的返回值，和 saveSegments 同结构。失败的细节让 UI 弹错误 */
+export type SaveProjectResult = { ok: true } | { ok: false; message: string }
 
 async function isDirEmpty(dir: string): Promise<boolean> {
   try {
@@ -127,6 +137,27 @@ export function registerProjectIpc(): void {
       }
     }
   )
+
+  /**
+   * 保存 project.json。renderer 传完整的 Project（不含 schemaVersion），
+   * main 包上当前 PROJECT_SCHEMA_VERSION 后原子写入。
+   *
+   * 和 saveSegments 一样立即落盘——project meta 改动频率低（用户编辑设置
+   * 才会触发），每次都直接写不会成为性能瓶颈
+   */
+  ipcMain.handle(PROJECT_IPC.saveProject, async (_e, next: Project): Promise<SaveProjectResult> => {
+    try {
+      const file: ProjectFile = {
+        ...next,
+        schemaVersion: PROJECT_SCHEMA_VERSION,
+        updatedAt: new Date().toISOString()
+      }
+      await projectSession.saveProject(file)
+      return { ok: true }
+    } catch (err) {
+      return { ok: false, message: (err as Error).message }
+    }
+  })
 
   /**
    * 读取工程内的 Take 文件给 renderer 播放。

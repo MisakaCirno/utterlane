@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 import type { AppPreferences } from '@shared/preferences'
-import type { ProjectBundle, SegmentsFile, WorkspaceFile } from '@shared/project'
+import type { Project, ProjectBundle, SegmentsFile, WorkspaceFile } from '@shared/project'
 import type { WriteTakeResult } from '@shared/recording'
 import type { AppInfo } from '@shared/appInfo'
 import type { CrashInfo } from '@shared/crash'
@@ -27,6 +27,7 @@ const PROJECT_CLOSE = 'project:close'
 const PROJECT_CURRENT = 'project:current'
 const PROJECT_SAVE_WORKSPACE = 'project:save-workspace'
 const PROJECT_SAVE_SEGMENTS = 'project:save-segments'
+const PROJECT_SAVE_PROJECT = 'project:save-project'
 const PROJECT_READ_TAKE_FILE = 'project:read-take-file'
 
 const RECORDING_WRITE_TAKE = 'recording:write-take'
@@ -52,6 +53,9 @@ export type OpenResult =
 
 /** 与 main 的 SaveSegmentsResult 保持同步 */
 export type SaveSegmentsResult = { ok: true } | { ok: false; message: string }
+
+/** 与 main 的 SaveProjectResult 保持同步 */
+export type SaveProjectResult = { ok: true } | { ok: false; message: string }
 
 /** 与 main 的 ExportResult 保持同步 */
 export type ExportResult =
@@ -129,6 +133,13 @@ const api = {
      */
     saveSegments: (next: SegmentsFile): Promise<SaveSegmentsResult> =>
       ipcRenderer.invoke(PROJECT_SAVE_SEGMENTS, next),
+
+    /**
+     * 保存 project.json。renderer 传完整 Project 对象（不含 schemaVersion），
+     * main 加上当前 schemaVersion + 更新 updatedAt 后原子写入
+     */
+    saveProject: (next: Project): Promise<SaveProjectResult> =>
+      ipcRenderer.invoke(PROJECT_SAVE_PROJECT, next),
 
     /** 读取工程内某个 Take 文件（relativePath 来自 Take.filePath），用于播放 */
     readTakeFile: (relativePath: string): Promise<ArrayBuffer> =>

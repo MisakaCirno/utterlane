@@ -162,6 +162,7 @@ export const enUS: TranslationSchema = {
 
   project_settings: {
     section_info: 'Project',
+    section_text: 'Text',
     section_export_defaults: 'Export defaults',
     section_paths: 'Paths',
     field_title: 'Title',
@@ -171,6 +172,10 @@ export const enUS: TranslationSchema = {
     field_subtitle_format: 'Subtitle format',
     field_segments_file: 'Segments file',
     field_audios_dir: 'Audios dir',
+    field_recommended_max_chars: 'Recommended max chars',
+    recommended_max_chars_placeholder: 'No limit',
+    recommended_max_chars_hint:
+      'Segments exceeding this length will be highlighted in red, but saving is not blocked',
     channel_mono: 'Mono',
     channel_stereo: 'Stereo'
   },
@@ -227,6 +232,8 @@ export const enUS: TranslationSchema = {
       'Already open in another window (PID {{pid}}). Close that window first.',
     save_segments_title: 'Save failed',
     save_segments_description: 'Error writing segments.json: {{message}}',
+    save_project_title: 'Project settings save failed',
+    save_project_description: 'Error writing project.json: {{message}}',
     recording_start_title: 'Cannot start recording',
     recording_stop_title: 'Failed to stop recording',
     recording_persist_title: 'Failed to save recording',
@@ -268,6 +275,10 @@ export const enUS: TranslationSchema = {
 
   countdown: {
     cancel_hint: 'Press Esc or click anywhere to cancel'
+  },
+
+  text_editor: {
+    too_long_hint: 'Text is too long; consider splitting'
   },
 
   history: {

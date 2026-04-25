@@ -164,6 +164,7 @@ export const zhCN = {
 
   project_settings: {
     section_info: '工程信息',
+    section_text: '文案',
     section_export_defaults: '默认导出设置',
     section_paths: '路径信息',
     field_title: '名称',
@@ -173,6 +174,9 @@ export const zhCN = {
     field_subtitle_format: '字幕格式',
     field_segments_file: 'Segments 文件',
     field_audios_dir: '音频目录',
+    field_recommended_max_chars: '推荐最大字数',
+    recommended_max_chars_placeholder: '不限制',
+    recommended_max_chars_hint: '超过该数值的 Segment 将被红色高亮提示，但不会阻止保存',
     channel_mono: 'Mono',
     channel_stereo: 'Stereo'
   },
@@ -226,6 +230,8 @@ export const zhCN = {
     project_busy_description: '已在另一个窗口中打开（PID {{pid}}）。请先关闭那个窗口后再试。',
     save_segments_title: '保存失败',
     save_segments_description: 'segments.json 写入出错：{{message}}',
+    save_project_title: '工程信息保存失败',
+    save_project_description: 'project.json 写入出错：{{message}}',
     recording_start_title: '无法开始录音',
     recording_stop_title: '停止录音失败',
     recording_persist_title: '录音落盘失败',
@@ -266,6 +272,10 @@ export const zhCN = {
 
   countdown: {
     cancel_hint: '按 Esc 或点击屏幕取消'
+  },
+
+  text_editor: {
+    too_long_hint: '文案过长，建议拆分'
   },
 
   history: {

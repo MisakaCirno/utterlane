@@ -4,6 +4,7 @@ import { randomUUID } from 'crypto'
 import {
   makeNewProjectFile,
   type ProjectBundle,
+  type ProjectFile,
   type SegmentsFile,
   type WorkspaceFile
 } from '@shared/project'
@@ -13,6 +14,7 @@ import {
   loadSegmentsFile,
   loadWorkspaceFile,
   ProjectFileError,
+  saveProjectFile,
   saveSegmentsFile,
   saveWorkspaceFile,
   writeProjectSkeleton
@@ -178,6 +180,16 @@ class ProjectSession {
       throw new Error('没有活动工程，无法保存 segments.json')
     }
     await saveSegmentsFile(this.currentPath, file)
+  }
+
+  /**
+   * 立即原子保存 project.json。和 segments 一样不 debounce——meta 改动频率低
+   */
+  async saveProject(file: ProjectFile): Promise<void> {
+    if (!this.currentPath) {
+      throw new Error('没有活动工程，无法保存 project.json')
+    }
+    await saveProjectFile(this.currentPath, file)
   }
 
   async flushWorkspace(): Promise<void> {

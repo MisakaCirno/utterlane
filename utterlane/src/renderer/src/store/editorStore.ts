@@ -98,6 +98,13 @@ type EditorState = {
    */
   applyHistoryPatch: (patch: (s: EditorState) => Partial<EditorState> | null) => void
 
+  /**
+   * 更新工程元信息（project.json）。立即应用到内存 + 通过 IPC 写盘。
+   * 不进 undo 栈——meta 是配置类数据，通过 ProjectSettingsView 编辑，
+   * 用户期待「点了立刻生效」而不是「需要 Ctrl+Z 反复试错」
+   */
+  updateProject: (patch: Partial<Project>) => void
+
   // 工作区（UI 上下文）
   selectSegment: (id: string | undefined) => void
   /**
@@ -488,6 +495,22 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       recordingTakeId: null,
       countdownRemaining: 0,
       missingTakeIds: new Set<string>()
+    })
+  },
+
+  updateProject: (patch) => {
+    const prev = get()
+    if (!prev.project) return
+    const next: Project = { ...prev.project, ...patch }
+    set({ project: next })
+    // fire-and-forget：失败时通过 toast 提示，但不阻塞 UI 反馈
+    void window.api.project.saveProject(next).then((result) => {
+      if (!result.ok) {
+        showError(
+          i18n.t('errors.save_project_title'),
+          i18n.t('errors.save_project_description', { message: result.message })
+        )
+      }
     })
   },
 

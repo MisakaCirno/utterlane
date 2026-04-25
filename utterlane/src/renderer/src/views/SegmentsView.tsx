@@ -171,6 +171,7 @@ function SegmentRow({
   const extraSelected = useEditorStore((s) => s.extraSelectedSegmentIds.has(id))
   const selectSegmentExtended = useEditorStore((s) => s.selectSegmentExtended)
   const editSegmentText = useEditorStore((s) => s.editSegmentText)
+  const recommendedMaxChars = useEditorStore((s) => s.project?.recommendedMaxChars)
   // 段首推导：order 中的第 0 个或显式 paragraphStart === true。
   // useEditorStore 直接订阅 idx === 0 的衍生量需要 order 的引用；用 idx 参数
   // 已经传进来，此处只看 paragraphStart 一项即可
@@ -208,6 +209,7 @@ function SegmentRow({
   if (!seg) return null
   const current = seg.takes.find((t) => t.id === seg.selectedTakeId)
   const duration = current?.durationMs ?? 0
+  const isTooLong = !!recommendedMaxChars && seg.text.length > recommendedMaxChars
 
   // dnd-kit 在拖拽中通过 transform 以 translate3d 视觉偏移；
   // transition 让松手归位有动画；isDragging 时提权层级 + 高亮
@@ -316,7 +318,20 @@ function SegmentRow({
           )}
         />
       ) : (
-        <div onDoubleClick={startEditing} title={seg.text} className="min-w-0 truncate px-2">
+        <div
+          onDoubleClick={startEditing}
+          title={
+            // 文案过长时 tooltip 加一行提示；否则照常显示完整文本（用于 truncate 截断时露出尾部）
+            isTooLong
+              ? `${seg.text}\n\n[${seg.text.length} / ${recommendedMaxChars}] 文案过长，建议拆分`
+              : seg.text
+          }
+          className={cn(
+            'min-w-0 truncate px-2',
+            // 主选中行已经是 accent 底 + 白字，红字会冲突；仅非选中态显示红色
+            isTooLong && !selected && 'text-rec'
+          )}
+        >
           <HighlightedText text={seg.text} highlight={highlight} dim={selected} />
         </div>
       )}
