@@ -150,6 +150,7 @@ export const zhCN = {
       '删除所有默认间隔：清空所有由「应用默认间隔」自动写入的间隔，手动设置的保留。',
     ctx_insert_before: '在前插入空白 Segment',
     ctx_insert_after: '在后插入空白 Segment',
+    handle_resize_gap_hint: '拖拽调整与相邻段之间的空白间隔',
     zoom_in: '放大（Ctrl+滚轮）',
     zoom_out: '缩小（Ctrl+滚轮）',
     zoom_reset: '恢复 1x',

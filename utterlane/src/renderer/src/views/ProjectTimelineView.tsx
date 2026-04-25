@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import * as ContextMenu from '@radix-ui/react-context-menu'
 import {
@@ -238,12 +238,18 @@ function TimelineClip({
   id,
   idx,
   startMs,
-  pxPerMs
+  pxPerMs,
+  prevSegId,
+  hasFollowingClip
 }: {
   id: string
   idx: number
   startMs: number
   pxPerMs: number
+  /** 上一段 id；首段（idx === 0）传 undefined 表示没有「之前的间隔」可拖 */
+  prevSegId: string | undefined
+  /** 是否有下一段。最后一段没有「之后的间隔」概念，不渲染右边缘的拖把 */
+  hasFollowingClip: boolean
 }): React.JSX.Element | null {
   const { t } = useTranslation()
   const seg = useEditorStore((s) => s.segmentsById[id])
@@ -251,10 +257,49 @@ function TimelineClip({
   const selectSegment = useEditorStore((s) => s.selectSegment)
   const insertSegmentBefore = useEditorStore((s) => s.insertSegmentBefore)
   const insertSegmentAfter = useEditorStore((s) => s.insertSegmentAfter)
+  const setSegmentGap = useEditorStore((s) => s.setSegmentGap)
+  // 自身的 gapAfter（右边缘拖把改这个）和上一段的 gapAfter（左边缘拖把改这个）
+  const ownGapMs = useEditorStore((s) => s.segmentsById[id]?.gapAfter?.ms ?? 0)
+  const prevGapMs = useEditorStore((s) =>
+    prevSegId ? (s.segmentsById[prevSegId]?.gapAfter?.ms ?? 0) : 0
+  )
 
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id
   })
+
+  /**
+   * 拖把状态用单个 useRef 跟踪——必须跨 re-render 保留。setSegmentGap 触发
+   * 重渲染会让函数闭包重生成；如果 dragRef 在闭包里就丢了。useRef 的对象
+   * 引用稳定，pointermove / up 都能拿到 pointerdown 写入的值
+   *
+   * 同时只能有一个边缘在拖（鼠标只能拖一个），所以 targetSegId 也存进 ref，
+   * 由 pointermove 从 ref 里读，不需要左右两边维护两份
+   */
+  const gapDragRef = useRef<{
+    targetSegId: string
+    startX: number
+    startMs: number
+  } | null>(null)
+
+  function startGapDrag(targetSegId: string, currentMs: number, e: React.PointerEvent): void {
+    e.preventDefault()
+    e.stopPropagation() // 阻止 dnd-kit PointerSensor 接管
+    gapDragRef.current = { targetSegId, startX: e.clientX, startMs: currentMs }
+    ;(e.currentTarget as Element).setPointerCapture?.(e.pointerId)
+  }
+  function onGapDragMove(e: React.PointerEvent): void {
+    const ctx = gapDragRef.current
+    if (!ctx) return
+    const dx = e.clientX - ctx.startX
+    const newMs = Math.max(0, Math.round(ctx.startMs + dx / pxPerMs))
+    setSegmentGap(ctx.targetSegId, { ms: newMs, manual: true })
+  }
+  function onGapDragEnd(e: React.PointerEvent): void {
+    if (!gapDragRef.current) return
+    gapDragRef.current = null
+    ;(e.currentTarget as Element).releasePointerCapture?.(e.pointerId)
+  }
 
   // 合并 dnd-kit ref 与自己的 ref：后者用于选中时横向滚到可见位置
   const clipElementRef = useRef<HTMLDivElement | null>(null)
@@ -272,17 +317,26 @@ function TimelineClip({
   if (!seg) return null
   const current = seg.takes.find((t) => t.id === seg.selectedTakeId)
   const hasAudio = !!current
-  // 未录段最小宽度也跟着 zoom 走，避免缩到极小时 clip 重叠成一团
-  const minWidth = Math.max(40, UNRECORDED_CLIP_WIDTH_AT_1X * Math.min(1, pxPerMs / BASE_PX_PER_MS))
-  const width = hasAudio ? current.durationMs * pxPerMs : minWidth
+  // 已录段：宽度严格等于 take 时长 × pxPerMs，外框和时间轴严格对齐
+  // 未录段：没有真实时长，给一个 placeholder 宽度让用户能选中（这部分会
+  // 让后续 clip 的视觉位置和时间轴产生一点偏差，但未录段本来就不计入播放
+  // 时间，可以接受）
+  const placeholderWidth = Math.max(
+    40,
+    UNRECORDED_CLIP_WIDTH_AT_1X * Math.min(1, pxPerMs / BASE_PX_PER_MS)
+  )
+  const width = hasAudio ? current.durationMs * pxPerMs : placeholderWidth
 
   const style: React.CSSProperties = {
     width,
-    minWidth,
     transform: CSS.Transform.toString(transform),
     transition,
     zIndex: isDragging ? 10 : undefined
   }
+
+  // 右边缘拖把宽度。pxPerMs 极小时 clip 自己都很窄，缩小拖把保证它不会
+  // 占据 clip 主体的过大比例
+  const HANDLE_WIDTH = Math.min(6, Math.max(3, width * 0.15))
 
   return (
     <ContextMenu.Root>
@@ -320,6 +374,41 @@ function TimelineClip({
               <span>{t('timeline.clip_unrecorded')}</span>
             )}
           </div>
+
+          {/*
+            左 / 右边缘 resize 拖把。绝对定位 + 高 z-index 确保覆盖在 clip
+            主体之上，pointer 事件先到拖把这一层。pointer-events-auto 反向
+            打开（父级如果 pointer-events:none 不会传染过来）。
+            只在「有目标段」时渲染：首段没左侧、末段没右侧
+          */}
+          {prevSegId && (
+            <div
+              onPointerDown={(e) => startGapDrag(prevSegId, prevGapMs, e)}
+              onPointerMove={onGapDragMove}
+              onPointerUp={onGapDragEnd}
+              onPointerCancel={onGapDragEnd}
+              style={{ width: HANDLE_WIDTH }}
+              className={cn(
+                'absolute left-0 top-0 bottom-0 z-20 cursor-ew-resize',
+                'bg-transparent hover:bg-accent/30'
+              )}
+              title={t('timeline.handle_resize_gap_hint')}
+            />
+          )}
+          {hasFollowingClip && (
+            <div
+              onPointerDown={(e) => startGapDrag(id, ownGapMs, e)}
+              onPointerMove={onGapDragMove}
+              onPointerUp={onGapDragEnd}
+              onPointerCancel={onGapDragEnd}
+              style={{ width: HANDLE_WIDTH }}
+              className={cn(
+                'absolute right-0 top-0 bottom-0 z-20 cursor-ew-resize',
+                'bg-transparent hover:bg-accent/30'
+              )}
+              title={t('timeline.handle_resize_gap_hint')}
+            />
+          )}
         </div>
       </ContextMenu.Trigger>
       <ContextMenu.Portal>
@@ -356,75 +445,35 @@ function TimelineClip({
 }
 
 /**
- * 段间空白「间隔块」：可见区域宽度对应 gapAfter.ms * pxPerMs。
- * 鼠标按住可以左右拖拽调节宽度，松手时设置成 manual: true（applyDefaultGaps
- * 不会再覆盖它）。
+ * 段间空白填充：纯视觉。宽度 = gapAfter.ms × pxPerMs，正好填到下一段
+ * 左边缘。不响应拖拽——拖拽逻辑搬到了 TimelineClip 的左 / 右边缘 handle，
+ * 让 clip 外框严格对齐时间轴。
  *
- * dnd-kit 的 SortableContext 不接管这个块——它不是 sortable item，纯
- * pointer 事件。pointer-down 时 stopPropagation 防止 dnd-kit 误启动重排
+ * ms === 0 时不渲染（width 为 0 没意义还会让 flex 多算一格）。manual 与
+ * 自动用色调区分：手动 = accent 微黄底，自动 = 中性灰
  */
-function GapSpacer({ segId, pxPerMs }: { segId: string; pxPerMs: number }): React.JSX.Element {
-  const gap = useEditorStore((s) => s.segmentsById[segId]?.gapAfter)
-  const setSegmentGap = useEditorStore((s) => s.setSegmentGap)
-  const ms = gap?.ms ?? 0
-  const isManual = !!gap?.manual
-
-  // 拖拽中的临时本地 ms，避免每次 pointermove 都触发 store 重渲染所有
-  // 监听者；pointermove 直接调 setSegmentGap，coalesce 把整段拖拽合成
-  // 一格 undo
-  const dragRef = useRef<{ startX: number; startMs: number } | null>(null)
-  const [hover, setHover] = useState(false)
-
-  function onPointerDown(e: React.PointerEvent): void {
-    e.preventDefault()
-    e.stopPropagation()
-    dragRef.current = { startX: e.clientX, startMs: ms }
-    ;(e.target as Element).setPointerCapture?.(e.pointerId)
-  }
-  function onPointerMove(e: React.PointerEvent): void {
-    const ctx = dragRef.current
-    if (!ctx) return
-    const dx = e.clientX - ctx.startX
-    const newMs = Math.max(0, Math.round(ctx.startMs + dx / pxPerMs))
-    setSegmentGap(segId, { ms: newMs, manual: true })
-  }
-  function onPointerUp(e: React.PointerEvent): void {
-    if (!dragRef.current) return
-    dragRef.current = null
-    ;(e.target as Element).releasePointerCapture?.(e.pointerId)
-  }
-
-  // 极窄间隔（< 4px）显示一个最小可见宽度，否则用户找不到拖拽对象。
-  // 0ms 时也保留一个 4px hover 触发区，让用户随时可以拖出空白
-  const renderedWidth = Math.max(4, ms * pxPerMs)
-
+function GapFiller({
+  ms,
+  manual,
+  pxPerMs
+}: {
+  ms: number
+  manual: boolean
+  pxPerMs: number
+}): React.JSX.Element | null {
+  if (ms <= 0) return null
+  const width = ms * pxPerMs
   return (
     <div
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
-      onPointerCancel={onPointerUp}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
-      title={
-        ms > 0 ? `${ms} ms${isManual ? ' (manual)' : ''}` : 'Drag to add a gap after this segment'
-      }
-      style={{ width: renderedWidth }}
+      style={{ width }}
+      title={`${ms} ms${manual ? ' (manual)' : ''}`}
       className={cn(
-        'relative flex shrink-0 cursor-ew-resize items-center justify-center',
-        // 渐变条作为视觉提示：手动设置的用 accent 色调，自动写入的偏中性
-        ms > 0
-          ? isManual
-            ? 'bg-accent/15 hover:bg-accent/30'
-            : 'bg-fg-dim/10 hover:bg-fg-dim/25'
-          : hover
-            ? 'bg-accent/20'
-            : 'bg-transparent'
+        'pointer-events-none relative flex shrink-0 items-center justify-center',
+        manual ? 'bg-accent/15' : 'bg-fg-dim/10'
       )}
     >
-      {/* 中间细线视觉锚点；ms 较大时显示文本 */}
       <div className="h-full w-px bg-border-strong/50" />
-      {ms >= 200 && pxPerMs * ms > 36 && (
+      {ms >= 200 && width > 36 && (
         <span className="absolute font-mono text-[9px] tabular-nums text-fg-dim">{ms}</span>
       )}
     </div>
@@ -472,18 +521,27 @@ function TimelineContent({ pxPerMs }: { pxPerMs: number }): React.JSX.Element {
           >
             <SortableContext items={order} strategy={horizontalListSortingStrategy}>
               <div className="flex h-full items-stretch">
-                {order.map((id, idx) => (
-                  <Fragment key={id}>
-                    <TimelineClip
-                      id={id}
-                      idx={idx}
-                      startMs={startMsById.get(id) ?? 0}
-                      pxPerMs={pxPerMs}
-                    />
-                    {/* 最后一段后面没有间隔，因为没有「下一段」可衔接 */}
-                    {idx < order.length - 1 && <GapSpacer segId={id} pxPerMs={pxPerMs} />}
-                  </Fragment>
-                ))}
+                {order.map((id, idx) => {
+                  const seg = segmentsById[id]
+                  const gap = seg?.gapAfter
+                  const isLast = idx === order.length - 1
+                  return (
+                    <Fragment key={id}>
+                      <TimelineClip
+                        id={id}
+                        idx={idx}
+                        startMs={startMsById.get(id) ?? 0}
+                        pxPerMs={pxPerMs}
+                        prevSegId={idx > 0 ? order[idx - 1] : undefined}
+                        hasFollowingClip={!isLast}
+                      />
+                      {/* 最后一段后面没有间隔；中间段渲染 ms × pxPerMs 宽度的填充 */}
+                      {!isLast && (
+                        <GapFiller ms={gap?.ms ?? 0} manual={!!gap?.manual} pxPerMs={pxPerMs} />
+                      )}
+                    </Fragment>
+                  )
+                })}
               </div>
             </SortableContext>
           </DndContext>

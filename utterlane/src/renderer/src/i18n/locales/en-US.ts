@@ -149,6 +149,7 @@ export const enUS: TranslationSchema = {
       'Clear default gaps: remove all gaps written by "Apply default", keeping manual ones.',
     ctx_insert_before: 'Insert empty Segment before',
     ctx_insert_after: 'Insert empty Segment after',
+    handle_resize_gap_hint: 'Drag to adjust the gap to the adjacent segment',
     zoom_in: 'Zoom in (Ctrl+wheel)',
     zoom_out: 'Zoom out (Ctrl+wheel)',
     zoom_reset: 'Reset to 1x',
