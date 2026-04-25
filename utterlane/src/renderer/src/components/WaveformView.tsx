@@ -63,15 +63,16 @@ export function WaveformView({
 }): React.JSX.Element {
   const { t } = useTranslation()
   const waveCanvasRef = useRef<HTMLCanvasElement>(null)
-  const playheadCanvasRef = useRef<HTMLCanvasElement>(null)
+  // 游标改成命令式 1px 竖线（ref + transform），见下方 effect。
+  // 之前用 canvas + setPlayheadMs 触发整个组件重渲染 + canvas redraw，
+  // 60Hz 跑下来有 React reconciliation + canvas API 双重开销
+  const playheadRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const [result, setResult] = useState<LoadResult | null>(null)
   // 缓存 sampleRate 用于把 playheadMs 换算到 canvas x 坐标。
   // 独立于 result.samples 的状态——只在加载成功时一起设置。
   const [entry, setEntry] = useState<CacheEntry | null>(null)
-  // playheadMs === null：当前不在播本文件；数值：播到了多少毫秒
-  const [playheadMs, setPlayheadMs] = useState<number | null>(null)
-  // 容器尺寸——同时影响波形与游标层，单独跟踪让两条 effect 都能依赖
+  // 容器尺寸——影响波形 / trim 手柄定位
   const [size, setSize] = useState<{ w: number; h: number }>({ w: 0, h: 0 })
 
   useEffect(() => {
@@ -92,18 +93,6 @@ export function WaveformView({
     }
   }, [filePath])
 
-  // 订阅播放位置。只有当 playingPath 等于本组件显示的 filePath 时才记录 playhead。
-  useEffect(() => {
-    const off = subscribePosition((playingPath, positionMs) => {
-      if (playingPath && playingPath === filePath) {
-        setPlayheadMs(positionMs)
-      } else {
-        setPlayheadMs(null)
-      }
-    })
-    return off
-  }, [filePath])
-
   const matches = result && result.path === filePath
   const samples = matches && 'samples' in result ? result.samples : null
   const errorMessage = matches && 'errorMessage' in result ? result.errorMessage : null
@@ -111,6 +100,30 @@ export function WaveformView({
 
   // 总时长（毫秒），用于把 playheadMs 映射到 x 坐标
   const totalMs = samples && entry ? (samples.length / entry.sampleRate) * 1000 : 0
+
+  // 命令式更新游标：subscribePosition 回调里直接写 transform，不走 React。
+  // closure 捕获 filePath / totalMs / size.w，三者任意变化时重新订阅以
+  // 让 closure 拿到最新值
+  useEffect(() => {
+    const target = playheadRef.current
+    if (!target) return
+    if (size.w === 0 || totalMs <= 0) {
+      target.style.display = 'none'
+      return
+    }
+    return subscribePosition((playingPath, positionMs) => {
+      const el = playheadRef.current
+      if (!el) return
+      if (!playingPath || playingPath !== filePath) {
+        el.style.display = 'none'
+        return
+      }
+      const ratio = Math.min(1, Math.max(0, positionMs / totalMs))
+      const cx = ratio * size.w
+      el.style.display = 'block'
+      el.style.transform = `translate3d(${cx}px, 0, 0)`
+    })
+  }, [filePath, totalMs, size.w])
 
   // 容器尺寸跟踪：用 ResizeObserver 写到 size state，让两层 canvas 都依赖
   useEffect(() => {
@@ -171,33 +184,6 @@ export function WaveformView({
     ctx.lineTo(size.w, midY)
     ctx.stroke()
   }, [samples, size])
-
-  // 游标层：仅依赖 playheadMs + totalMs + size。绝对定位覆盖在波形上方，
-  // 每帧只清一次小区域 + 画一条竖线，O(1)
-  useEffect(() => {
-    const canvas = playheadCanvasRef.current
-    if (!canvas || size.w === 0 || size.h === 0) return
-    const dpr = window.devicePixelRatio || 1
-    canvas.width = Math.floor(size.w * dpr)
-    canvas.height = Math.floor(size.h * dpr)
-    canvas.style.width = `${size.w}px`
-    canvas.style.height = `${size.h}px`
-
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-    ctx.scale(dpr, dpr)
-    ctx.clearRect(0, 0, size.w, size.h)
-
-    if (playheadMs === null || totalMs <= 0) return
-    const ratio = Math.min(1, Math.max(0, playheadMs / totalMs))
-    const cx = Math.floor(ratio * size.w) + 0.5
-    ctx.strokeStyle = 'rgba(209, 69, 69, 0.85)'
-    ctx.lineWidth = 1
-    ctx.beginPath()
-    ctx.moveTo(cx, 0)
-    ctx.lineTo(cx, size.h)
-    ctx.stroke()
-  }, [playheadMs, totalMs, size])
 
   // ========================================================================
   // Trim 编辑：手柄 + 遮罩
@@ -289,10 +275,16 @@ export function WaveformView({
               style={{ left: endX, right: 0 }}
             />
           )}
-          {/* 播放游标层。z 叠在波形之上、trim 手柄之下——播放时游标在
-              「裁掉段」上也能看见进度（虽然导出时这部分会被丢，但播放时
-              当前实现仍然走全段时间） */}
-          <canvas ref={playheadCanvasRef} className="pointer-events-none absolute inset-0" />
+          {/* 播放游标：1px 红色竖线。位置由命令式 useEffect 写
+              transform，不走 React 重渲染。z 叠在波形之上、trim 手柄
+              之下——播放时游标在「裁掉段」上也能看见进度。
+              初始 display: none，subscribePosition 命中本 take 时才显示 */}
+          <div
+            ref={playheadRef}
+            aria-hidden
+            className="pointer-events-none absolute top-0 bottom-0 left-0 z-10 w-px bg-rec/85 will-change-transform"
+            style={{ display: 'none' }}
+          />
           {/* trim 手柄：只在传入 onTrimChange 且 durationMs > 0 时渲染 */}
           {showTrimUi && (
             <>

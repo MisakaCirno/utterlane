@@ -531,33 +531,61 @@ function TimelineContent({ pxPerMs }: { pxPerMs: number }): React.JSX.Element {
     return { startMsById: idMap, totalMs: acc, startMsByFilePath: pathMap }
   }, [order, segmentsById])
 
-  // 播放期间订阅 player 的位置事件，把「文件相对位置」映射成「工程时间轴
-  // 全局位置」用于显示游标。空闲时不挂订阅，避免无意义的 RAF 唤醒
-  const [livePlayheadMs, setLivePlayheadMs] = useState<number | null>(null)
+  // 游标命令式更新：避开 React 重渲染。
+  //
+  // 原方案是 setLivePlayheadMs 触发整个 TimelineContent re-render——60Hz
+  // 跑下来要重建 ticks、reconcile 所有 clips、走 layout（style.left 触发
+  // reflow），主线程偶发卡 16ms 就肉眼可见跳变。
+  //
+  // 新方案：游标通过 ref 拿到 DOM，subscribePosition 回调直接写
+  // transform。transform 进合成层走 GPU，跳过 layout / paint，只走
+  // compositor——浏览器能稳跑 60fps。
+  //
+  // React 仍然管「非播放态下游标的位置」（取决于 storedPlayheadMs，低频
+  // 变化）和「样式 / 颜色」。播放期间 RAF 直接覆盖 transform，React 不再
+  // 介入
+  const cursorRef = useRef<HTMLDivElement | null>(null)
+  const isLivePlayingRef = useRef(false)
+
   useEffect(() => {
     if (playback !== 'project' && playback !== 'segment') {
-      setLivePlayheadMs(null)
+      // 退出播放：把游标颜色还原到 stored，位置由 React 渲染重新管控
+      isLivePlayingRef.current = false
+      const el = cursorRef.current
+      if (el) {
+        el.style.transform = `translate3d(${storedPlayheadMs * pxPerMs}px, 0, 0)`
+        el.classList.remove('bg-rec')
+        el.classList.add('bg-accent')
+      }
       return
     }
+    isLivePlayingRef.current = true
+    const el = cursorRef.current
+    if (el) {
+      el.classList.remove('bg-accent')
+      el.classList.add('bg-rec')
+    }
     return subscribePosition((path, ms) => {
+      const target = cursorRef.current
+      if (!target) return
       if (!path) {
-        setLivePlayheadMs(null)
+        // player 通知没有活跃播放（被 stop 等）。颜色 / 位置切换交给上面
+        // 的 useEffect 清理分支，避免重复逻辑
         return
       }
       const meta = startMsByFilePath.get(path)
       if (!meta) return
       // ms 是文件相对位置（含 trim 起点），减掉 trimStart 后才是「在
       // effective 段内的偏移」，再加 segStart 才对齐工程时间轴
-      setLivePlayheadMs(meta.segStart + Math.max(0, ms - meta.trimStartMs))
+      const liveMs = meta.segStart + Math.max(0, ms - meta.trimStartMs)
+      target.style.transform = `translate3d(${liveMs * pxPerMs}px, 0, 0)`
     })
-  }, [playback, startMsByFilePath])
+  }, [playback, startMsByFilePath, pxPerMs, storedPlayheadMs])
 
-  // 游标显示的最终 ms：播放中跟随实际进度，空闲时显示存储的 playhead
-  const cursorMs =
-    livePlayheadMs !== null && (playback === 'project' || playback === 'segment')
-      ? livePlayheadMs
-      : storedPlayheadMs
-  const cursorPx = cursorMs * pxPerMs
+  // 渲染时游标的位置：播放中由上面的 effect 直接写 DOM；空闲时跟随
+  // storedPlayheadMs（通过 React 渲染 transform，低频）。同时这也是
+  // playback 切换瞬间的初始位置
+  const initialCursorPx = storedPlayheadMs * pxPerMs
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }))
 
@@ -666,16 +694,17 @@ function TimelineContent({ pxPerMs }: { pxPerMs: number }): React.JSX.Element {
               </SortableContext>
             </DndContext>
           </div>
-          {/* 时间游标：单 1px 竖线，pointer-events-none 避免阻断 clip 点击。
-              z-index 高于 clip（z-10）但低于 ruler 的 sticky-ish 层级，让标尺
-              数字能盖在游标上方仍然可读 */}
+          {/* 时间游标：单 1px 竖线。pointer-events-none 避免阻断 clip 点击。
+              z-index 高于 clip（z-10）但低于 ruler 的 sticky 层级，让标尺
+              数字能盖在游标上方仍然可读。
+              位置用 transform: translate3d 走合成层，60Hz 更新无 layout
+              开销。播放期间由上面的 useEffect 命令式覆盖；空闲时这里的
+              初值代表 storedPlayheadMs */}
           <div
+            ref={cursorRef}
             aria-hidden
-            className={cn(
-              'pointer-events-none absolute top-0 bottom-0 z-20 w-px',
-              livePlayheadMs !== null ? 'bg-rec' : 'bg-accent'
-            )}
-            style={{ left: cursorPx }}
+            className="pointer-events-none absolute top-0 bottom-0 left-0 z-20 w-px bg-accent will-change-transform"
+            style={{ transform: `translate3d(${initialCursorPx}px, 0, 0)` }}
           />
         </div>
       </div>
