@@ -410,19 +410,32 @@ export function InspectorView(): React.JSX.Element {
  * Take 列表的表格视图。8 列：
  *   1. 启用（语义上是单选 = selectedTakeId，按 user 要求渲染成 checkbox）
  *   2. 名称（Take N + 缺失徽标）
- *   3. 节选起点（ms 数字输入）
- *   4. 节选终点（ms 数字输入）
- *   5. 持续时间 / 总时间
+ *   3. 节选起点（ms 数字输入，列宽可调）
+ *   4. 节选终点（ms 数字输入，列宽可调）
+ *   5. 持续时间 / 总时间（列宽可调）
  *   6. 试听
  *   7. 删除
  *   8. 在系统文件管理器中定位
  *
- * 用 CSS grid 让所有行的列宽对齐。最小宽度收紧到能放 6 列 24px 按钮 +
- * 名称 + 输入：约 280px；Inspector 实际更窄时由 overflow-auto 接管成
- * 横向滚动条，所有功能仍可达
+ * CSS grid 让所有行 / 表头按列对齐。三个时间列可拖动右侧把手调整列宽，
+ * 配置写进 preferences.layout.inspectorTakeColumnWidths 跨会话保留。
+ * 行 / 表头都用同一个 inline gridTemplateColumns，由 state 驱动以保证
+ * 一致——避免 Tailwind JIT 拼接动态 class 的坑
  */
-const TAKE_GRID_COLS =
-  'grid-cols-[20px_minmax(48px,auto)_60px_60px_minmax(96px,1fr)_24px_24px_24px]'
+
+type TakeColWidths = { trimStart: number; trimEnd: number; duration: number }
+
+/** 三个时间列的默认宽度（像素）。比首版的 60/60/96 翻一倍以缓解局促感 */
+const DEFAULT_TAKE_COL_WIDTHS: TakeColWidths = {
+  trimStart: 120,
+  trimEnd: 120,
+  duration: 192
+}
+
+/** 拖动时单列允许压缩到的最小宽度，防止用户拽到看不见 */
+const TAKE_COL_MIN = 60
+
+type TakeColKey = 'trimStart' | 'trimEnd' | 'duration'
 
 function TakesTable({
   segmentId,
@@ -450,6 +463,65 @@ function TakesTable({
   const { t } = useTranslation()
   const isIdle = playback === 'idle'
 
+  // 列宽来源：preferences.layout.inspectorTakeColumnWidths（持久化），缺项
+  // 回落 DEFAULT_TAKE_COL_WIDTHS。SegmentsView 同款做法——拖动期间用本地
+  // state 流畅回显，松手时再写 preferences，避免每帧 IPC
+  const [widths, setWidths] = useState<TakeColWidths>(() => {
+    const saved = usePreferencesStore.getState().prefs.layout?.inspectorTakeColumnWidths
+    return {
+      trimStart: saved?.trimStart ?? DEFAULT_TAKE_COL_WIDTHS.trimStart,
+      trimEnd: saved?.trimEnd ?? DEFAULT_TAKE_COL_WIDTHS.trimEnd,
+      duration: saved?.duration ?? DEFAULT_TAKE_COL_WIDTHS.duration
+    }
+  })
+
+  // 注意 col 5（duration）用 minmax(N, 1fr)：当 Inspector 比 grid 自身宽
+  // 还宽时，duration 列吃掉富余空间；窄时被父级 overflow-auto 接管成横滚
+  const gridTemplateColumns = `20px minmax(48px,auto) ${widths.trimStart}px ${widths.trimEnd}px minmax(${widths.duration}px,1fr) 24px 24px 24px`
+
+  // 拖动状态。pointermove 在 window 级监听，避免指针离开 handle 时丢更新
+  const dragRef = useRef<{ col: TakeColKey; startX: number; startW: number } | null>(null)
+
+  const startResize = (col: TakeColKey) => (e: React.PointerEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    dragRef.current = { col, startX: e.clientX, startW: widths[col] }
+    document.body.style.cursor = 'col-resize'
+
+    const onMove = (ev: PointerEvent): void => {
+      const ctx = dragRef.current
+      if (!ctx) return
+      const dx = ev.clientX - ctx.startX
+      const next = Math.max(TAKE_COL_MIN, ctx.startW + dx)
+      setWidths((w) => ({ ...w, [ctx.col]: next }))
+    }
+    const onUp = (): void => {
+      dragRef.current = null
+      document.body.style.cursor = ''
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      // 用 setter 拿到最新值落 preferences——闭包里的 widths 是拖动起点
+      setWidths((finalWidths) => {
+        usePreferencesStore
+          .getState()
+          .update({ layout: { inspectorTakeColumnWidths: finalWidths } })
+        return finalWidths
+      })
+    }
+
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }
+
+  // 双击 handle 复位到默认宽度
+  const resetCol = (col: TakeColKey): void => {
+    setWidths((w) => {
+      const next = { ...w, [col]: DEFAULT_TAKE_COL_WIDTHS[col] }
+      usePreferencesStore.getState().update({ layout: { inspectorTakeColumnWidths: next } })
+      return next
+    })
+  }
+
   return (
     // min-w-max 让 grid 在窄面板下保留全部列宽（不被父级压扁），由父级
     // overflow-auto 兜成横向滚动
@@ -458,15 +530,27 @@ function TakesTable({
       <div
         className={cn(
           'sticky top-0 z-10 grid items-center gap-1 border-b border-border bg-bg px-3 py-1',
-          'text-2xs font-medium text-fg-muted',
-          TAKE_GRID_COLS
+          'text-2xs font-medium text-fg-muted'
         )}
+        style={{ gridTemplateColumns }}
       >
         <span />
         <span>{t('inspector.col_take')}</span>
-        <span className="text-right">{t('inspector.col_trim_start')}</span>
-        <span className="text-right">{t('inspector.col_trim_end')}</span>
-        <span className="text-right">{t('inspector.col_duration')}</span>
+        <ResizableHeaderCell
+          label={t('inspector.col_trim_start')}
+          onResizeStart={startResize('trimStart')}
+          onReset={() => resetCol('trimStart')}
+        />
+        <ResizableHeaderCell
+          label={t('inspector.col_trim_end')}
+          onResizeStart={startResize('trimEnd')}
+          onReset={() => resetCol('trimEnd')}
+        />
+        <ResizableHeaderCell
+          label={t('inspector.col_duration')}
+          onResizeStart={startResize('duration')}
+          onReset={() => resetCol('duration')}
+        />
         <span />
         <span />
         <span />
@@ -496,9 +580,9 @@ function TakesTable({
             key={take.id}
             className={cn(
               'grid items-center gap-1 border-b border-border-subtle px-3 py-1 text-xs',
-              TAKE_GRID_COLS,
               isCurrent ? 'bg-accent-soft/40' : 'hover:bg-bg-raised'
             )}
+            style={{ gridTemplateColumns }}
           >
             {/* 1. 启用：实际是 selectedTakeId 单选，按 user 要求用 checkbox
                   外观。点击当前选中的不会取消（store 不接受 undefined） */}
@@ -678,5 +762,37 @@ function IconActionButton({
     >
       {children}
     </button>
+  )
+}
+
+/**
+ * 可拖动调整列宽的表头单元。视觉上是右对齐的列名 + 右边缘 4px 拖动把手。
+ * 鼠标悬停时把手变彩色提示「这里可以拖」；双击恢复默认宽度。
+ *
+ * 把手用 absolute + right-0 让它紧贴单元右边缘——拖把横移时更新对应的
+ * 列宽 state。pointermove / up 由调用方挂在 window 上跟踪
+ */
+function ResizableHeaderCell({
+  label,
+  onResizeStart,
+  onReset
+}: {
+  label: string
+  onResizeStart: (e: React.PointerEvent) => void
+  onReset: () => void
+}): React.JSX.Element {
+  const { t } = useTranslation()
+  return (
+    <div className="relative pr-2 text-right">
+      <span>{label}</span>
+      <div
+        onPointerDown={onResizeStart}
+        onDoubleClick={onReset}
+        title={t('inspector.col_resize_hint')}
+        // 比 1px 宽好抓；hover 时显色提示。z 高于表头其它内容 + sticky
+        // 让把手永远落在最上层
+        className="absolute top-0 right-0 bottom-0 z-20 w-1.5 cursor-col-resize hover:bg-accent/60"
+      />
+    </div>
   )
 }

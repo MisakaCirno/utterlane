@@ -128,6 +128,7 @@ export const zhCN = {
     col_trim_start: '起点 (ms)',
     col_trim_end: '终点 (ms)',
     col_duration: '时长',
+    col_resize_hint: '拖动调整列宽 · 双击恢复默认',
     take_reveal_aria: '在文件管理器中定位',
     btn_play: '播放',
     btn_stop: '停止',

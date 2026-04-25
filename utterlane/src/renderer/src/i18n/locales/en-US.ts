@@ -126,6 +126,7 @@ export const enUS: TranslationSchema = {
     col_trim_start: 'Start (ms)',
     col_trim_end: 'End (ms)',
     col_duration: 'Duration',
+    col_resize_hint: 'Drag to resize · double-click to reset',
     take_reveal_aria: 'Reveal in file manager',
     btn_play: 'Play',
     btn_stop: 'Stop',

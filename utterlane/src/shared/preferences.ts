@@ -151,6 +151,13 @@ export type SegmentsColumnWidths = {
   duration?: number
 }
 
+/** Inspector 里 Take 表格三个时间列的列宽（像素）。其它列宽度固定不可调 */
+export type InspectorTakeColumnWidths = {
+  trimStart?: number
+  trimEnd?: number
+  duration?: number
+}
+
 /**
  * dockLayout 当前版本号。每次默认布局结构发生破坏性变化（新加 / 删除
  * panel、改 panel id 等）时 +1：旧版本的持久化布局会因 schemaVersion
@@ -188,6 +195,7 @@ export type AppPreferences = {
      */
     dockLayout?: DockLayoutEnvelope
     segmentsColumnWidths?: SegmentsColumnWidths
+    inspectorTakeColumnWidths?: InspectorTakeColumnWidths
   }
 
   window?: WindowBounds
@@ -324,6 +332,12 @@ export function mergePreferences(
       layoutNext.segmentsColumnWidths = mergePartial(
         base.layout?.segmentsColumnWidths,
         patch.layout.segmentsColumnWidths
+      )
+    }
+    if (patch.layout.inspectorTakeColumnWidths) {
+      layoutNext.inspectorTakeColumnWidths = mergePartial(
+        base.layout?.inspectorTakeColumnWidths,
+        patch.layout.inspectorTakeColumnWidths
       )
     }
     next.layout = layoutNext
