@@ -845,6 +845,38 @@ export function ProjectTimelineView(): React.JSX.Element {
     return () => el.removeEventListener('wheel', onWheel)
   }, [zoom, setTimelineScroll])
 
+  // === 临时调试：每次面板 resize 把每一层 div 的实际尺寸打印出来 ===
+  // 让 dockview tab 切左/右后能从 console 看到每层 width 是多少，
+  // 精准定位「哪一层被撑大、哪一层 stretch 失效」。dev-only，确认问
+  // 题后下一个 commit 会移除
+  useEffect(() => {
+    if (!import.meta.env.DEV) return
+    const root = wrapperRef.current
+    if (!root) return
+    const dump = (tag: string): void => {
+      const lines: string[] = [`[PT-debug] ${tag}`]
+      let el: HTMLElement | null = root
+      let depth = 0
+      while (el && depth < 6) {
+        const r = el.getBoundingClientRect()
+        const cls = typeof el.className === 'string' ? el.className.slice(0, 80) : '<svg>'
+        lines.push(
+          `  [${depth}] <${el.tagName.toLowerCase()}> w=${r.width.toFixed(0)} ` +
+            `x=${r.left.toFixed(0)} clsName="${cls}"`
+        )
+        el = el.parentElement
+        depth++
+      }
+      console.log(lines.join('\n'))
+    }
+    dump('mount')
+    const ro = new ResizeObserver(() => dump('resize'))
+    ro.observe(root)
+    if (root.parentElement) ro.observe(root.parentElement)
+    if (root.parentElement?.parentElement) ro.observe(root.parentElement.parentElement)
+    return () => ro.disconnect()
+  }, [])
+
   return (
     // PanelShell 强制 width 100% panel container，但 flex item 默认
     // min-width:auto = max-content。如果不加 min-w-0，本 root 内部的
