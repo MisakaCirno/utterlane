@@ -45,7 +45,10 @@ export function WaveformView({
   filePath,
   durationMs,
   trim,
-  onTrimChange
+  onTrimChange,
+  zoomH = 1,
+  zoomV = 1,
+  onWheel
 }: {
   filePath: string | null
   /**
@@ -60,6 +63,21 @@ export function WaveformView({
    * 否则传新区间。仅当传了这个 prop 时才显示手柄
    */
   onTrimChange?: (trim: WaveformTrim | undefined) => void
+  /**
+   * 横向缩放。1 = canvas 宽度等于容器宽度（无横向滚动）；> 1 = canvas
+   * 比容器宽，外层 scroll container 出横向滚动条供精细调整 trim
+   */
+  zoomH?: number
+  /**
+   * 纵向缩放。1 = 默认振幅；> 1 = 振幅放大显示（低音量录音也看得清）；
+   * < 1 = 振幅压低。波形超出容器高度时自然被 overflow 裁
+   */
+  zoomV?: number
+  /**
+   * 容器层 wheel 事件回调。让父级实现「Ctrl+wheel = 缩放、普通 wheel =
+   * 横向滚动」之类的策略。WaveformView 自己不处理 wheel
+   */
+  onWheel?: (e: WheelEvent) => void
 }): React.JSX.Element {
   const { t } = useTranslation()
   const waveCanvasRef = useRef<HTMLCanvasElement>(null)
@@ -101,13 +119,21 @@ export function WaveformView({
   // 总时长（毫秒），用于把 playheadMs 映射到 x 坐标
   const totalMs = samples && entry ? (samples.length / entry.sampleRate) * 1000 : 0
 
+  // === 缩放后的内层宽度 ===
+  // size.w 是外层 scroll container 的可见宽度（viewport）。inner 内容
+  // 宽度 = viewport × zoomH。zoomH=1 时 inner = viewport（无横向滚动），
+  // zoomH>1 时 inner 比 viewport 宽，外层 overflow-x-auto 出滚动条。
+  // 所有 absolute 子元素（canvas / handles / overlays / playhead）的位置
+  // 都基于 innerWidth，而不是 size.w
+  const innerWidth = size.w > 0 ? size.w * zoomH : 0
+
   // 命令式更新游标：subscribePosition 回调里直接写 transform，不走 React。
-  // closure 捕获 filePath / totalMs / size.w，三者任意变化时重新订阅以
+  // closure 捕获 filePath / totalMs / innerWidth，任意变化时重新订阅以
   // 让 closure 拿到最新值
   useEffect(() => {
     const target = playheadRef.current
     if (!target) return
-    if (size.w === 0 || totalMs <= 0) {
+    if (innerWidth === 0 || totalMs <= 0) {
       target.style.display = 'none'
       return
     }
@@ -119,11 +145,11 @@ export function WaveformView({
         return
       }
       const ratio = Math.min(1, Math.max(0, positionMs / totalMs))
-      const cx = ratio * size.w
+      const cx = ratio * innerWidth
       el.style.display = 'block'
       el.style.transform = `translate3d(${cx}px, 0, 0)`
     })
-  }, [filePath, totalMs, size.w])
+  }, [filePath, totalMs, innerWidth])
 
   // 容器尺寸跟踪：用 ResizeObserver 写到 size state，让两层 canvas 都依赖
   useEffect(() => {
@@ -139,28 +165,33 @@ export function WaveformView({
     return () => ro.disconnect()
   }, [])
 
-  // 波形层：仅依赖 samples + size。播放每帧的 playheadMs 变化不会让它重绘，
-  // 不再触发 computePeaks(O(samples)) 的浪费。
+  // 波形层：依赖 samples + innerWidth + size.h + zoomV。innerWidth 已经
+  // 包含 zoomH 因素；zoomV 影响绘制时的振幅高度
   useEffect(() => {
     const canvas = waveCanvasRef.current
-    if (!canvas || size.w === 0 || size.h === 0) return
+    if (!canvas || innerWidth === 0 || size.h === 0) return
     const dpr = window.devicePixelRatio || 1
-    canvas.width = Math.floor(size.w * dpr)
+    canvas.width = Math.floor(innerWidth * dpr)
     canvas.height = Math.floor(size.h * dpr)
-    canvas.style.width = `${size.w}px`
+    canvas.style.width = `${innerWidth}px`
     canvas.style.height = `${size.h}px`
 
     const ctx = canvas.getContext('2d')
     if (!ctx) return
     ctx.scale(dpr, dpr)
-    ctx.clearRect(0, 0, size.w, size.h)
+    ctx.clearRect(0, 0, innerWidth, size.h)
 
     if (!samples) return
 
-    const buckets = Math.max(1, Math.floor(size.w))
+    // buckets = innerWidth：zoomH 越大 → 越多 buckets → 波形越细。代价是
+    // 重绘时间跟 buckets 成线性，但 zoomH 变化不频繁，可接受
+    const buckets = Math.max(1, Math.floor(innerWidth))
     const peaks = computePeaks(samples, buckets)
     const midY = size.h / 2
-    const maxHalfHeight = midY - 4
+    // zoomV 缩放振幅。zoomV > 1 时波形可能超出 [0, size.h]，被外层
+    // overflow-y-hidden 裁——这是预期行为（用户拉高纵向缩放就是要看
+    // 低音量细节，不在乎高音量峰值视觉上"出框"）
+    const maxHalfHeight = (midY - 4) * zoomV
 
     // 用产品品牌色（Tailwind 里 accent.DEFAULT）硬编码——
     // 波形是产品识别的一部分，不跟随 dock 主题切换
@@ -181,22 +212,24 @@ export function WaveformView({
     ctx.lineWidth = 1
     ctx.beginPath()
     ctx.moveTo(0, midY)
-    ctx.lineTo(size.w, midY)
+    ctx.lineTo(innerWidth, midY)
     ctx.stroke()
-  }, [samples, size])
+  }, [samples, innerWidth, size.h, zoomV])
 
   // ========================================================================
   // Trim 编辑：手柄 + 遮罩
   // ========================================================================
 
   // 当前用于 trim 渲染的有效区间。durationMs / trim 缺失时回落到「整段」，
-  // 这样手柄默认贴在两端，用户从那里开始拖即可激活节选
+  // 这样手柄默认贴在两端，用户从那里开始拖即可激活节选。
+  // 位置基于 innerWidth：zoomH > 1 时 inner 比 viewport 宽，handles 的
+  // px 位置自然跟着分散，更易精准拖拽
   const trimDurationMs = durationMs && durationMs > 0 ? durationMs : 0
   const effectiveTrimStart = Math.max(0, Math.min(trim?.startMs ?? 0, trimDurationMs))
   const effectiveTrimEnd = Math.max(0, Math.min(trim?.endMs ?? trimDurationMs, trimDurationMs))
-  const showTrimUi = !!onTrimChange && trimDurationMs > 0 && size.w > 0
-  const startX = trimDurationMs > 0 ? (effectiveTrimStart / trimDurationMs) * size.w : 0
-  const endX = trimDurationMs > 0 ? (effectiveTrimEnd / trimDurationMs) * size.w : size.w
+  const showTrimUi = !!onTrimChange && trimDurationMs > 0 && innerWidth > 0
+  const startX = trimDurationMs > 0 ? (effectiveTrimStart / trimDurationMs) * innerWidth : 0
+  const endX = trimDurationMs > 0 ? (effectiveTrimEnd / trimDurationMs) * innerWidth : innerWidth
 
   // 拖拽状态：单一 ref 跨 pointermove / up 共享
   const dragRef = useRef<{
@@ -219,9 +252,11 @@ export function WaveformView({
 
   function onDragMove(e: React.PointerEvent): void {
     const ctx = dragRef.current
-    if (!ctx || !onTrimChange || size.w <= 0) return
+    if (!ctx || !onTrimChange || innerWidth <= 0) return
     const dx = e.clientX - ctx.startClientX
-    const dMs = (dx / size.w) * trimDurationMs
+    // dx 是屏幕像素位移，innerWidth 是 inner 总像素宽度对应 trimDurationMs。
+    // zoomH > 1 时 innerWidth 更大，相同 dx 对应更小的 dMs——拖拽精度提高
+    const dMs = (dx / innerWidth) * trimDurationMs
     let nextStart = effectiveTrimStart
     let nextEnd = effectiveTrimEnd
     if (ctx.side === 'start') {
@@ -241,11 +276,25 @@ export function WaveformView({
     ;(e.currentTarget as Element).releasePointerCapture?.(e.pointerId)
   }
 
+  // wheel listener 用 native event 而不是 React 的 onWheel：React onWheel
+  // 默认 passive: true 不能 preventDefault，会让父级 wheel 处理与默认
+  // 滚动行为冲突
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el || !onWheel) return
+    const handler = (e: WheelEvent): void => onWheel(e)
+    el.addEventListener('wheel', handler, { passive: false })
+    return () => el.removeEventListener('wheel', handler)
+  }, [onWheel])
+
   return (
     <div
       ref={containerRef}
       className={cn(
-        'relative flex-1 overflow-hidden bg-bg-deep',
+        // overflow-x-auto 让 zoomH > 1 时出现横向滚动条；overflow-y-hidden
+        // 防止 zoomV > 1 时波形纵向溢出导致的纵向滚动（纵向方向用户没法
+        // 滚动也无意义）
+        'relative flex-1 overflow-x-auto overflow-y-hidden bg-bg-deep',
         // 最小高度保证切空段时布局不坍塌
         'min-h-[80px]'
       )}
@@ -256,8 +305,11 @@ export function WaveformView({
         <Placeholder>{t('timeline.waveform_error', { message: errorMessage })}</Placeholder>
       )}
       {filePath && !errorMessage && (
-        <>
-          <canvas ref={waveCanvasRef} className="absolute inset-0" />
+        // inner 容器：宽度 = innerWidth（=viewport×zoomH），absolute 子元素
+        // 都以这个 inner 为定位基准。container 是 scroll outer，inner 超出
+        // viewport 部分由 outer 的 overflow-x-auto 接管成横向滚动条
+        <div className="relative h-full" style={{ width: innerWidth || '100%' }}>
+          <canvas ref={waveCanvasRef} className="absolute inset-y-0 left-0" />
           {/* 节选 trim 遮罩：手柄外的区域用半透明黑覆盖，视觉上提示
               「这段不会被播放 / 导出」。pointer-events-none 不挡 click /
               hover */}
@@ -268,11 +320,11 @@ export function WaveformView({
               style={{ width: startX }}
             />
           )}
-          {showTrimUi && endX < size.w && (
+          {showTrimUi && endX < innerWidth && (
             <div
               aria-hidden
               className="pointer-events-none absolute top-0 bottom-0 bg-bg-deep/70"
-              style={{ left: endX, right: 0 }}
+              style={{ left: endX, width: innerWidth - endX }}
             />
           )}
           {/* 播放游标：1px 红色竖线。位置由命令式 useEffect 写
@@ -285,7 +337,7 @@ export function WaveformView({
             className="pointer-events-none absolute top-0 bottom-0 left-0 z-10 w-px bg-rec/85 will-change-transform"
             style={{ display: 'none' }}
           />
-          {/* trim 手柄：只在传入 onTrimChange 且 durationMs > 0 时渲染 */}
+          {/* trim 手柄：只在传入 onTrimChange 且 innerWidth > 0 时渲染 */}
           {showTrimUi && (
             <>
               <TrimHandle
@@ -308,7 +360,7 @@ export function WaveformView({
               />
             </>
           )}
-        </>
+        </div>
       )}
     </div>
   )
