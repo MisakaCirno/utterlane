@@ -8,6 +8,8 @@ import {
   type AppPreferences
 } from '@shared/preferences'
 import { writeJsonAtomic } from '../lib/atomic-write'
+import { backupBeforeMigration, runMigrations } from '../lib/migrations'
+import { preferencesMigrations } from './migrations'
 
 /**
  * 写盘节流时长：UI 上大多数偏好变更都是用户连续操作（拖拽窗口、调列宽、
@@ -37,21 +39,51 @@ class PreferencesStore {
   private dirty = false
 
   /**
-   * 启动时加载一次。失败（文件不存在 / 解析失败 / schema 不识别）一律回落到默认值，
-   * 不抛异常，避免因为一个损坏的偏好文件导致应用无法启动。
+   * 启动时加载一次。失败（文件不存在 / 解析失败 / schema 迁移失败 / 高版本拒绝）
+   * 一律回落到默认值，不抛异常——一个损坏的偏好文件不应阻塞应用启动。
    */
   async init(): Promise<void> {
     this.filePath = join(app.getPath('userData'), FILE_NAME)
     try {
       const raw = await fs.readFile(this.filePath, 'utf8')
-      const parsed = JSON.parse(raw) as AppPreferences
-      if (parsed.schemaVersion === PREFERENCES_SCHEMA_VERSION) {
-        // 未来出现新的 schemaVersion 时，在这里放迁移逻辑。
-        // 目前版本单一，直接采纳。
-        this.current = { ...DEFAULT_PREFERENCES, ...parsed }
-      } else {
+      const parsedRaw: unknown = JSON.parse(raw)
+      const version =
+        typeof parsedRaw === 'object' &&
+        parsedRaw !== null &&
+        typeof (parsedRaw as { schemaVersion?: unknown }).schemaVersion === 'number'
+          ? ((parsedRaw as { schemaVersion: number }).schemaVersion as number)
+          : 0
+
+      if (version === PREFERENCES_SCHEMA_VERSION) {
+        this.current = { ...DEFAULT_PREFERENCES, ...(parsedRaw as AppPreferences) }
+        return
+      }
+
+      if (version > PREFERENCES_SCHEMA_VERSION) {
         console.warn(
-          `[preferences] unrecognized schemaVersion ${parsed.schemaVersion}, falling back to defaults`
+          `[preferences] schemaVersion ${version} is from a newer Utterlane build, using defaults`
+        )
+        return
+      }
+
+      // 低版本：备份 + 迁移 + 写回。失败时回落到默认值（非致命）
+      try {
+        await backupBeforeMigration(this.filePath, version)
+        const migrated = runMigrations(
+          parsedRaw,
+          version,
+          PREFERENCES_SCHEMA_VERSION,
+          preferencesMigrations
+        ) as AppPreferences
+        await writeJsonAtomic(this.filePath, migrated)
+        this.current = { ...DEFAULT_PREFERENCES, ...migrated }
+        console.log(
+          `[preferences] migrated from v${version} to v${PREFERENCES_SCHEMA_VERSION} (backup saved)`
+        )
+      } catch (migrateErr) {
+        console.warn(
+          `[preferences] migration from v${version} failed, using defaults:`,
+          (migrateErr as Error).message
         )
       }
     } catch (err: unknown) {
