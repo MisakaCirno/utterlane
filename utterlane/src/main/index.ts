@@ -11,6 +11,7 @@ import { initLogger } from './logger'
 import { registerLogsIpc } from './logger/ipc'
 import { registerAppInfoIpc } from './app-info/ipc'
 import type { WindowBounds } from '@shared/preferences'
+import { WINDOW_IPC } from '@shared/ipc'
 
 // 日志必须最早 init：后面任何模块的 log 调用、uncaughtException 捕获都依赖它
 initLogger()
@@ -75,7 +76,7 @@ function createWindow(): void {
   mainWindow.on('close', (event) => {
     if (mainWindow[ALLOW_CLOSE_KEY]) return
     event.preventDefault()
-    mainWindow.webContents.send('window:close-request')
+    mainWindow.webContents.send(WINDOW_IPC.closeRequest)
   })
 
   // 上次退出时若是最大化状态，新窗口打开后恢复最大化
@@ -88,7 +89,7 @@ function createWindow(): void {
   })
 
   const emitMaximizeState = (): void => {
-    mainWindow.webContents.send('window:maximize-state', mainWindow.isMaximized())
+    mainWindow.webContents.send(WINDOW_IPC.maximizeState, mainWindow.isMaximized())
   }
   mainWindow.on('maximize', () => {
     emitMaximizeState()
@@ -138,26 +139,26 @@ app.whenReady().then(async () => {
     optimizer.watchWindowShortcuts(window)
   })
 
-  ipcMain.on('window:minimize', (event) => {
+  ipcMain.on(WINDOW_IPC.minimize, (event) => {
     BrowserWindow.fromWebContents(event.sender)?.minimize()
   })
-  ipcMain.on('window:toggle-maximize', (event) => {
+  ipcMain.on(WINDOW_IPC.toggleMaximize, (event) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     if (!win) return
     if (win.isMaximized()) win.unmaximize()
     else win.maximize()
   })
-  ipcMain.on('window:close', (event) => {
+  ipcMain.on(WINDOW_IPC.close, (event) => {
     BrowserWindow.fromWebContents(event.sender)?.close()
   })
   // renderer 确认后主动调这个 IPC：置 allowClose 后第二次 close 就会放行
-  ipcMain.on('window:close-confirmed', (event) => {
+  ipcMain.on(WINDOW_IPC.closeConfirmed, (event) => {
     const win = BrowserWindow.fromWebContents(event.sender) as WindowWithAllowClose | null
     if (!win) return
     win[ALLOW_CLOSE_KEY] = true
     win.close()
   })
-  ipcMain.handle('window:is-maximized', (event) => {
+  ipcMain.handle(WINDOW_IPC.isMaximized, (event) => {
     return BrowserWindow.fromWebContents(event.sender)?.isMaximized() ?? false
   })
 

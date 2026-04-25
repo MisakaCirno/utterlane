@@ -7,6 +7,7 @@ import {
   PREFERENCES_SCHEMA_VERSION,
   type AppPreferences
 } from '@shared/preferences'
+import { PREFERENCES_IPC } from '@shared/ipc'
 import { writeJsonAtomic } from '../lib/atomic-write'
 import { backupBeforeMigration, runMigrations } from '../lib/migrations'
 import { preferencesMigrations } from './migrations'
@@ -21,7 +22,7 @@ const SAVE_DEBOUNCE_MS = 500
 const FILE_NAME = 'preferences.json'
 
 /** 发给 renderer 的变更事件名。renderer 端可以订阅它来同步本地副本 */
-export const PREFERENCES_CHANGED_EVENT = 'preferences:changed'
+export const PREFERENCES_CHANGED_EVENT = PREFERENCES_IPC.changed
 
 /**
  * 偏好存储管理器。

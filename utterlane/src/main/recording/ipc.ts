@@ -2,8 +2,11 @@ import { promises as fs } from 'fs'
 import { join } from 'path'
 import { ipcMain } from 'electron'
 import type { WriteTakeResult } from '@shared/recording'
+import { RECORDING_IPC } from '@shared/ipc'
 import { projectSession } from '../project-storage'
 import { projectPaths } from '../project-storage/paths'
+
+export { RECORDING_IPC }
 
 /**
  * 录音的落盘流程（对应 docs/utterlane.md#录音落盘）：
@@ -15,10 +18,6 @@ import { projectPaths } from '../project-storage/paths'
  * 这里只处理「文件写入」，Take 对 segments.json 的添加 / 选中由 renderer 侧
  * 通过既有的 saveSegments 流程完成——保持各自职责单一。
  */
-
-export const RECORDING_IPC = {
-  writeTake: 'recording:write-take'
-} as const
 
 export type WriteTakePayload = {
   segmentId: string

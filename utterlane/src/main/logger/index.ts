@@ -1,9 +1,10 @@
 import { BrowserWindow, shell } from 'electron'
 import log from 'electron-log/main'
 import type { CrashInfo } from '@shared/crash'
+import { APP_IPC } from '@shared/ipc'
 
 /** Renderer 端订阅的崩溃事件通道名 */
-export const CRASH_EVENT = 'app:crash'
+export const CRASH_EVENT = APP_IPC.crash
 
 /**
  * 日志系统：基于 electron-log。

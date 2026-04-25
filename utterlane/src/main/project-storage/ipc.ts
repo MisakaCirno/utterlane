@@ -7,23 +7,11 @@ import {
   type SegmentsFile,
   type WorkspaceFile
 } from '@shared/project'
+import { PROJECT_IPC } from '@shared/ipc'
 import { projectSession, type OpenResult } from './session'
 import { projectPaths, resolveProjectRelative } from './paths'
 
-/**
- * 集中定义的 IPC 通道名。preload 复制同名字符串，避免跨进程 import 耦合。
- */
-export const PROJECT_IPC = {
-  new: 'project:new',
-  open: 'project:open',
-  openPath: 'project:open-path',
-  close: 'project:close',
-  current: 'project:current',
-  saveWorkspace: 'project:save-workspace',
-  saveSegments: 'project:save-segments',
-  saveProject: 'project:save-project',
-  readTakeFile: 'project:read-take-file'
-} as const
+export { PROJECT_IPC }
 
 /** saveSegments 的 IPC 返回值；renderer 侧据此切换 saved 标记。 */
 export type SaveSegmentsResult = { ok: true } | { ok: false; message: string }

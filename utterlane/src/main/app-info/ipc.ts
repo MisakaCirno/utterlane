@@ -1,5 +1,6 @@
 import { app, ipcMain } from 'electron'
 import type { AppInfo } from '@shared/appInfo'
+import { APP_IPC } from '@shared/ipc'
 
 /**
  * 暴露给 renderer 的应用 / 运行时元信息。
@@ -8,12 +9,8 @@ import type { AppInfo } from '@shared/appInfo'
  * 全是只读、启动后不变，所以 renderer 端可以缓存 —— 我们直接同步算好返回。
  */
 
-export const APP_INFO_IPC = {
-  getInfo: 'app:get-info'
-} as const
-
 export function registerAppInfoIpc(): void {
-  ipcMain.handle(APP_INFO_IPC.getInfo, (): AppInfo => {
+  ipcMain.handle(APP_IPC.getInfo, (): AppInfo => {
     return {
       name: app.getName(),
       version: app.getVersion(),

@@ -1,14 +1,9 @@
 import { ipcMain } from 'electron'
 import type { AppPreferences } from '@shared/preferences'
+import { PREFERENCES_IPC } from '@shared/ipc'
 import { preferencesStore } from './store'
 
-/**
- * IPC 通道名。集中在这里定义，preload 侧直接引用同名常量，避免字面量散落。
- */
-export const PREFERENCES_IPC = {
-  get: 'preferences:get',
-  update: 'preferences:update'
-} as const
+export { PREFERENCES_IPC }
 
 export function registerPreferencesIpc(): void {
   // 用 handle + invoke 是为了让 renderer 能拿到同步返回的当前快照。

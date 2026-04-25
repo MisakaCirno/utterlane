@@ -10,10 +10,13 @@ import type {
   RemapTakeResult,
   SaveOrphanAsTakeResult
 } from '@shared/audio-audit'
+import { AUDIO_AUDIT_IPC } from '@shared/ipc'
 import { projectSession } from '../project-storage'
 import { loadSegmentsFile } from '../project-storage/io'
 import { projectPaths, resolveProjectRelative } from '../project-storage/paths'
 import { readWav } from '../export/wav'
+
+export { AUDIO_AUDIT_IPC }
 
 /**
  * 音频文件审计：扫描 segments.json 与 audios/ 之间的差异，提供缺失 Take 修复
@@ -35,13 +38,6 @@ import { readWav } from '../export/wav'
  * 这些是修复性操作，纳入 undo 反而别扭——撤销了「修复」之后还得手动重新
  * 修复。和录音同样的边界。
  */
-
-export const AUDIO_AUDIT_IPC = {
-  scan: 'audio-audit:scan',
-  remap: 'audio-audit:remap',
-  saveOrphanAsTake: 'audio-audit:save-orphan-as-take',
-  deleteOrphan: 'audio-audit:delete-orphan'
-} as const
 
 // ---------------------------------------------------------------------------
 // 扫描：列出缺失 + 孤儿

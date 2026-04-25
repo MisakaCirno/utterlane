@@ -3,7 +3,10 @@ import { basename, join } from 'path'
 import { BrowserWindow, dialog, ipcMain } from 'electron'
 import type { ExportAudioOptions } from '@shared/export'
 import type { Segment } from '@shared/project'
+import { EXPORT_IPC } from '@shared/ipc'
 import { projectSession } from '../project-storage'
+
+export { EXPORT_IPC }
 import { loadSegmentsFile, loadProjectFile } from '../project-storage/io'
 import { readWav, decodeWavToFloat32, buildWavFromChannels } from './wav'
 import { resampleChannels } from './resample'
@@ -30,11 +33,6 @@ import { buildSrt } from './srt'
  *     （这是「单一工程内所有录音参数一致」这一约束的延伸；source 端不一致
  *     不在 MVP 处理范围）
  */
-
-export const EXPORT_IPC = {
-  audioWav: 'export:audio-wav',
-  subtitlesSrt: 'export:subtitles-srt'
-} as const
 
 export type ExportResult =
   | { ok: true; filePath: string; skipped: number }
