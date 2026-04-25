@@ -143,6 +143,12 @@ export const enUS: TranslationSchema = {
     tb_apply_default_gaps: 'Apply default gaps',
     tb_apply_default_gaps_hint:
       'Auto-fill gaps for segments that have not been set manually: {{sentence}} ms between sentences, {{paragraph}} ms between paragraphs. Manually set gaps are preserved.',
+    tb_reset_gaps_hint:
+      'Reset to defaults: force every segment (including manual ones) back to default values.',
+    tb_clear_auto_gaps_hint:
+      'Clear default gaps: remove all gaps written by "Apply default", keeping manual ones.',
+    ctx_insert_before: 'Insert empty Segment before',
+    ctx_insert_after: 'Insert empty Segment after',
     zoom_in: 'Zoom in (Ctrl+wheel)',
     zoom_out: 'Zoom out (Ctrl+wheel)',
     zoom_reset: 'Reset to 1x',
@@ -298,7 +304,9 @@ export const enUS: TranslationSchema = {
     set_paragraph_start: 'Toggle Paragraph Head',
     replace_all: 'Replace All',
     set_segment_gap: 'Adjust Trailing Gap',
-    apply_default_gaps: 'Apply Default Gaps'
+    apply_default_gaps: 'Apply Default Gaps',
+    reset_gaps_to_default: 'Reset Gaps to Default',
+    clear_auto_gaps: 'Clear Auto Gaps'
   },
 
   audit_dialog: {

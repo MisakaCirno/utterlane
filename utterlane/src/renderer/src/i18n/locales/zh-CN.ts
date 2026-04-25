@@ -145,6 +145,11 @@ export const zhCN = {
     tb_apply_default_gaps: '应用默认间隔',
     tb_apply_default_gaps_hint:
       '把所有未手动设置过间隔的 Segment 自动填充：句间 {{sentence}} ms / 段间 {{paragraph}} ms。已手动设置的不会被覆盖。',
+    tb_reset_gaps_hint: '重置为默认间隔：强制把所有段（包括手动设置过的）都设回默认值。',
+    tb_clear_auto_gaps_hint:
+      '删除所有默认间隔：清空所有由「应用默认间隔」自动写入的间隔，手动设置的保留。',
+    ctx_insert_before: '在前插入空白 Segment',
+    ctx_insert_after: '在后插入空白 Segment',
     zoom_in: '放大（Ctrl+滚轮）',
     zoom_out: '缩小（Ctrl+滚轮）',
     zoom_reset: '恢复 1x',
@@ -295,7 +300,9 @@ export const zhCN = {
     set_paragraph_start: '切换段首',
     replace_all: '全部替换',
     set_segment_gap: '调整段后间隔',
-    apply_default_gaps: '应用默认间隔'
+    apply_default_gaps: '应用默认间隔',
+    reset_gaps_to_default: '重置为默认间隔',
+    clear_auto_gaps: '清除自动间隔'
   },
 
   audit_dialog: {

@@ -1,8 +1,13 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import * as ContextMenu from '@radix-ui/react-context-menu'
 import {
+  ArrowDownFromLine,
+  ArrowUpFromLine,
+  Eraser,
   Pause,
   Play,
+  RefreshCw,
   Rewind,
   Square,
   ZoomIn,
@@ -103,34 +108,56 @@ function ProjectControlRow({
   const selectSegment = useEditorStore((s) => s.selectSegment)
   const order = useEditorStore((s) => s.order)
   const applyDefaultGaps = useEditorStore((s) => s.applyDefaultGaps)
+  const resetGapsToDefault = useEditorStore((s) => s.resetGapsToDefault)
+  const clearAutoGaps = useEditorStore((s) => s.clearAutoGaps)
 
   const isBusy = playback !== 'idle'
+  const canEditGaps = !isBusy && order.length > 1
+  const defaults = {
+    sentenceMs: DEFAULT_SENTENCE_GAP_MS,
+    paragraphMs: DEFAULT_PARAGRAPH_GAP_MS
+  }
 
+  // 三段式 grid 布局：左 = 间隔操作；中 = 播放控制；右 = 缩放。
+  // 用 grid 而不是 flex+ml-auto 是为了让中间组「真正居中」——
+  // ml-auto 的居中受左右两侧宽度差影响，会偏移
   return (
-    <div className="flex h-8 shrink-0 items-center gap-2 border-b border-border-subtle bg-bg-panel px-2">
-      {/* 应用默认间隔：句间 200ms / 段间 800ms，跳过 manual 的段 */}
-      <button
-        onClick={() =>
-          applyDefaultGaps({
-            sentenceMs: DEFAULT_SENTENCE_GAP_MS,
-            paragraphMs: DEFAULT_PARAGRAPH_GAP_MS
-          })
-        }
-        disabled={isBusy || order.length <= 1}
-        title={t('timeline.tb_apply_default_gaps_hint', {
-          sentence: DEFAULT_SENTENCE_GAP_MS,
-          paragraph: DEFAULT_PARAGRAPH_GAP_MS
-        })}
-        className={cn(
-          'flex h-6 items-center gap-1 rounded-sm border border-border bg-bg-raised px-2 text-2xs',
-          'text-fg hover:border-border-strong disabled:cursor-not-allowed disabled:opacity-40'
-        )}
-      >
-        <AlignVerticalJustifyCenter size={11} />
-        {t('timeline.tb_apply_default_gaps')}
-      </button>
+    <div
+      className="grid h-8 shrink-0 items-center gap-2 border-b border-border-subtle bg-bg-panel px-2"
+      style={{ gridTemplateColumns: '1fr auto 1fr' }}
+    >
+      {/* 左：间隔操作组 */}
+      <div className="flex items-center gap-1">
+        <IconButton
+          title={t('timeline.tb_apply_default_gaps_hint', {
+            sentence: DEFAULT_SENTENCE_GAP_MS,
+            paragraph: DEFAULT_PARAGRAPH_GAP_MS
+          })}
+          onClick={() => applyDefaultGaps(defaults)}
+          disabled={!canEditGaps}
+        >
+          <AlignVerticalJustifyCenter size={12} />
+        </IconButton>
+        {/* 重置：覆盖 manual，强制全部回到默认值 */}
+        <IconButton
+          title={t('timeline.tb_reset_gaps_hint')}
+          onClick={() => resetGapsToDefault(defaults)}
+          disabled={!canEditGaps}
+        >
+          <RefreshCw size={11} />
+        </IconButton>
+        {/* 清除：仅清掉非 manual 的，保留用户手动设置过的 */}
+        <IconButton
+          title={t('timeline.tb_clear_auto_gaps_hint')}
+          onClick={() => clearAutoGaps()}
+          disabled={!canEditGaps}
+        >
+          <Eraser size={11} />
+        </IconButton>
+      </div>
 
-      <div className="ml-auto flex items-center gap-0.5 rounded-sm border border-border bg-bg-deep p-0.5">
+      {/* 中：播放控制组（始终居中，不被左右组宽度推动） */}
+      <div className="flex items-center gap-0.5 justify-self-center rounded-sm border border-border bg-bg-deep p-0.5">
         <IconButton
           title={t('timeline.btn_play_project_from_start')}
           onClick={() => {
@@ -168,9 +195,8 @@ function ProjectControlRow({
         </IconButton>
       </div>
 
-      {/* zoom 控制：连续缩放，每次按钮 ×/÷ 1.5 倍。Ctrl+滚轮在 TimelineContent
-          层处理（更接近鼠标位置） */}
-      <div className="flex items-center gap-0.5 rounded-sm border border-border bg-bg-deep p-0.5">
+      {/* 右：缩放控制组 */}
+      <div className="flex items-center gap-0.5 justify-self-end rounded-sm border border-border bg-bg-deep p-0.5">
         <IconButton
           title={t('timeline.zoom_out')}
           onClick={() => onZoomChange(clampZoom(zoom / 1.5))}
@@ -223,6 +249,8 @@ function TimelineClip({
   const seg = useEditorStore((s) => s.segmentsById[id])
   const isSelected = useEditorStore((s) => s.selectedSegmentId === id)
   const selectSegment = useEditorStore((s) => s.selectSegment)
+  const insertSegmentBefore = useEditorStore((s) => s.insertSegmentBefore)
+  const insertSegmentAfter = useEditorStore((s) => s.insertSegmentAfter)
 
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id
@@ -257,38 +285,73 @@ function TimelineClip({
   }
 
   return (
-    <div
-      ref={combinedRef}
-      {...attributes}
-      {...listeners}
-      onClick={() => selectSegment(id)}
-      title={seg.text}
-      className={cn(
-        'relative flex shrink-0 cursor-pointer flex-col justify-between rounded-sm border px-1.5 py-1 text-[10px]',
-        hasAudio
-          ? isSelected
-            ? 'border-accent bg-accent-soft text-white'
-            : 'border-border bg-bg-raised text-fg hover:border-border-strong'
-          : isSelected
-            ? 'border-accent bg-bg-deep text-fg-muted'
-            : 'border-dashed border-border bg-bg-deep text-fg-dim hover:border-border-strong',
-        isDragging && 'shadow-lg ring-1 ring-accent'
-      )}
-      style={style}
-    >
-      <div className="flex items-center gap-1">
-        <span className="font-mono tabular-nums opacity-70">{idx + 1}</span>
-        <span className="truncate">{seg.text}</span>
-      </div>
-      <div className="flex items-center justify-between font-mono tabular-nums opacity-70">
-        <span>{formatDuration(startMs)}</span>
-        {hasAudio ? (
-          <span>{formatDuration(current.durationMs)}</span>
-        ) : (
-          <span>{t('timeline.clip_unrecorded')}</span>
-        )}
-      </div>
-    </div>
+    <ContextMenu.Root>
+      <ContextMenu.Trigger asChild>
+        <div
+          ref={combinedRef}
+          {...attributes}
+          {...listeners}
+          onClick={() => selectSegment(id)}
+          // 右键先选中再弹菜单：用户点哪一段就操作哪一段，不需要先单击再右键
+          onContextMenu={() => selectSegment(id)}
+          title={seg.text}
+          className={cn(
+            'relative flex shrink-0 cursor-pointer flex-col justify-between rounded-sm border px-1.5 py-1 text-[10px]',
+            hasAudio
+              ? isSelected
+                ? 'border-accent bg-accent-soft text-white'
+                : 'border-border bg-bg-raised text-fg hover:border-border-strong'
+              : isSelected
+                ? 'border-accent bg-bg-deep text-fg-muted'
+                : 'border-dashed border-border bg-bg-deep text-fg-dim hover:border-border-strong',
+            isDragging && 'shadow-lg ring-1 ring-accent'
+          )}
+          style={style}
+        >
+          <div className="flex items-center gap-1">
+            <span className="font-mono tabular-nums opacity-70">{idx + 1}</span>
+            <span className="truncate">{seg.text}</span>
+          </div>
+          <div className="flex items-center justify-between font-mono tabular-nums opacity-70">
+            <span>{formatDuration(startMs)}</span>
+            {hasAudio ? (
+              <span>{formatDuration(current.durationMs)}</span>
+            ) : (
+              <span>{t('timeline.clip_unrecorded')}</span>
+            )}
+          </div>
+        </div>
+      </ContextMenu.Trigger>
+      <ContextMenu.Portal>
+        <ContextMenu.Content
+          className={cn(
+            'min-w-[180px] rounded-sm border border-border bg-bg-panel py-1 shadow-xl',
+            'text-xs text-fg'
+          )}
+        >
+          <ContextMenu.Item
+            onSelect={() => insertSegmentBefore(id)}
+            className={cn(
+              'flex cursor-default items-center gap-2 px-3 py-1.5 outline-none',
+              'data-[highlighted]:bg-accent data-[highlighted]:text-white'
+            )}
+          >
+            <ArrowUpFromLine size={11} />
+            {t('timeline.ctx_insert_before')}
+          </ContextMenu.Item>
+          <ContextMenu.Item
+            onSelect={() => insertSegmentAfter(id)}
+            className={cn(
+              'flex cursor-default items-center gap-2 px-3 py-1.5 outline-none',
+              'data-[highlighted]:bg-accent data-[highlighted]:text-white'
+            )}
+          >
+            <ArrowDownFromLine size={11} />
+            {t('timeline.ctx_insert_after')}
+          </ContextMenu.Item>
+        </ContextMenu.Content>
+      </ContextMenu.Portal>
+    </ContextMenu.Root>
   )
 }
 

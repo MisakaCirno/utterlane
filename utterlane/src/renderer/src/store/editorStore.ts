@@ -178,6 +178,16 @@ type EditorState = {
    * 句间 / 段间默认值。最后一段的 gapAfter 不写（拼接导出时无意义）
    */
   applyDefaultGaps: (defaults: { sentenceMs: number; paragraphMs: number }) => void
+  /**
+   * 强制把所有段（含 manual）重置为默认值。和 applyDefaultGaps 的区别：
+   * 这条会覆盖用户的手动设置（manual 字段也被清掉）。用户「想从头来过」时使用
+   */
+  resetGapsToDefault: (defaults: { sentenceMs: number; paragraphMs: number }) => void
+  /**
+   * 清除所有「非手动」的段间间隔。manual === true 的段保留。
+   * 反向操作：让用户先做整体清零，再手动从零开始构建间隔
+   */
+  clearAutoGaps: () => void
 
   // 音频文件审计
   /** 用 audit 扫描结果覆盖 missingTakeIds，集合会被 UI 用作缺失徽标的依据 */
@@ -1146,6 +1156,91 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       segmentsById: { ...prev.segmentsById, [segmentId]: nextSeg },
       ...markDirty()
     })
+    scheduleSegmentsSave()
+  },
+
+  resetGapsToDefault: (defaults) => {
+    const prev = get()
+    if (prev.order.length <= 1) return
+    const edits: Array<{
+      segId: string
+      before: { ms: number; manual?: boolean } | undefined
+      after: { ms: number; manual?: boolean } | undefined
+    }> = []
+
+    for (let i = 0; i < prev.order.length; i++) {
+      const segId = prev.order[i]
+      const seg = prev.segmentsById[segId]
+      if (!seg) continue
+      if (i === prev.order.length - 1) continue // 最后一段无意义
+      const next = prev.segmentsById[prev.order[i + 1]]
+      const isParagraphBoundary = !!next?.paragraphStart
+      const ms = isParagraphBoundary ? defaults.paragraphMs : defaults.sentenceMs
+      // reset 写入的是「非 manual 的默认值」——清掉 manual 标志，让下次
+      // applyDefaultGaps 还能继续覆盖它
+      const newGap = ms > 0 ? { ms } : undefined
+
+      if (gapEquals(seg.gapAfter, newGap)) continue
+      edits.push({
+        segId,
+        before: seg.gapAfter ? { ...seg.gapAfter } : undefined,
+        after: newGap
+      })
+    }
+    if (edits.length === 0) return
+
+    useHistoryStore.getState().push('resetGapsToDefault', 'history.reset_gaps_to_default', {
+      type: 'applyDefaultGaps',
+      edits
+    })
+
+    const nextById = { ...prev.segmentsById }
+    for (const e of edits) {
+      const seg = nextById[e.segId]
+      if (!seg) continue
+      const nextSeg = { ...seg }
+      if (e.after) nextSeg.gapAfter = { ...e.after }
+      else delete nextSeg.gapAfter
+      nextById[e.segId] = nextSeg
+    }
+    set({ segmentsById: nextById, ...markDirty() })
+    scheduleSegmentsSave()
+  },
+
+  clearAutoGaps: () => {
+    const prev = get()
+    const edits: Array<{
+      segId: string
+      before: { ms: number; manual?: boolean } | undefined
+      after: { ms: number; manual?: boolean } | undefined
+    }> = []
+    for (const segId of prev.order) {
+      const seg = prev.segmentsById[segId]
+      if (!seg) continue
+      // 只清非 manual 的；没设 gapAfter 的也跳过（无可清）
+      if (!seg.gapAfter || seg.gapAfter.manual) continue
+      edits.push({
+        segId,
+        before: { ...seg.gapAfter },
+        after: undefined
+      })
+    }
+    if (edits.length === 0) return
+
+    useHistoryStore.getState().push('clearAutoGaps', 'history.clear_auto_gaps', {
+      type: 'applyDefaultGaps',
+      edits
+    })
+
+    const nextById = { ...prev.segmentsById }
+    for (const e of edits) {
+      const seg = nextById[e.segId]
+      if (!seg) continue
+      const nextSeg = { ...seg }
+      delete nextSeg.gapAfter
+      nextById[e.segId] = nextSeg
+    }
+    set({ segmentsById: nextById, ...markDirty() })
     scheduleSegmentsSave()
   },
 
