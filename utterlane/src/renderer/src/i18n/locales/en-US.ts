@@ -46,9 +46,8 @@ export const enUS: TranslationSchema = {
     transport_play_project: 'Play Project',
     transport_stop: 'Stop',
     help: 'Help',
+    help_user_guide: 'User Guide',
     help_about: 'About Utterlane',
-    help_license: 'License (MPL-2.0)',
-    help_homepage: 'Project Homepage',
     help_open_logs: 'Open Logs Folder'
   },
 
@@ -315,7 +314,13 @@ export const enUS: TranslationSchema = {
     diagnostics_label: 'Diagnostics',
     copy_btn: 'Copy',
     copy_tooltip: 'Copy version and runtime info (handy for bug reports)',
-    copied: 'Copied to clipboard'
+    copied: 'Copied to clipboard',
+    third_party_label: 'Third-party libraries',
+    third_party_count: '{{count}} packages'
+  },
+
+  user_guide: {
+    title: 'User Guide'
   },
 
   level_meter: {

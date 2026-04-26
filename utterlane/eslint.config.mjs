@@ -6,7 +6,9 @@ import eslintPluginReactHooks from 'eslint-plugin-react-hooks'
 import eslintPluginReactRefresh from 'eslint-plugin-react-refresh'
 
 export default defineConfig(
-  { ignores: ['**/node_modules', '**/dist', '**/out'] },
+  // scripts/ 是构建期 Node 脚本（gen-licenses 等），跑在 Node 而非
+  // 浏览器；TS 严格规则（强制返回类型注解等）对 .mjs 没意义还多噪音
+  { ignores: ['**/node_modules', '**/dist', '**/out', 'scripts/**'] },
   tseslint.configs.recommended,
   eslintPluginReact.configs.flat.recommended,
   eslintPluginReact.configs.flat['jsx-runtime'],

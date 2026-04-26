@@ -13,6 +13,7 @@ import { AboutDialog } from './dialogs/AboutDialog'
 import { CrashDialog } from './dialogs/CrashDialog'
 import { ExportDialog } from './dialogs/ExportDialog'
 import { AudioAuditDialog } from './dialogs/AudioAuditDialog'
+import { UserGuideDialog } from './dialogs/UserGuideDialog'
 import { reportCrash } from './store/crashStore'
 import { useEditorStore } from './store/editorStore'
 import { connectPreferencesStore, usePreferencesStore } from './store/preferencesStore'
@@ -33,6 +34,8 @@ function App(): React.JSX.Element {
   const closePreferences = useDialogStore((s) => s.closePreferences)
   const aboutOpen = useDialogStore((s) => s.aboutOpen)
   const closeAbout = useDialogStore((s) => s.closeAbout)
+  const userGuideOpen = useDialogStore((s) => s.userGuideOpen)
+  const closeUserGuide = useDialogStore((s) => s.closeUserGuide)
   const exportAudioOpen = useDialogStore((s) => s.exportAudioOpen)
   const closeExportAudio = useDialogStore((s) => s.closeExportAudio)
   const audioAuditOpen = useDialogStore((s) => s.audioAuditOpen)
@@ -134,6 +137,7 @@ function App(): React.JSX.Element {
         onOpenChange={(open) => !open && closePreferences()}
       />
       <AboutDialog open={aboutOpen} onOpenChange={(open) => !open && closeAbout()} />
+      <UserGuideDialog open={userGuideOpen} onOpenChange={(open) => !open && closeUserGuide()} />
       <ExportDialog open={exportAudioOpen} onOpenChange={(open) => !open && closeExportAudio()} />
       <AudioAuditDialog open={audioAuditOpen} onOpenChange={(open) => !open && closeAudioAudit()} />
       <CrashDialog />

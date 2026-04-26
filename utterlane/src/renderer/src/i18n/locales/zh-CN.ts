@@ -48,9 +48,8 @@ export const zhCN = {
     transport_play_project: '播放项目',
     transport_stop: '停止',
     help: 'Help',
+    help_user_guide: '使用说明',
     help_about: '关于 Utterlane',
-    help_license: '许可证（MPL-2.0）',
-    help_homepage: '项目主页',
     help_open_logs: '打开日志目录'
   },
 
@@ -309,7 +308,13 @@ export const zhCN = {
     diagnostics_label: '诊断信息',
     copy_btn: '复制',
     copy_tooltip: '复制版本与运行时信息（提交 bug 时附上）',
-    copied: '已复制到剪贴板'
+    copied: '已复制到剪贴板',
+    third_party_label: '第三方库 / 许可证',
+    third_party_count: '{{count}} 项'
+  },
+
+  user_guide: {
+    title: '使用说明'
   },
 
   level_meter: {

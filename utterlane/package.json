@@ -11,9 +11,13 @@
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
+    "gen:licenses": "node scripts/gen-licenses.mjs",
+    "predev": "npm run gen:licenses",
+    "pretypecheck": "npm run gen:licenses",
+    "prelint": "npm run gen:licenses",
     "start": "electron-vite preview",
     "dev": "electron-vite dev",
-    "build": "npm run typecheck && electron-vite build",
+    "build": "npm run gen:licenses && npm run typecheck && electron-vite build",
     "postinstall": "electron-builder install-app-deps",
     "build:unpack": "npm run build && electron-builder --dir",
     "build:win": "npm run build && electron-builder --win",
@@ -40,6 +44,7 @@
     "i18next": "^26.0.7",
     "lucide-react": "^1.8.0",
     "react-i18next": "^17.0.4",
+    "react-markdown": "^10.1.0",
     "zustand": "^5.0.12"
   },
   "devDependencies": {

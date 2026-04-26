@@ -1,10 +1,19 @@
 import * as Dialog from '@radix-ui/react-dialog'
-import { Copy, Mic, X } from 'lucide-react'
+import { ChevronDown, ChevronRight, Copy, Mic, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { AppInfo } from '@shared/appInfo'
 import { showInfo } from '@renderer/store/toastStore'
 import { cn } from '@renderer/lib/cn'
+
+import licenses from '@renderer/generated/licenses.json'
+
+type LicenseEntry = {
+  name: string
+  version: string
+  license: string
+  homepage: string | null
+}
 
 /**
  * About 对话框。
@@ -23,6 +32,8 @@ export function AboutDialog({
 }): React.JSX.Element {
   const { t } = useTranslation()
   const [info, setInfo] = useState<AppInfo | null>(null)
+  // 第三方库列表默认折叠：典型 100+ 条，展开会让对话框变成长滚动
+  const [licensesExpanded, setLicensesExpanded] = useState(false)
 
   // 第一次打开时拉取（避免没用 About 时也跑一次 IPC）
   useEffect(() => {
@@ -62,7 +73,8 @@ export function AboutDialog({
         <Dialog.Content
           className={cn(
             'fixed left-1/2 top-1/2 z-50 -translate-x-1/2 -translate-y-1/2',
-            'flex w-[480px] max-w-[90vw] flex-col rounded-sm border border-border bg-bg-panel shadow-2xl',
+            // 给一个高度上限让展开第三方库时变成可滚动而不是顶到屏幕外
+            'flex w-[520px] max-h-[85vh] max-w-[90vw] flex-col rounded-sm border border-border bg-bg-panel shadow-2xl',
             'focus:outline-none'
           )}
         >
@@ -76,7 +88,7 @@ export function AboutDialog({
             </Dialog.Close>
           </div>
 
-          <div className="flex flex-col gap-3 px-5 py-4">
+          <div className="flex flex-1 flex-col gap-3 overflow-y-auto px-5 py-4">
             {/* 标识区：图标 + 名字 + 版本 + 一句话 */}
             <div className="flex items-center gap-3">
               <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-sm bg-bg-raised">
@@ -123,6 +135,41 @@ export function AboutDialog({
               <pre className="overflow-x-auto whitespace-pre font-mono text-2xs leading-5 text-fg-muted">
                 {info ? formatDiagnostics(info) : '…'}
               </pre>
+            </div>
+
+            {/* 第三方库 + 许可证：默认折叠，展开后渲染从 generated/licenses.json
+                来的列表。每行：name@version + 许可证 badge + 可选 homepage 链接 */}
+            <div className="rounded-sm border border-border bg-bg-deep">
+              <button
+                type="button"
+                onClick={() => setLicensesExpanded((v) => !v)}
+                className="flex w-full items-center gap-2 px-3 py-2 text-2xs uppercase tracking-wider text-fg-dim hover:text-fg"
+              >
+                {licensesExpanded ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+                <span className="flex-1 text-left">{t('about.third_party_label')}</span>
+                <span className="text-fg-muted normal-case tracking-normal">
+                  {t('about.third_party_count', { count: (licenses as LicenseEntry[]).length })}
+                </span>
+              </button>
+              {licensesExpanded && (
+                <div className="max-h-64 overflow-y-auto border-t border-border-subtle px-3 py-2">
+                  <ul className="flex flex-col gap-0.5 text-2xs">
+                    {(licenses as LicenseEntry[]).map((lic) => (
+                      <li key={lic.name} className="flex items-center gap-2 font-mono tabular-nums">
+                        {lic.homepage ? (
+                          <ExternalLink href={lic.homepage}>{lic.name}</ExternalLink>
+                        ) : (
+                          <span className="text-fg">{lic.name}</span>
+                        )}
+                        <span className="text-fg-dim">@{lic.version}</span>
+                        <span className="ml-auto rounded-sm border border-border-subtle px-1 text-fg-muted">
+                          {lic.license}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
           </div>
         </Dialog.Content>

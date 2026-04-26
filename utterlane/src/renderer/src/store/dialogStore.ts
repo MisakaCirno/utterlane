@@ -23,6 +23,10 @@ type DialogState = {
   openAbout: () => void
   closeAbout: () => void
 
+  userGuideOpen: boolean
+  openUserGuide: () => void
+  closeUserGuide: () => void
+
   exportAudioOpen: boolean
   openExportAudio: () => void
   closeExportAudio: () => void
@@ -52,6 +56,10 @@ export const useDialogStore = create<DialogState>((set) => ({
   aboutOpen: false,
   openAbout: () => set({ aboutOpen: true }),
   closeAbout: () => set({ aboutOpen: false }),
+
+  userGuideOpen: false,
+  openUserGuide: () => set({ userGuideOpen: true }),
+  closeUserGuide: () => set({ userGuideOpen: false }),
 
   exportAudioOpen: false,
   openExportAudio: () => set({ exportAudioOpen: true }),

@@ -54,6 +54,7 @@ function buildMenus(
   openPreferences: () => void,
   openAbout: () => void,
   openAudioAudit: () => void,
+  openUserGuide: () => void,
   history: HistoryMenuCtx,
   transportShortcuts: {
     record: string
@@ -206,9 +207,9 @@ function buildMenus(
     {
       label: t('menu.help'),
       items: [
+        { kind: 'item', label: t('menu.help_user_guide'), onSelect: openUserGuide },
+        { kind: 'separator' },
         { kind: 'item', label: t('menu.help_about'), onSelect: openAbout },
-        { kind: 'item', label: t('menu.help_license') },
-        { kind: 'item', label: t('menu.help_homepage') },
         { kind: 'separator' },
         {
           kind: 'item',
@@ -385,6 +386,7 @@ export function Titlebar(): React.JSX.Element {
   const openPreferences = useDialogStore((s) => s.openPreferences)
   const openAbout = useDialogStore((s) => s.openAbout)
   const openAudioAudit = useDialogStore((s) => s.openAudioAudit)
+  const openUserGuide = useDialogStore((s) => s.openUserGuide)
   const openPanelIds = useDockStore((s) => s.openPanelIds)
 
   // 订阅历史栈长度与栈顶 labelKey：两者变化时菜单应重新计算。
@@ -427,6 +429,7 @@ export function Titlebar(): React.JSX.Element {
         openPreferences,
         openAbout,
         openAudioAudit,
+        openUserGuide,
         historyCtx,
         transportShortcuts,
         openPanelIds
@@ -440,6 +443,7 @@ export function Titlebar(): React.JSX.Element {
       openPreferences,
       openAbout,
       openAudioAudit,
+      openUserGuide,
       historyCtx.canUndo,
       historyCtx.canRedo,
       historyCtx.undoLabelKey,

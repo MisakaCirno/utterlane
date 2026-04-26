@@ -4,3 +4,7 @@ out
 .DS_Store
 .eslintcache
 *.log*
+
+# 自动生成的第三方库 / 许可证清单（gen-licenses 在 predev / prebuild
+# 触发，About 对话框读取）。提交一份样本到仓库会随 npm install 漂移
+src/renderer/src/generated/
