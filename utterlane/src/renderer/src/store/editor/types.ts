@@ -59,6 +59,8 @@ export type EditorData = {
    * 渲染按钮即可。
    */
   paused: boolean
+  /** 当前播放倍速；clamp 在 [0.25, 4]。1 = 原速 */
+  playbackRate: number
   /** 磁盘上的 segments.json 是否和内存一致。UI 用来显示「已保存/未保存」提示 */
   saved: boolean
 
@@ -249,8 +251,21 @@ export type EditorActions = {
   // 播放
   playCurrentSegment: () => Promise<void>
   playProject: () => Promise<void>
+  /**
+   * 从项目开头播：把 timelinePlayheadMs 归零再 playProject，**不改变**
+   * selectedSegmentId（用户的选中是文档维度的状态，不应被「从头播」副作用改）
+   */
+  playProjectFromStart: () => Promise<void>
+  /**
+   * 从当前选中 Segment 的开头播：算出该段在工程时间轴上的累计起点 ms，
+   * 写入 timelinePlayheadMs 后 playProject。selectedSegmentId 不变。
+   * 没选中时回退到从头播
+   */
+  playProjectFromCurrentSegment: () => Promise<void>
   stopPlayback: () => void
   togglePausePlayback: () => void
+  /** 播放倍速。范围 [0.25, 4]，作用于 segment / project / 单 take 试听所有走 player 的播放 */
+  setPlaybackRate: (rate: number) => void
 }
 
 export type EditorState = EditorData & EditorActions
@@ -298,6 +313,7 @@ export const INITIAL_DATA: EditorData = {
   waveformZoomV: 1,
   playback: 'idle',
   paused: false,
+  playbackRate: 1,
   saved: true,
   recordingSegmentId: null,
   recordingTakeId: null,

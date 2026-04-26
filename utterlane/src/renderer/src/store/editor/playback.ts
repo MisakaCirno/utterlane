@@ -1,9 +1,16 @@
 import * as player from '@renderer/services/player'
 import { showError } from '@renderer/store/toastStore'
 import i18n from '@renderer/i18n'
-import { takeEffectiveRange } from '@shared/project'
+import { takeEffectiveDurationMs, takeEffectiveRange } from '@shared/project'
 import type { EditorActions, SliceCreator } from './types'
 import { pushWorkspace } from './save'
+
+/**
+ * 播放倍速允许的边界。0.25x 接近极限慢放仍能听清相位；4x 接近大多数人
+ * 一边听还能跟上的极速浏览。低于 / 高于这个区间会让用户体验奇怪
+ */
+const PLAYBACK_RATE_MIN = 0.25
+const PLAYBACK_RATE_MAX = 4
 
 /**
  * 播放 slice：单段试听 / 工程连读 / 停止 / 暂停。
@@ -34,7 +41,16 @@ function buildPlayOptions(
 }
 
 export const createPlaybackSlice: SliceCreator<
-  Pick<EditorActions, 'playCurrentSegment' | 'playProject' | 'stopPlayback' | 'togglePausePlayback'>
+  Pick<
+    EditorActions,
+    | 'playCurrentSegment'
+    | 'playProject'
+    | 'playProjectFromStart'
+    | 'playProjectFromCurrentSegment'
+    | 'stopPlayback'
+    | 'togglePausePlayback'
+    | 'setPlaybackRate'
+  >
 > = (set, get) => ({
   /**
    * 播放当前选中 Segment 的当前 Take。
@@ -190,5 +206,67 @@ export const createPlaybackSlice: SliceCreator<
       player.pause()
       set({ paused: true })
     }
+  },
+
+  /**
+   * 「从项目头开始」按钮：把游标设到 0 后跑 playProject。**不**改
+   * selectedSegmentId——选中是文档维度状态，跟「我要从哪播」无关。
+   * 当前正在播放时先停下再从头播
+   */
+  playProjectFromStart: async () => {
+    const state = get()
+    if (state.playback !== 'idle') {
+      player.stop()
+      set({ playback: 'idle', paused: false })
+    }
+    set({ timelinePlayheadMs: 0 })
+    pushWorkspace(get())
+    await get().playProject()
+  },
+
+  /**
+   * 「从当前段开始」按钮：把游标设到当前选中 Segment 的累计起点 ms 后
+   * playProject。selectedSegmentId 同样不变。算法与 ProjectTimelineView
+   * 的 startMsById 一致：累加前序段的有效时长 + gapAfter
+   */
+  playProjectFromCurrentSegment: async () => {
+    const state = get()
+    if (state.playback !== 'idle') {
+      player.stop()
+      set({ playback: 'idle', paused: false })
+    }
+    const selId = state.selectedSegmentId
+    if (!selId) {
+      // 没选中段时退回从头播——按钮可能是错误地暴露给用户的状态，但
+      // 走「从头」比啥都不做更接近预期
+      set({ timelinePlayheadMs: 0 })
+      pushWorkspace(get())
+      await get().playProject()
+      return
+    }
+    let acc = 0
+    for (const id of state.order) {
+      if (id === selId) break
+      const seg = state.segmentsById[id]
+      const take = seg?.takes.find((t) => t.id === seg.selectedTakeId)
+      if (take && !state.missingTakeIds.has(take.id)) {
+        acc += takeEffectiveDurationMs(take)
+      }
+      acc += seg?.gapAfter?.ms ?? 0
+    }
+    set({ timelinePlayheadMs: acc })
+    pushWorkspace(get())
+    await get().playProject()
+  },
+
+  /**
+   * 设置播放倍速并立即应用到当前 audio（如有）+ 之后所有 player.playFile
+   * 调用。clamp 到 [PLAYBACK_RATE_MIN, PLAYBACK_RATE_MAX]
+   */
+  setPlaybackRate: (rate) => {
+    const clamped = Math.max(PLAYBACK_RATE_MIN, Math.min(PLAYBACK_RATE_MAX, rate))
+    if (get().playbackRate === clamped) return
+    set({ playbackRate: clamped })
+    player.setPlaybackRate(clamped)
   }
 })

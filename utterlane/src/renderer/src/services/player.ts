@@ -27,6 +27,17 @@ type LevelListener = (level: number) => void
 type PositionListener = (playingPath: string | null, positionMs: number) => void
 
 let currentAudio: HTMLAudioElement | null = null
+/**
+ * 全局播放倍速。新创建的 audio 会读取此值；setPlaybackRate 也会立刻
+ * 同步到正在播的 audio。范围由调用方（editor store）clamp，本服务
+ * 信任它已经合规
+ */
+let currentRate = 1
+
+export function setPlaybackRate(rate: number): void {
+  currentRate = rate
+  if (currentAudio) currentAudio.playbackRate = rate
+}
 let currentObjectUrl: string | null = null
 let currentAnalyser: AnalyserNode | null = null
 let currentSource: MediaElementAudioSourceNode | null = null
@@ -223,6 +234,10 @@ export async function playFile(relativePath: string, options: PlayFileOptions = 
     return
   }
   const audio = new Audio(url)
+  // 应用当前全局倍速。setPlaybackRate 后续调用会同步到 currentAudio；
+  // 这里在 currentAudio 赋值之前先写一次，保证 metadata 加载完后 audio
+  // 能用正确速度起播
+  audio.playbackRate = currentRate
   currentAudio = audio
   currentObjectUrl = url
 

@@ -5,8 +5,10 @@ import {
   ArrowDownFromLine,
   ArrowUpFromLine,
   Eraser,
+  Minus,
   Pause,
   Play,
+  Plus,
   RefreshCw,
   Rewind,
   Square,
@@ -63,6 +65,17 @@ const UNRECORDED_CLIP_WIDTH_AT_1X = 60
 const FALLBACK_SENTENCE_GAP_MS = 200
 const FALLBACK_PARAGRAPH_GAP_MS = 800
 
+/**
+ * 倍速下拉的档位。± 步进按 0.25 调整，可以走出这五个档位（见 store
+ * 的 setPlaybackRate clamp 区间 [0.25, 4]）；下拉只展示最常用的几档。
+ *
+ * 类型为 readonly number[] 而不是 as const tuple——后者会让 .includes()
+ * 拒绝任意 number 参数（窄类型不接受宽类型）
+ */
+const SPEED_PRESETS: readonly number[] = [0.5, 1, 1.5, 2, 3]
+const PLAYBACK_RATE_MIN = 0.25
+const PLAYBACK_RATE_MAX = 4
+
 function IconButton({
   children,
   onClick,
@@ -103,11 +116,14 @@ function ProjectControlRow({
   const { t } = useTranslation()
   const playback = useEditorStore((s) => s.playback)
   const paused = useEditorStore((s) => s.paused)
-  const playProject = useEditorStore((s) => s.playProject)
+  const playProjectFromStart = useEditorStore((s) => s.playProjectFromStart)
+  const playProjectFromCurrentSegment = useEditorStore((s) => s.playProjectFromCurrentSegment)
   const stopPlayback = useEditorStore((s) => s.stopPlayback)
   const togglePause = useEditorStore((s) => s.togglePausePlayback)
-  const selectSegment = useEditorStore((s) => s.selectSegment)
   const order = useEditorStore((s) => s.order)
+  const selectedSegmentId = useEditorStore((s) => s.selectedSegmentId)
+  const playbackRate = useEditorStore((s) => s.playbackRate)
+  const setPlaybackRate = useEditorStore((s) => s.setPlaybackRate)
   const applyDefaultGaps = useEditorStore((s) => s.applyDefaultGaps)
   const resetGapsToDefault = useEditorStore((s) => s.resetGapsToDefault)
   const clearAutoGaps = useEditorStore((s) => s.clearAutoGaps)
@@ -119,6 +135,23 @@ function ProjectControlRow({
   const defaults = {
     sentenceMs: projectDefaultGaps?.sentenceMs ?? FALLBACK_SENTENCE_GAP_MS,
     paragraphMs: projectDefaultGaps?.paragraphMs ?? FALLBACK_PARAGRAPH_GAP_MS
+  }
+
+  // 播放控制状态推导：
+  //   - 「从头」：始终允许（除录音 / 当前在播 segment）
+  //   - 「从当前段」：要求 selectedSegmentId 存在
+  //   - 「Play / Pause」toggle：playback === 'project' 时用 paused 判
+  //     图标；否则展示 Play 图标，点击 = 从当前段开始
+  const isProjectPlaying = playback === 'project'
+  const canStartProject = !isBusy && order.length > 0
+  const canStartFromSelected = canStartProject && !!selectedSegmentId
+
+  const onPlayPauseToggle = (): void => {
+    if (isProjectPlaying) {
+      togglePause()
+    } else if (canStartFromSelected) {
+      void playProjectFromCurrentSegment()
+    }
   }
 
   // 布局策略：
@@ -166,45 +199,81 @@ function ProjectControlRow({
           </IconButton>
         </div>
 
-        {/* 中：播放控制组（始终居中，不被左右组宽度推动） */}
-        <div className="flex items-center gap-0.5 justify-self-center rounded-sm border border-border bg-bg-deep p-0.5">
-          <IconButton
-            title={t('timeline.btn_play_project_from_start')}
-            onClick={() => {
-              if (order.length > 0) selectSegment(order[0])
-              void playProject()
-            }}
-            disabled={isBusy || order.length === 0}
-          >
-            <Rewind size={12} />
-          </IconButton>
-          <IconButton
-            title={
-              playback === 'project'
-                ? t('timeline.btn_stop_project')
-                : t('timeline.btn_play_project')
-            }
-            active={playback === 'project'}
-            disabled={playback === 'segment' || playback === 'recording' || order.length === 0}
-            onClick={playback === 'project' ? stopPlayback : () => void playProject()}
-          >
-            {playback === 'project' ? <Square size={11} /> : <Play size={12} />}
-          </IconButton>
-          <IconButton
-            title={paused ? t('timeline.btn_resume_project') : t('timeline.btn_pause_project')}
-            active={paused}
-            onClick={togglePause}
-            disabled={playback !== 'project'}
-          >
-            {paused ? <Play size={12} /> : <Pause size={12} />}
-          </IconButton>
-          <IconButton
-            title={t('timeline.btn_stop_project')}
-            onClick={stopPlayback}
-            disabled={playback !== 'project'}
-          >
-            <Square size={11} />
-          </IconButton>
+        {/* 中：播放控制组。三按钮 = [从项目头] [从当前段 ⇄ 暂停] [停止]
+            + 倍速控件。播放与暂停整合到同一个按钮位置，按 playback +
+            paused 切换图标——主流媒体播放器（VLC / YouTube / DAW）通用 */}
+        <div className="flex items-center gap-1 justify-self-center">
+          <div className="flex items-center gap-0.5 rounded-sm border border-border bg-bg-deep p-0.5">
+            <IconButton
+              title={t('timeline.btn_play_project_from_start')}
+              onClick={() => void playProjectFromStart()}
+              disabled={!canStartProject}
+            >
+              <Rewind size={12} />
+            </IconButton>
+            <IconButton
+              // 当前在播 = 显示 Pause 图标 + 点击切换 paused / resumed；
+              // idle = 显示 Play + 点击从当前段开始播放。一个按钮承担
+              // 「play / pause / resume」三态，让 UI 不再有 4 颗按钮挤一起
+              title={
+                isProjectPlaying
+                  ? paused
+                    ? t('timeline.btn_resume_project')
+                    : t('timeline.btn_pause_project')
+                  : t('timeline.btn_play_from_current_segment')
+              }
+              active={isProjectPlaying && !paused}
+              disabled={isProjectPlaying ? false : !canStartFromSelected}
+              onClick={onPlayPauseToggle}
+            >
+              {isProjectPlaying && !paused ? <Pause size={12} /> : <Play size={12} />}
+            </IconButton>
+            <IconButton
+              title={t('timeline.btn_stop_project')}
+              onClick={stopPlayback}
+              disabled={!isProjectPlaying}
+            >
+              <Square size={11} />
+            </IconButton>
+          </div>
+
+          {/* 倍速控件：- 步进 / 下拉档位 / + 步进。下拉与步进互补——
+              下拉档位（0.5 / 1 / 1.5 / 2 / 3）覆盖最常用速度，± 0.25
+              步进给精细调整。clamp 由 setPlaybackRate 在 store 里做 */}
+          <div className="flex items-center gap-0.5 rounded-sm border border-border bg-bg-deep p-0.5">
+            <IconButton
+              title={t('timeline.btn_speed_minus')}
+              onClick={() => setPlaybackRate(playbackRate - 0.25)}
+              disabled={playbackRate <= PLAYBACK_RATE_MIN}
+            >
+              <Minus size={11} />
+            </IconButton>
+            <select
+              value={SPEED_PRESETS.includes(playbackRate) ? String(playbackRate) : ''}
+              onChange={(e) => {
+                if (e.currentTarget.value) setPlaybackRate(Number(e.currentTarget.value))
+              }}
+              title={t('timeline.speed_select_hint', { rate: playbackRate.toFixed(2) })}
+              className="h-5 rounded-sm border border-border bg-bg-deep px-1 text-2xs text-fg outline-none focus:border-accent"
+            >
+              {/* 当前不在档位（被 ± 步出预设）时显示空值占位；用户重新选档即对齐 */}
+              {!SPEED_PRESETS.includes(playbackRate) && (
+                <option value="">{playbackRate.toFixed(2)}x</option>
+              )}
+              {SPEED_PRESETS.map((rate) => (
+                <option key={rate} value={String(rate)}>
+                  {rate}x
+                </option>
+              ))}
+            </select>
+            <IconButton
+              title={t('timeline.btn_speed_plus')}
+              onClick={() => setPlaybackRate(playbackRate + 0.25)}
+              disabled={playbackRate >= PLAYBACK_RATE_MAX}
+            >
+              <Plus size={11} />
+            </IconButton>
+          </div>
         </div>
 
         {/* 右：缩放滑动条。log 刻度让 1x 落在中间，半档与翻倍距离对称 */}

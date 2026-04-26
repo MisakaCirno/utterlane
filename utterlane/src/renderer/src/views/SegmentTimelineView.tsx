@@ -195,27 +195,26 @@ function SegmentControlRow({
             <SkipForward size={12} />
           </IconButton>
           <div className="mx-0.5 h-4 w-px bg-border" />
+          {/* Play / Pause 同位切换：playback === 'segment' 时显示 Pause，
+              点击切 paused / resumed；idle 时显示 Play，点击 = 试听当前
+              段。停止键独立。和 ProjectTimeline 的播放控件保持同一模式 */}
           <IconButton
             title={
               playback === 'segment'
-                ? t('timeline.btn_stop_segment')
+                ? paused
+                  ? t('timeline.btn_resume')
+                  : t('timeline.btn_pause')
                 : t('timeline.btn_play_segment')
             }
-            active={playback === 'segment'}
+            active={playback === 'segment' && !paused}
             disabled={
-              playback === 'project' || playback === 'recording' || !segment?.selectedTakeId
+              playback === 'segment'
+                ? false
+                : playback === 'project' || playback === 'recording' || !segment?.selectedTakeId
             }
-            onClick={playback === 'segment' ? stopPlayback : () => void playCurrentSegment()}
+            onClick={playback === 'segment' ? togglePause : (): void => void playCurrentSegment()}
           >
-            {playback === 'segment' ? <Square size={11} /> : <Play size={12} />}
-          </IconButton>
-          <IconButton
-            title={paused ? t('timeline.btn_resume') : t('timeline.btn_pause')}
-            active={paused}
-            onClick={togglePause}
-            disabled={playback !== 'segment' && playback !== 'project'}
-          >
-            {paused ? <Play size={12} /> : <Pause size={12} />}
+            {playback === 'segment' && !paused ? <Pause size={12} /> : <Play size={12} />}
           </IconButton>
           <IconButton
             title={t('timeline.btn_stop_segment')}
