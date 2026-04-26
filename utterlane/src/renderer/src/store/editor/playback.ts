@@ -13,28 +13,19 @@ const PLAYBACK_RATE_MIN = 0.25
 const PLAYBACK_RATE_MAX = 4
 
 /**
- * playProject 的会话 ID。每次进入 playProject 会 ++ 拿一个新值,loop 每
- * 轮迭代前校验自己的 ID 仍是最新——不是就 break。
- *
- * 用途:防止「重复点击播放键 → 两个 playProject loop 同时运行 → 互相
- * 抢 currentAudio,旧 loop 的 audio 还在响,新 loop 的 audio 也开始响」。
- * 旧 loop 在新 session 启动后立刻失效,不会再 spawn 新 audio。
- *
- * 与 player.ts 的 activePlayFileId 配合:player 层防止「await loadBlobUrl
- * 期间被打断时仍然创建 audio」,playback 层防止「旧 loop 继续往下走 spawn
- * 更多 playFile」。两层都需要,缺一就有不同 race window
- */
-let activeProjectSessionId = 0
-
-/**
  * 播放 slice：单段试听 / 工程连读 / 停止 / 暂停。
  *
- * 切分依据：所有动作都把 playback 字段在 idle / segment / project 之间
- * 推进，副作用只是调 player 服务（不改 segments.json，也不进 undo 栈）。
- * 与 recording 形成对称——同样靠状态机控制 UI，但走另一组事件。
+ * === 全局单实例不变量 ===
  *
- * 缺失文件守卫：playCurrentSegment 单段命中 missingTakeIds 时直接弹错
- * 提示用户去 Audio Audit 修复；playProject 跳过缺失段，连读不被中断。
+ * App 任意时刻最多只有一个播放任务在跑——不管发起方是 SegmentTimeline、
+ * ProjectTimeline 的哪个按钮、还是 Inspector 单 Take 试听，新启动的请求
+ * 都先抢占旧任务、等其完整退出后再启动自己。这样 currentAudio 单例不会
+ * 被多个 loop 同时争抢,也不会出现「旧 loop 的 audio 还没死,新 loop 的
+ * audio 已经创建」的并发音频。
+ *
+ * 抢占接力靠 preemptAndRun:把 player.stop / set idle / 等待旧任务完成
+ * 三件事打包,所有 play* 入口都走它。`if (state.playback !== 'idle') return`
+ * 这种「忙了就拒绝」的旧守卫不再需要——抢占替代了拒绝。
  */
 
 /**
@@ -65,62 +56,53 @@ export const createPlaybackSlice: SliceCreator<
     | 'togglePausePlayback'
     | 'setPlaybackRate'
   >
-> = (set, get) => ({
+> = (set, get) => {
+  // 全局唯一的「正在跑的播放任务」。每次 preemptAndRun 同步段内把它替换
+  // 成自己的 promise,新的 preempt 都先 await 旧 promise——形成串行链
+  let activePlaybackTask: Promise<void> = Promise.resolve()
+
   /**
-   * 播放当前选中 Segment 的当前 Take。
-   * 要求：idle + 有 selectedTakeId。
-   * 播完 / 被中断后 playback 回 idle（不留 ghost 状态）。
+   * 抢占式启动新播放任务。
    *
-   * 缺失文件守卫：missingTakeIds 由 audit 扫描填充，命中时直接弹错——
-   * 否则 player 会调 readTakeFile，main 抛 ENOENT，最终 audio 元素吐
-   * 一个不显眼的 console.error，用户看不到反馈
+   * 同步段做三件事(JS 单线程,这里不会被新的 preempt 卡进中间):
+   *   1. player.stop()——杀正在播的 audio + 让 in-flight 的 playFile
+   *      在 await loadBlobUrl 后拿不到匹配的 activePlayFileId,放弃
+   *      创建新 audio
+   *   2. set playback 'idle'——旧 loop 下一次迭代检查 break 条件成立
+   *   3. 创建本次任务的 promise,把 activePlaybackTask 立刻替换掉,后续
+   *      preempt 都会 await 这个新 promise
+   *
+   * 然后 await 旧任务的 promise 完整退出,才执行 action。这样保证「真正
+   * 进入 action body」时,任意旧 loop 都已经走完 finally 了
    */
-  playCurrentSegment: async () => {
-    const state = get()
-    if (state.playback !== 'idle') return
-    if (!state.selectedSegmentId) return
-    const seg = state.segmentsById[state.selectedSegmentId]
-    const take = seg?.takes.find((t) => t.id === seg.selectedTakeId)
-    if (!take) return
-    if (state.missingTakeIds.has(take.id)) {
-      showError(
-        i18n.t('errors.play_missing_take_title'),
-        i18n.t('errors.play_missing_take_description')
-      )
-      return
-    }
+  async function preemptAndRun(action: () => Promise<void>): Promise<void> {
+    player.stop()
+    set({ playback: 'idle', paused: false })
 
-    // 节选区间：take 设了 trim 就只播节选段，否则整段
-    const range = takeEffectiveRange(take)
-    const playOpts = buildPlayOptions(range, take.durationMs)
+    const prior = activePlaybackTask
+    let resolveOurs!: () => void
+    const ours = new Promise<void>((resolve) => {
+      resolveOurs = resolve
+    })
+    activePlaybackTask = ours
 
-    set({ playback: 'segment', paused: false })
+    // 旧任务可能 throw,我们不在乎——只要它退出就行
+    await prior.catch(() => {})
+
     try {
-      await player.playFile(take.filePath, playOpts)
+      await action()
     } finally {
-      // 只有当 playback 还是我们这一轮设置的 'segment' 时才回落；
-      // 如果期间被 playProject 接管，不覆盖它的状态
-      if (get().playback === 'segment') set({ playback: 'idle', paused: false })
+      resolveOurs()
     }
-  },
+  }
 
   /**
-   * 连续播放工程里所有「有 selectedTakeId」的 Take。未录制的段自动跳过。
-   *
-   * 和 Slice D1 的实现不同：这里不再走 player.playSequence，而是把顺序循环
-   * 放在 store 里，每段开始前同步 selectedSegmentId。这样 UI 可以跟随
-   * 当前播放段高亮 + 自动滚动，也避免 player 层需要理解 segment 语义。
-   *
-   * === 从游标位置起播 ===
-   *
-   * 读 timelinePlayheadMs，找到游标落在哪个 take 内，从该段以 startMs
-   * 偏移播放，后续段从头播。空白间隔区间（gap 内）也归到「下一段从头
-   * 播」——用户在间隔区域点游标后想要的是「下一段从头开始」而非「等
-   * 完间隔再播」
+   * 项目连读 loop 的真正实现。读 timelinePlayheadMs 决定起点;调用方负责
+   * 在调用前把 playhead 设到目标位置(从头 / 从当前段头 / 不动 = 从游标
+   * 当前位置)。
    */
-  playProject: async () => {
+  async function runProjectLoop(): Promise<void> {
     const state = get()
-    if (state.playback !== 'idle') return
 
     // 收集可播 items + 累计起点：跳过缺失文件的 take。
     // 时间轴用「节选后的有效时长」累计——和 ProjectTimelineView 的 clip
@@ -168,17 +150,12 @@ export const createPlaybackSlice: SliceCreator<
     if (startIdx < 0) startIdx = 0
     const offsetWithinFirst = Math.max(0, playhead - items[startIdx].effectiveStartMs)
 
-    // 拿本次会话的 ID。后续 loop 每轮迭代会校验,避免被新启动的会话抢占
-    const mySession = ++activeProjectSessionId
     set({ playback: 'project', paused: false })
     try {
       for (let i = startIdx; i < items.length; i++) {
         const item = items[i]
-        // 会话校验:用户重新点了播放键会让我们这一轮失效,break 让旧 loop
-        // 不再 spawn 新 playFile。配合 player.ts 的 activePlayFileId 形成
-        // 双层防御
-        if (activeProjectSessionId !== mySession) break
-        // stopPlayback 会立刻把 playback 切到 idle,循环这里读一次就退出
+        // stopPlayback / preemptAndRun 都会把 playback 切到 idle,
+        // 让循环在下一次迭代退出
         if (get().playback !== 'project') break
         set({ selectedSegmentId: item.segmentId })
         pushWorkspace(get())
@@ -190,109 +167,143 @@ export const createPlaybackSlice: SliceCreator<
           buildPlayOptions({ startMs: fileStartMs, endMs: item.trimEndMs }, item.fileDurationMs)
         )
       }
-      // 自然播完：把游标停在工程末尾，便于用户看到「播到哪了」。
-      // 必须确认我们仍是最新会话——新会话已经在写它自己的 playhead,
-      // 不能让旧 loop 把游标拉到工程末尾覆盖它
-      if (activeProjectSessionId === mySession && get().playback === 'project') {
+      // 自然播完：把游标停在工程末尾，便于用户看到「播到哪了」
+      if (get().playback === 'project') {
         set({ timelinePlayheadMs: cursor })
         pushWorkspace(get())
       }
     } finally {
-      // 同样:只有最新会话才能把 playback 切回 idle,避免旧 loop 在 finally
-      // 阶段把新会话刚 set 的 'project' 状态覆盖掉
-      if (activeProjectSessionId === mySession && get().playback === 'project') {
+      if (get().playback === 'project') set({ playback: 'idle', paused: false })
+    }
+  }
+
+  return {
+    /**
+     * 播放当前选中 Segment 的当前 Take。
+     *
+     * 缺失文件守卫：missingTakeIds 由 audit 扫描填充，命中时直接弹错——
+     * 否则 player 会调 readTakeFile，main 抛 ENOENT，最终 audio 元素吐
+     * 一个不显眼的 console.error，用户看不到反馈
+     */
+    playCurrentSegment: () =>
+      preemptAndRun(async () => {
+        const state = get()
+        if (!state.selectedSegmentId) return
+        const seg = state.segmentsById[state.selectedSegmentId]
+        const take = seg?.takes.find((t) => t.id === seg.selectedTakeId)
+        if (!take) return
+        if (state.missingTakeIds.has(take.id)) {
+          showError(
+            i18n.t('errors.play_missing_take_title'),
+            i18n.t('errors.play_missing_take_description')
+          )
+          return
+        }
+
+        // 节选区间：take 设了 trim 就只播节选段，否则整段
+        const range = takeEffectiveRange(take)
+        const playOpts = buildPlayOptions(range, take.durationMs)
+
+        set({ playback: 'segment', paused: false })
+        try {
+          await player.playFile(take.filePath, playOpts)
+        } finally {
+          if (get().playback === 'segment') set({ playback: 'idle', paused: false })
+        }
+      }),
+
+    /**
+     * 从游标当前位置连续播放工程剩余 take。和 Slice D1 的实现不同:
+     * 顺序循环放在 store 里,每段开始前同步 selectedSegmentId,UI 跟随
+     * 当前播放段高亮 + 自动滚动。
+     *
+     * 起点由 timelinePlayheadMs 决定:游标落在哪段的有效区间内,从那
+     * 段的对应位置起播;落在 gap 区间则从下一段起播;超过总时长回退
+     * 到工程开头
+     */
+    playProject: () => preemptAndRun(runProjectLoop),
+
+    /**
+     * 「从项目头开始」按钮:把游标设到 0 后跑 runProjectLoop。**不**改
+     * selectedSegmentId——选中是文档维度状态,跟「我要从哪播」无关
+     */
+    playProjectFromStart: () =>
+      preemptAndRun(async () => {
+        set({ timelinePlayheadMs: 0 })
+        pushWorkspace(get())
+        await runProjectLoop()
+      }),
+
+    /**
+     * 「从当前段开始」按钮:把游标设到当前选中 Segment 的累计起点 ms 后
+     * runProjectLoop。selectedSegmentId 同样不变。算法与
+     * ProjectTimelineView 的 startMsById 一致:累加前序段的有效时长 +
+     * gapAfter
+     */
+    playProjectFromCurrentSegment: () =>
+      preemptAndRun(async () => {
+        const state = get()
+        const selId = state.selectedSegmentId
+        if (!selId) {
+          // 没选中段时退回从头播——按钮可能是错误地暴露给用户的状态,
+          // 但走「从头」比啥都不做更接近预期
+          set({ timelinePlayheadMs: 0 })
+          pushWorkspace(get())
+          await runProjectLoop()
+          return
+        }
+        let acc = 0
+        for (const id of state.order) {
+          if (id === selId) break
+          const seg = state.segmentsById[id]
+          const take = seg?.takes.find((t) => t.id === seg.selectedTakeId)
+          if (take && !state.missingTakeIds.has(take.id)) {
+            acc += takeEffectiveDurationMs(take)
+          }
+          acc += seg?.gapAfter?.ms ?? 0
+        }
+        set({ timelinePlayheadMs: acc })
+        pushWorkspace(get())
+        await runProjectLoop()
+      }),
+
+    /**
+     * 停止播放。直接把 playback 切回 idle(不等 playFile 的 finally),
+     * 这样 runProjectLoop 循环能立刻看到状态变化并退出,不会多播一段
+     */
+    stopPlayback: () => {
+      const state = get()
+      if (state.playback === 'segment' || state.playback === 'project') {
+        player.stop()
         set({ playback: 'idle', paused: false })
       }
-    }
-  },
+    },
 
-  /**
-   * 停止播放。直接把 playback 切回 idle（不等 playFile 的 finally），
-   * 这样 playProject 循环能立刻看到状态变化并退出，不会多播一段。
-   */
-  stopPlayback: () => {
-    const state = get()
-    if (state.playback === 'segment' || state.playback === 'project') {
-      player.stop()
-      set({ playback: 'idle', paused: false })
-    }
-  },
-
-  /**
-   * 暂停 ↔ 恢复。仅在播放中有意义；idle / recording 时 no-op。
-   * 实际的音频暂停 / 恢复交给 player service；本函数只同步状态位。
-   */
-  togglePausePlayback: () => {
-    const state = get()
-    if (state.playback !== 'segment' && state.playback !== 'project') return
-    if (state.paused) {
-      player.resume()
-      set({ paused: false })
-    } else {
-      player.pause()
-      set({ paused: true })
-    }
-  },
-
-  /**
-   * 「从项目头开始」按钮：把游标设到 0 后跑 playProject。**不**改
-   * selectedSegmentId——选中是文档维度状态，跟「我要从哪播」无关。
-   * 当前正在播放时先停下再从头播
-   */
-  playProjectFromStart: async () => {
-    const state = get()
-    if (state.playback !== 'idle') {
-      player.stop()
-      set({ playback: 'idle', paused: false })
-    }
-    set({ timelinePlayheadMs: 0 })
-    pushWorkspace(get())
-    await get().playProject()
-  },
-
-  /**
-   * 「从当前段开始」按钮：把游标设到当前选中 Segment 的累计起点 ms 后
-   * playProject。selectedSegmentId 同样不变。算法与 ProjectTimelineView
-   * 的 startMsById 一致：累加前序段的有效时长 + gapAfter
-   */
-  playProjectFromCurrentSegment: async () => {
-    const state = get()
-    if (state.playback !== 'idle') {
-      player.stop()
-      set({ playback: 'idle', paused: false })
-    }
-    const selId = state.selectedSegmentId
-    if (!selId) {
-      // 没选中段时退回从头播——按钮可能是错误地暴露给用户的状态，但
-      // 走「从头」比啥都不做更接近预期
-      set({ timelinePlayheadMs: 0 })
-      pushWorkspace(get())
-      await get().playProject()
-      return
-    }
-    let acc = 0
-    for (const id of state.order) {
-      if (id === selId) break
-      const seg = state.segmentsById[id]
-      const take = seg?.takes.find((t) => t.id === seg.selectedTakeId)
-      if (take && !state.missingTakeIds.has(take.id)) {
-        acc += takeEffectiveDurationMs(take)
+    /**
+     * 暂停 ↔ 恢复。仅在播放中有意义；idle / recording 时 no-op。
+     * 实际的音频暂停 / 恢复交给 player service；本函数只同步状态位。
+     */
+    togglePausePlayback: () => {
+      const state = get()
+      if (state.playback !== 'segment' && state.playback !== 'project') return
+      if (state.paused) {
+        player.resume()
+        set({ paused: false })
+      } else {
+        player.pause()
+        set({ paused: true })
       }
-      acc += seg?.gapAfter?.ms ?? 0
-    }
-    set({ timelinePlayheadMs: acc })
-    pushWorkspace(get())
-    await get().playProject()
-  },
+    },
 
-  /**
-   * 设置播放倍速并立即应用到当前 audio（如有）+ 之后所有 player.playFile
-   * 调用。clamp 到 [PLAYBACK_RATE_MIN, PLAYBACK_RATE_MAX]
-   */
-  setPlaybackRate: (rate) => {
-    const clamped = Math.max(PLAYBACK_RATE_MIN, Math.min(PLAYBACK_RATE_MAX, rate))
-    if (get().playbackRate === clamped) return
-    set({ playbackRate: clamped })
-    player.setPlaybackRate(clamped)
+    /**
+     * 设置播放倍速并立即应用到当前 audio（如有）+ 之后所有 player.playFile
+     * 调用。clamp 到 [PLAYBACK_RATE_MIN, PLAYBACK_RATE_MAX]
+     */
+    setPlaybackRate: (rate) => {
+      const clamped = Math.max(PLAYBACK_RATE_MIN, Math.min(PLAYBACK_RATE_MAX, rate))
+      if (get().playbackRate === clamped) return
+      set({ playbackRate: clamped })
+      player.setPlaybackRate(clamped)
+    }
   }
-})
+}
