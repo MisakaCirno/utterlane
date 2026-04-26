@@ -204,16 +204,25 @@ function ProjectControlRow({
             paused 切换图标——主流媒体播放器（VLC / YouTube / DAW）通用 */}
         <div className="flex items-center gap-1 justify-self-center">
           <div className="flex items-center gap-0.5 rounded-sm border border-border bg-bg-deep p-0.5">
-            <IconButton
-              title={t('timeline.btn_play_project_from_start')}
+            {/* 「从项目头开始播放」:用 SkipBack + Play 组合图标(⏮▶)。
+                单 SkipBack 容易被误读成「上一项」navigation,加一个小
+                Play 三角后视觉表达「回到起点并播放」更清晰——这是物理
+                媒体播放器(CD / DVD)上常见的「⏮▶」按钮画法。
+                单图标按钮 h-6 w-6 不够放,这里把宽度拉到 w-10 */}
+            <button
+              type="button"
               onClick={() => void playProjectFromStart()}
               disabled={!canStartProject}
+              title={t('timeline.btn_play_project_from_start')}
+              className={cn(
+                'flex h-6 w-10 items-center justify-center gap-0 rounded-sm text-fg-muted',
+                'disabled:cursor-not-allowed disabled:opacity-40',
+                !canStartProject ? '' : 'hover:bg-chrome-hover hover:text-fg'
+              )}
             >
-              {/* SkipBack（⏮）= 「跳到开头」，比 Rewind（⏪「快退」）
-                  更准确表达「从项目第一段开始播」的语义；视觉上和右
-                  边的 ▶ Play 按钮也更容易区分 */}
-              <SkipBack size={12} />
-            </IconButton>
+              <SkipBack size={11} />
+              <Play size={9} className="-ml-0.5" />
+            </button>
             <IconButton
               // 当前在播 = 显示 Pause 图标 + 点击切换 paused / resumed；
               // idle = 显示 Play + 点击从当前段开始播放。一个按钮承担
