@@ -19,6 +19,39 @@ export const PANEL_TITLE_KEYS: Record<string, string> = {
 }
 
 /**
+ * 显示菜单 toggle 的 panel 顺序 + 「再添加回来时去哪里」的默认位置。
+ *
+ * direction === undefined 表示并入参考 panel 的 group（同一 tab 组）。
+ * 如果参考 panel 当下不在 layout 里，addPanel 会回退到无 position
+ * （dockview 把它放进活动 group 或新建一个）——比抛错好，至少 panel
+ * 出现在屏幕上让用户能看见
+ */
+type PanelDefinition = {
+  component: string
+  refId?: string
+  direction?: 'left' | 'right' | 'above' | 'below' | 'within'
+}
+
+export const PANEL_DEFINITIONS: Record<string, PanelDefinition> = {
+  segments: { component: 'segments' },
+  inspector: { component: 'inspector', refId: 'segments', direction: 'right' },
+  projectSettings: { component: 'projectSettings', refId: 'inspector', direction: 'within' },
+  segmentTimeline: { component: 'segmentTimeline', refId: 'segments', direction: 'below' },
+  projectTimeline: { component: 'projectTimeline', refId: 'segmentTimeline', direction: 'below' },
+  levelMeter: { component: 'levelMeter', refId: 'segmentTimeline', direction: 'right' }
+}
+
+/** 菜单中 panel toggle 的展示顺序——按用户习惯的「读取优先」从上到下 */
+export const PANEL_TOGGLE_ORDER: string[] = [
+  'segments',
+  'inspector',
+  'projectSettings',
+  'segmentTimeline',
+  'projectTimeline',
+  'levelMeter'
+]
+
+/**
  * 用当前语言把所有已知 panel 的 tab 标题刷一遍。
  * 用在两个地方：
  *   1. 从持久化布局 fromJSON 恢复后（旧语言的标题会被覆盖）
@@ -35,6 +68,35 @@ export function syncDockTabTitles(api: DockviewApi): void {
 /** 通过模块作用域的 currentApi 刷新标题，不存在 api 时 no-op */
 export function refreshDockTabTitles(): void {
   if (currentApi) syncDockTabTitles(currentApi)
+}
+
+/**
+ * 切换 panel 的可见性。当前存在则 removePanel，否则按 PANEL_DEFINITIONS
+ * 的默认位置 addPanel 回去。
+ *
+ * 重新添加时若参考 panel 不在 layout 里（用户已经把它也关了），回退到
+ * 无 position：dockview 把新 panel 放进活动 group / 新建一个，行为可
+ * 预测且不抛错
+ */
+export function togglePanel(id: string): void {
+  if (!currentApi) return
+  const existing = currentApi.getPanel(id)
+  if (existing) {
+    currentApi.removePanel(existing)
+    return
+  }
+  const def = PANEL_DEFINITIONS[id]
+  if (!def) return
+  const t = i18n.t.bind(i18n)
+  const titleKey = PANEL_TITLE_KEYS[id]
+  const refExists = def.refId ? !!currentApi.getPanel(def.refId) : false
+  currentApi.addPanel({
+    id,
+    component: def.component,
+    title: titleKey ? t(titleKey) : id,
+    position:
+      refExists && def.refId ? { referencePanel: def.refId, direction: def.direction } : undefined
+  })
 }
 
 /**

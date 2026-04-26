@@ -8,6 +8,7 @@ import { SegmentTimelineView } from '@renderer/views/SegmentTimelineView'
 import { ProjectTimelineView } from '@renderer/views/ProjectTimelineView'
 import { LevelMeterView } from '@renderer/views/LevelMeterView'
 import { usePreferencesStore } from '@renderer/store/preferencesStore'
+import { useDockStore } from '@renderer/store/dockStore'
 import {
   DEFAULT_PREFERENCES,
   DOCK_LAYOUT_SCHEMA_VERSION,
@@ -152,6 +153,16 @@ function onWorkspaceReady(event: DockviewReadyEvent): void {
     }
     usePreferencesStore.getState().update({ layout: { dockLayout: envelope } })
   })
+
+  // 跟踪打开的 panel 集合给 View 菜单的 toggle checkbox 用。
+  // 初始化一次 + 在 add/remove 事件时更新——比 onDidLayoutChange 更精准
+  // 也更省（layout 改变的事件远多于 panel 增删）
+  const syncOpenIds = (): void => {
+    useDockStore.getState().setOpenPanelIds(new Set(api.panels.map((p) => p.id)))
+  }
+  syncOpenIds()
+  api.onDidAddPanel(syncOpenIds)
+  api.onDidRemovePanel(syncOpenIds)
 }
 
 export function Workspace(): React.JSX.Element {

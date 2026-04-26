@@ -11,10 +11,23 @@ import { formatBinding, resolveBindings } from '@shared/preferences'
 import { closeCurrentProject, newProject, openProject } from '@renderer/actions/project'
 import { exportAudioWav, exportSubtitlesSrt } from '@renderer/actions/export'
 import { useDialogStore } from '@renderer/store/dialogStore'
-import { resetWorkspaceLayout } from './workspaceHandle'
+import { useDockStore } from '@renderer/store/dockStore'
+import {
+  PANEL_TITLE_KEYS,
+  PANEL_TOGGLE_ORDER,
+  resetWorkspaceLayout,
+  togglePanel
+} from './workspaceHandle'
 
 type MenuItem =
   | { kind: 'item'; label: string; shortcut?: string; disabled?: boolean; onSelect?: () => void }
+  | {
+      kind: 'checkbox'
+      label: string
+      checked: boolean
+      disabled?: boolean
+      onSelect?: () => void
+    }
   | { kind: 'separator' }
   | { kind: 'submenu'; label: string; items: MenuItem[] }
   | {
@@ -48,7 +61,8 @@ function buildMenus(
     playSegment: string
     playProject: string
     stop: string
-  }
+  },
+  openPanelIds: ReadonlySet<string>
 ): MenuDef[] {
   // undo / redo 动态标签：可用时显示「撤销：编辑文案」让用户知道会撤销什么；
   // 不可用时退回纯标签（也不显示 label 后缀，避免视觉上像可点击）
@@ -153,9 +167,15 @@ function buildMenus(
           onSelect: resetWorkspaceLayout
         },
         { kind: 'separator' },
-        { kind: 'item', label: t('menu.view_toggle_segments'), disabled: true },
-        { kind: 'item', label: t('menu.view_toggle_inspector'), disabled: true },
-        { kind: 'item', label: t('menu.view_toggle_timeline'), disabled: true }
+        // 6 个 panel 的显示 / 隐藏。checkbox 反映当前是否打开；点击切换。
+        // 工程未打开时整列 disabled——dockview 容器没工作内容
+        ...PANEL_TOGGLE_ORDER.map<MenuItem>((id) => ({
+          kind: 'checkbox',
+          label: t(PANEL_TITLE_KEYS[id]),
+          checked: openPanelIds.has(id),
+          disabled: !hasProject,
+          onSelect: () => togglePanel(id)
+        }))
         // Dock 主题已经整合到 Edit → Preferences 里；
         // 保留 View 菜单的「布局」概念，主题由统一偏好管理
       ]
@@ -235,6 +255,31 @@ function renderItems(items: MenuItem[]): React.ReactNode {
   return items.map((it, idx) => {
     if (it.kind === 'separator') {
       return <DropdownMenu.Separator key={idx} className="my-1 h-px bg-border" />
+    }
+    if (it.kind === 'checkbox') {
+      return (
+        <DropdownMenu.CheckboxItem
+          key={idx}
+          checked={it.checked}
+          disabled={it.disabled}
+          onSelect={(e) => {
+            // 阻止默认行为：dropdown 默认 select 后会关菜单，但 toggle 类
+            // 操作通常希望菜单保持打开让用户连续切多个 panel
+            e.preventDefault()
+            it.onSelect?.()
+          }}
+          className={cn(
+            'relative flex items-center justify-between gap-6 px-3 py-1.5 pl-6 text-xs outline-none',
+            'data-[highlighted]:bg-accent data-[highlighted]:text-white',
+            'data-[disabled]:text-fg-dim data-[disabled]:pointer-events-none'
+          )}
+        >
+          <DropdownMenu.ItemIndicator className="absolute left-1.5">
+            <Check size={11} />
+          </DropdownMenu.ItemIndicator>
+          <span>{it.label}</span>
+        </DropdownMenu.CheckboxItem>
+      )
     }
     if (it.kind === 'radioGroup') {
       return (
@@ -340,6 +385,7 @@ export function Titlebar(): React.JSX.Element {
   const openPreferences = useDialogStore((s) => s.openPreferences)
   const openAbout = useDialogStore((s) => s.openAbout)
   const openAudioAudit = useDialogStore((s) => s.openAudioAudit)
+  const openPanelIds = useDockStore((s) => s.openPanelIds)
 
   // 订阅历史栈长度与栈顶 labelKey：两者变化时菜单应重新计算。
   // 只取我们需要的标量 / 字符串，避免订阅整条 entry 对象引发不必要的重渲染
@@ -382,7 +428,8 @@ export function Titlebar(): React.JSX.Element {
         openAbout,
         openAudioAudit,
         historyCtx,
-        transportShortcuts
+        transportShortcuts,
+        openPanelIds
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [
@@ -401,7 +448,8 @@ export function Titlebar(): React.JSX.Element {
       transportShortcuts.rerecord,
       transportShortcuts.playSegment,
       transportShortcuts.playProject,
-      transportShortcuts.stop
+      transportShortcuts.stop,
+      openPanelIds
     ]
   )
 
