@@ -1,5 +1,6 @@
 import * as player from '@renderer/services/player'
 import { showError } from '@renderer/store/toastStore'
+import { devLog } from '@renderer/lib/devLog'
 import i18n from '@renderer/i18n'
 import { takeEffectiveDurationMs, takeEffectiveRange } from '@shared/project'
 import type { EditorActions, SliceCreator } from './types'
@@ -153,6 +154,9 @@ export const createPlaybackSlice: SliceCreator<
     let startIdx = items.findIndex((it) => playhead < it.effectiveStartMs + it.effectiveDurationMs)
     if (startIdx < 0) startIdx = 0
     const offsetWithinFirst = Math.max(0, playhead - items[startIdx].effectiveStartMs)
+    devLog(
+      `[playback] playProject playhead=${playhead} → startIdx=${startIdx} (segId=${items[startIdx].segmentId}, segStart=${items[startIdx].effectiveStartMs}, segDur=${items[startIdx].effectiveDurationMs}) offsetWithinFirst=${offsetWithinFirst}`
+    )
 
     set({ playback: 'project', paused: false })
     try {
@@ -231,6 +235,9 @@ export const createPlaybackSlice: SliceCreator<
    */
   playProjectFromCurrentSegment: async () => {
     const state = get()
+    devLog(
+      `[playback] fromCurrentSegment ENTRY playback=${state.playback} selId=${state.selectedSegmentId ?? '<none>'}`
+    )
     if (state.playback !== 'idle') {
       player.stop()
       set({ playback: 'idle', paused: false })
@@ -239,6 +246,7 @@ export const createPlaybackSlice: SliceCreator<
     if (!selId) {
       // 没选中段时退回从头播——按钮可能是错误地暴露给用户的状态，但
       // 走「从头」比啥都不做更接近预期
+      devLog('[playback] fromCurrentSegment no selection → falling back to fromStart')
       set({ timelinePlayheadMs: 0 })
       pushWorkspace(get())
       await get().playProject()
@@ -254,6 +262,9 @@ export const createPlaybackSlice: SliceCreator<
       }
       acc += seg?.gapAfter?.ms ?? 0
     }
+    devLog(
+      `[playback] fromCurrentSegment selId=${selId} computedStartMs=${acc} (writing to timelinePlayheadMs)`
+    )
     set({ timelinePlayheadMs: acc })
     pushWorkspace(get())
     await get().playProject()
