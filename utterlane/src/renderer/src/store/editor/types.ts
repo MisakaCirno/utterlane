@@ -35,6 +35,15 @@ export type EditorData = {
    */
   timelinePlayheadMs: number
   /**
+   * SegmentTimeline 的「段内游标」(毫秒,文件相对位置 = 实际 audio
+   * currentTime 对应的 ms)。用途:
+   *   - 「从游标位置播放当前句」按钮的起点
+   *   - WaveformView 在 idle 态下显示静态游标
+   * 切换 selectedSegmentId 时复位为 0,因为是「段内」概念。不持久化进
+   * workspace.json——属于会话状态,跨打开没保留意义
+   */
+  segmentPlayheadMs: number
+  /**
    * 主选中之外的「副选中」集合，用于多选场景。
    *
    * 不变量：selectedSegmentId（主选中）永远不会出现在 extraSelectedSegmentIds
@@ -249,7 +258,17 @@ export type EditorActions = {
   cancelCountdown: () => void
 
   // 播放
+  /**
+   * 播放当前选中 Segment。从 segmentPlayheadMs 起播——配合「从游标位置」
+   * 按钮使用。如果 playhead 已超过 trim 区间(自然播完后),回退到段头
+   */
   playCurrentSegment: () => Promise<void>
+  /**
+   * 「从段头播放」按钮:把 segmentPlayheadMs 归零,然后 playCurrentSegment
+   */
+  playCurrentSegmentFromHead: () => Promise<void>
+  /** 直接设置段内游标位置(毫秒,文件相对)。WaveformView 点击 / 拖动用 */
+  setSegmentPlayhead: (ms: number) => void
   playProject: () => Promise<void>
   /**
    * 从项目开头播：把 timelinePlayheadMs 归零再 playProject，**不改变**
@@ -304,6 +323,7 @@ export const INITIAL_DATA: EditorData = {
   segmentsById: {},
   selectedSegmentId: undefined,
   timelinePlayheadMs: 0,
+  segmentPlayheadMs: 0,
   extraSelectedSegmentIds: new Set<string>(),
   lastPreviewedTakeId: undefined,
   scriptListScrollTop: 0,

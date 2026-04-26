@@ -13,6 +13,38 @@ const PLAYBACK_RATE_MIN = 0.25
 const PLAYBACK_RATE_MAX = 4
 
 /**
+ * 可暂停 / 可取消的等待。RAF 里累加 elapsed,paused 时不累加 wall-clock,
+ * 让暂停期间「停表」——避免「暂停 = 仍在等」让 gap 不公平。倍速由调用
+ * 方在传入 ms 时已经除掉,所以这里只看真实毫秒
+ */
+function sleepPausable(
+  ms: number,
+  isCancelled: () => boolean,
+  isPaused: () => boolean
+): Promise<void> {
+  return new Promise((resolve) => {
+    let elapsed = 0
+    let last = performance.now()
+    function tick(): void {
+      if (isCancelled()) {
+        resolve()
+        return
+      }
+      const now = performance.now()
+      const delta = now - last
+      last = now
+      if (!isPaused()) elapsed += delta
+      if (elapsed >= ms) {
+        resolve()
+        return
+      }
+      requestAnimationFrame(tick)
+    }
+    requestAnimationFrame(tick)
+  })
+}
+
+/**
  * 播放 slice：单段试听 / 工程连读 / 停止 / 暂停。
  *
  * === 全局单实例不变量 ===
@@ -49,6 +81,8 @@ export const createPlaybackSlice: SliceCreator<
   Pick<
     EditorActions,
     | 'playCurrentSegment'
+    | 'playCurrentSegmentFromHead'
+    | 'setSegmentPlayhead'
     | 'playProject'
     | 'playProjectFromStart'
     | 'playProjectFromCurrentSegment'
@@ -166,6 +200,27 @@ export const createPlaybackSlice: SliceCreator<
           item.filePath,
           buildPlayOptions({ startMs: fileStartMs, endMs: item.trimEndMs }, item.fileDurationMs)
         )
+
+        // 段间间隔(gap)等待:模拟「预览输出音频」效果。导出时段与段
+        // 之间会填充 gap.ms 长度的静音,连读应该等同样的时长才让
+        // 「播放节奏」与「输出节奏」一致。
+        // 间隔大小 = 下一 item 的 effectiveStartMs - 本 item 的结束 ms,
+        // 已经把跳过的 missing take 那一截累加进 gap(他们 effectiveDur=0
+        // 但 gap 仍然被 cursor 累加),所以这一减就拿到「真正应该等多久」
+        if (i < items.length - 1 && get().playback === 'project') {
+          const gapMs =
+            items[i + 1].effectiveStartMs - (item.effectiveStartMs + item.effectiveDurationMs)
+          if (gapMs > 0) {
+            // 倍速生效:2x 速度下 gap 也只等一半。playbackRate 已 clamp 在
+            // [0.25, 4],除法不会爆
+            const rate = get().playbackRate || 1
+            await sleepPausable(
+              gapMs / rate,
+              () => get().playback !== 'project',
+              () => get().paused
+            )
+          }
+        }
       }
       // 自然播完：把游标停在工程末尾，便于用户看到「播到哪了」
       if (get().playback === 'project') {
@@ -179,7 +234,9 @@ export const createPlaybackSlice: SliceCreator<
 
   return {
     /**
-     * 播放当前选中 Segment 的当前 Take。
+     * 播放当前选中 Segment 的当前 Take。从 segmentPlayheadMs 起播——
+     * playhead 在 trim 范围内时尊重它,超出(自然播完后会停在 trimEnd)
+     * 时回退到段头,避免「点击就立刻结束」。
      *
      * 缺失文件守卫：missingTakeIds 由 audit 扫描填充，命中时直接弹错——
      * 否则 player 会调 readTakeFile，main 抛 ENOENT，最终 audio 元素吐
@@ -202,7 +259,16 @@ export const createPlaybackSlice: SliceCreator<
 
         // 节选区间：take 设了 trim 就只播节选段，否则整段
         const range = takeEffectiveRange(take)
-        const playOpts = buildPlayOptions(range, take.durationMs)
+        // 从 segmentPlayheadMs 起播,但要 clamp 到 trim 范围内。playhead
+        // 在 trim 区间外 (< start 或 >= end) 时退回段头——前者是「越界」,
+        // 后者是「自然播完后位置」,都不该让 playFile 立即结束
+        const playhead = state.segmentPlayheadMs
+        const startFrom =
+          playhead > range.startMs && playhead < range.endMs ? playhead : range.startMs
+        const playOpts = buildPlayOptions(
+          { startMs: startFrom, endMs: range.endMs },
+          take.durationMs
+        )
 
         set({ playback: 'segment', paused: false })
         try {
@@ -211,6 +277,44 @@ export const createPlaybackSlice: SliceCreator<
           if (get().playback === 'segment') set({ playback: 'idle', paused: false })
         }
       }),
+
+    /**
+     * 从段头播放当前 Segment——把 segmentPlayheadMs 归零再 playCurrentSegment。
+     * 保证总是从 trim 起点起播,跟「从游标位置」按钮形成对照
+     */
+    playCurrentSegmentFromHead: () =>
+      preemptAndRun(async () => {
+        set({ segmentPlayheadMs: 0 })
+        // 内联走 playCurrentSegment 的逻辑(不能调 get().playCurrentSegment()
+        // ——那会再走一次 preemptAndRun,把自己当成旧任务等死)
+        const state = get()
+        if (!state.selectedSegmentId) return
+        const seg = state.segmentsById[state.selectedSegmentId]
+        const take = seg?.takes.find((t) => t.id === seg.selectedTakeId)
+        if (!take) return
+        if (state.missingTakeIds.has(take.id)) {
+          showError(
+            i18n.t('errors.play_missing_take_title'),
+            i18n.t('errors.play_missing_take_description')
+          )
+          return
+        }
+        const range = takeEffectiveRange(take)
+        const playOpts = buildPlayOptions(range, take.durationMs)
+        set({ playback: 'segment', paused: false })
+        try {
+          await player.playFile(take.filePath, playOpts)
+        } finally {
+          if (get().playback === 'segment') set({ playback: 'idle', paused: false })
+        }
+      }),
+
+    /** 直接写段内游标位置。WaveformView 点击 / 拖动 / 暂停时用 */
+    setSegmentPlayhead: (ms) => {
+      const next = Math.max(0, ms)
+      if (get().segmentPlayheadMs === next) return
+      set({ segmentPlayheadMs: next })
+    },
 
     /**
      * 从游标当前位置连续播放工程剩余 take。和 Slice D1 的实现不同:
@@ -269,11 +373,16 @@ export const createPlaybackSlice: SliceCreator<
 
     /**
      * 停止播放。直接把 playback 切回 idle(不等 playFile 的 finally),
-     * 这样 runProjectLoop 循环能立刻看到状态变化并退出,不会多播一段
+     * 这样 runProjectLoop 循环能立刻看到状态变化并退出,不会多播一段。
+     * segment 播放停止时顺手把 segmentPlayheadMs 写到当前位置——下次
+     * 「从游标位置」按钮就从这里接着播
      */
     stopPlayback: () => {
       const state = get()
       if (state.playback === 'segment' || state.playback === 'project') {
+        if (state.playback === 'segment') {
+          set({ segmentPlayheadMs: player.getCurrentTimeMs() })
+        }
         player.stop()
         set({ playback: 'idle', paused: false })
       }
@@ -282,6 +391,8 @@ export const createPlaybackSlice: SliceCreator<
     /**
      * 暂停 ↔ 恢复。仅在播放中有意义；idle / recording 时 no-op。
      * 实际的音频暂停 / 恢复交给 player service；本函数只同步状态位。
+     * segment 暂停时同步 segmentPlayheadMs,让 WaveformView 的静态游标
+     * 停在用户暂停的位置
      */
     togglePausePlayback: () => {
       const state = get()
@@ -291,6 +402,9 @@ export const createPlaybackSlice: SliceCreator<
         set({ paused: false })
       } else {
         player.pause()
+        if (state.playback === 'segment') {
+          set({ segmentPlayheadMs: player.getCurrentTimeMs() })
+        }
         set({ paused: true })
       }
     },

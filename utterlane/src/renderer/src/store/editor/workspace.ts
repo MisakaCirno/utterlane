@@ -32,8 +32,9 @@ export const createWorkspaceSlice: SliceCreator<
   >
 > = (set, get) => ({
   selectSegment: (id) => {
-    // 普通选中也清空副选——保持「主选变化时副选不孤立」的语义
-    set({ selectedSegmentId: id, extraSelectedSegmentIds: new Set() })
+    // 普通选中也清空副选——保持「主选变化时副选不孤立」的语义。
+    // segmentPlayheadMs 也复位:它是「段内」概念,切换到别的段就该归零
+    set({ selectedSegmentId: id, extraSelectedSegmentIds: new Set(), segmentPlayheadMs: 0 })
     pushWorkspace(get())
   },
 

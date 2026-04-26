@@ -136,37 +136,56 @@ export function WaveformView({
   // 都基于 innerWidth，而不是 size.w
   const innerWidth = size.w > 0 ? size.w * zoomH : 0
 
-  // 命令式更新游标：subscribePosition 回调里直接写 transform，不走 React。
-  // closure 捕获 filePath / totalMs / innerWidth，任意变化时重新订阅以
-  // 让 closure 拿到最新值
+  // 订阅 store 的播放状态 + 段内游标位置。playhead 有两种来源:
+  //   - segment 播放中:实时跟 player.subscribePosition (高频 RAF)
+  //   - 其他时刻(idle / paused / project 播放中):静态停在 segmentPlayheadMs
+  // 后者让用户能看到「下次点'从游标位置'按钮会从哪开始」
+  const playback = useEditorStore((s) => s.playback)
+  const segmentPlayheadMs = useEditorStore((s) => s.segmentPlayheadMs)
+  const setSegmentPlayhead = useEditorStore((s) => s.setSegmentPlayhead)
+
   useEffect(() => {
-    const target = playheadRef.current
-    if (!target) return
+    const el = playheadRef.current
+    if (!el) return
     if (innerWidth === 0 || totalMs <= 0) {
-      target.style.display = 'none'
+      el.style.display = 'none'
       return
     }
-    return subscribePosition((playingPath, positionMs) => {
-      const el = playheadRef.current
-      if (!el) return
-      // 只在 segment 播放语境下显示 playhead——project 连读时游标反馈
-      // 归 ProjectTimeline 管,WaveformView 不再「反向联动」project 播放
-      // 位置(那会让用户以为「单段在播」而其实是项目连读)
-      const playback = useEditorStore.getState().playback
-      if (playback !== 'segment') {
-        el.style.display = 'none'
-        return
-      }
-      if (!playingPath || playingPath !== filePath) {
-        el.style.display = 'none'
-        return
-      }
-      const ratio = Math.min(1, Math.max(0, positionMs / totalMs))
-      const cx = ratio * innerWidth
+
+    if (playback === 'segment') {
+      // 实时模式:只在 playingPath 跟当前展示的 take 一致时显示
       el.style.display = 'block'
-      el.style.transform = `translate3d(${cx}px, 0, 0)`
-    })
-  }, [filePath, totalMs, innerWidth])
+      return subscribePosition((playingPath, positionMs) => {
+        const target = playheadRef.current
+        if (!target) return
+        if (!playingPath || playingPath !== filePath) {
+          target.style.display = 'none'
+          return
+        }
+        const ratio = Math.min(1, Math.max(0, positionMs / totalMs))
+        target.style.transform = `translate3d(${ratio * innerWidth}px, 0, 0)`
+        target.style.display = 'block'
+      })
+    }
+    // 静态模式:停在 segmentPlayheadMs。clamp 防止越界(切段后旧 playhead
+    // 位置可能超过新段时长)
+    const ratio = Math.min(1, Math.max(0, segmentPlayheadMs / totalMs))
+    el.style.transform = `translate3d(${ratio * innerWidth}px, 0, 0)`
+    el.style.display = 'block'
+    return undefined
+  }, [filePath, totalMs, innerWidth, playback, segmentPlayheadMs])
+
+  /** 点击波形 / ruler 任意位置:把段内游标设到对应 ms 处 */
+  const onSeek = (e: React.MouseEvent<HTMLDivElement>): void => {
+    if (innerWidth <= 0 || totalMs <= 0) return
+    const rect = e.currentTarget.getBoundingClientRect()
+    // rect.width === innerWidth(inner div 显式 width);clientX - rect.left
+    // 自动正确处理横向 scroll(scrollLeft 让 rect.left 变成负值)
+    const clickX = e.clientX - rect.left
+    const ratio = clickX / rect.width
+    const ms = Math.max(0, Math.min(totalMs, ratio * totalMs))
+    setSegmentPlayhead(ms)
+  }
 
   // 容器尺寸跟踪：用 ResizeObserver 写到 size state，让两层 canvas 都依赖
   useEffect(() => {
@@ -339,7 +358,11 @@ export function WaveformView({
         // innerWidth（=viewport×zoomH），absolute 子元素都以波形区为
         // 定位基准。container 是 scroll outer，inner 超出 viewport 部分
         // 由 outer 的 overflow-x-auto 接管成横向滚动条
-        <div className="flex h-full flex-col" style={{ width: innerWidth || '100%' }}>
+        <div
+          className="flex h-full cursor-pointer flex-col"
+          style={{ width: innerWidth || '100%' }}
+          onClick={onSeek}
+        >
           {showRuler && (
             <TimeRuler
               pxPerMs={rulerPxPerMs}
@@ -444,6 +467,9 @@ function TrimHandle({
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerCancel}
+      // stopPropagation:防止 click 冒泡到外层 onSeek,避免拖完手柄
+      // 松开瞬间也把段内游标设到那个位置
+      onClick={(e) => e.stopPropagation()}
       className={cn(
         'absolute top-0 bottom-0 z-30 flex w-2 cursor-ew-resize items-stretch justify-center',
         side === 'start' ? '-translate-x-1/2' : '-translate-x-1/2'

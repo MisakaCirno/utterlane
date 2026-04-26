@@ -38,6 +38,14 @@ export function setPlaybackRate(rate: number): void {
   currentRate = rate
   if (currentAudio) currentAudio.playbackRate = rate
 }
+
+/**
+ * 当前正在播的 audio 的 currentTime(毫秒,文件相对)。没有活跃播放
+ * 时返回 0。给 pause / stop 用——能在杀掉 audio 之前抓住「停在哪了」
+ */
+export function getCurrentTimeMs(): number {
+  return currentAudio ? currentAudio.currentTime * 1000 : 0
+}
 let currentObjectUrl: string | null = null
 let currentAnalyser: AnalyserNode | null = null
 let currentSource: MediaElementAudioSourceNode | null = null
