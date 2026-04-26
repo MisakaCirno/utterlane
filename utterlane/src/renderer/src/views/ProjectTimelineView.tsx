@@ -637,8 +637,13 @@ function TimelineContent({ pxPerMs }: { pxPerMs: number }): React.JSX.Element {
   const isLivePlayingRef = useRef(false)
 
   useEffect(() => {
-    if (playback !== 'project' && playback !== 'segment') {
-      // 退出播放：把游标颜色还原到 stored，位置由 React 渲染重新管控
+    // 只有项目级播放(playback === 'project')才让 ProjectTimeline 的游标
+    // 跟随实时位置移动。segment 播放是另一个独立的播放语境(用户在
+    // SegmentTimeline 试听单句),不该让 ProjectTimeline 的游标也跑——
+    // 那会让用户以为「项目在播放」而其实只在试听一句
+    if (playback !== 'project') {
+      // 退出 project 播放：把游标颜色还原到 stored，位置由 React 渲染
+      // 重新管控。segment 播放期间也走这一支 → 游标静止在 storedPlayhead
       isLivePlayingRef.current = false
       const el = cursorRef.current
       if (el) {
