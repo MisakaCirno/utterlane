@@ -212,42 +212,46 @@ function ProjectControlRow({
         className="grid h-full min-w-max items-center gap-2 px-2"
         style={{ gridTemplateColumns: '1fr auto 1fr' }}
       >
-        {/* 左：间隔操作组 */}
-        <div className="flex items-center gap-1">
-          <IconButton
-            title={t('timeline.tb_apply_default_gaps_hint', {
-              sentence: defaults.sentenceMs,
-              paragraph: defaults.paragraphMs
-            })}
-            onClick={() => applyDefaultGaps(defaults)}
-            disabled={!canEditGaps}
-          >
-            <AlignVerticalJustifyCenter size={12} />
-          </IconButton>
-          {/* 重置：覆盖 manual，强制全部回到默认值 */}
-          <IconButton
-            title={t('timeline.tb_reset_gaps_hint')}
-            onClick={() => resetGapsToDefault(defaults)}
-            disabled={!canEditGaps}
-          >
-            <RefreshCw size={11} />
-          </IconButton>
-          {/* 清除：仅清掉非 manual 的，保留用户手动设置过的 */}
-          <IconButton
-            title={t('timeline.tb_clear_auto_gaps_hint')}
-            onClick={() => clearAutoGaps()}
-            disabled={!canEditGaps}
-          >
-            <Eraser size={11} />
-          </IconButton>
-        </div>
+        {/* 左：占位，让中间组真正居中(跟 SegmentTimeline 一致) */}
+        <div />
 
-        {/* 中：播放控制组。四按钮 = [⏮▶ 从项目头] [▶ 从当前段头]
-            [⏸/▶ 暂停继续] [⏹ 停止] + 倍速控件。
+        {/* 中：间隔操作 + 播放控制 + 倍速，三组各自圆框、gap-2 留白
+            (对齐 SegmentTimeline 的 3-group 模式)。播放四按钮 =
+            [⏮▶ 从项目头] [⏪▶ 从当前段头] [⏸/▶ 暂停继续] [⏹ 停止]。
             按钮 1 / 2 始终是「从某起点重新播放」语义,即使正在播也允许
             点(行为是 stop-then-restart)；按钮 3 是 #9 说的 play↔pause
             整合,只在 project 播放中启用 */}
-        <div className="flex items-center gap-1 justify-self-center">
+        <div className="flex items-center gap-2 justify-self-center">
+          {/* 间隔操作组：apply default / reset / clear auto */}
+          <div className="flex items-center gap-0.5 rounded-sm border border-border bg-bg-deep p-0.5">
+            <IconButton
+              title={t('timeline.tb_apply_default_gaps_hint', {
+                sentence: defaults.sentenceMs,
+                paragraph: defaults.paragraphMs
+              })}
+              onClick={() => applyDefaultGaps(defaults)}
+              disabled={!canEditGaps}
+            >
+              <AlignVerticalJustifyCenter size={12} />
+            </IconButton>
+            {/* 重置：覆盖 manual，强制全部回到默认值 */}
+            <IconButton
+              title={t('timeline.tb_reset_gaps_hint')}
+              onClick={() => resetGapsToDefault(defaults)}
+              disabled={!canEditGaps}
+            >
+              <RefreshCw size={11} />
+            </IconButton>
+            {/* 清除：仅清掉非 manual 的，保留用户手动设置过的 */}
+            <IconButton
+              title={t('timeline.tb_clear_auto_gaps_hint')}
+              onClick={() => clearAutoGaps()}
+              disabled={!canEditGaps}
+            >
+              <Eraser size={11} />
+            </IconButton>
+          </div>
+
           <div className="flex items-center gap-0.5 rounded-sm border border-border bg-bg-deep p-0.5">
             {/* 1. 从项目头:SkipBack + Play 复合图标(⏮▶) */}
             <CompositeButton
