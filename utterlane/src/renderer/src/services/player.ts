@@ -68,8 +68,17 @@ function getContext(): AudioContext {
   return sharedContext
 }
 
-/** 连读播放时被 stop 打断的标记。下一次进 loop 循环体时用它跳出。 */
-let sequenceAborted = false
+/**
+ * 单调递增的 playFile 调用 ID。每次 playFile 进入时 ++ 拿一个新值,await
+ * loadBlobUrl 之后用这个值跟 activePlayFileId 比对——若期间又有新的
+ * playFile 调用(比如用户连点播放键),自己的 ID 已不再是最新,放弃创建
+ * audio,避免「旧调用的 audio 和新调用的 audio 同时活着」。
+ *
+ * 旧实现是布尔 sequenceAborted:每次 playFile 入口先 stop()(置 true)再
+ * 重置为 false。两次并发调用会互相把对方的 abort 标志洗掉,起不到防御
+ * 作用——这是「重复点击导致多段音频同时播」的根因
+ */
+let activePlayFileId = 0
 
 /**
  * 订阅列表挂在模块作用域——UI 组件常驻，需要跨多个 play 会话保持订阅。
@@ -193,11 +202,12 @@ function teardown(): void {
 
 /**
  * 停止任何正在进行的播放 / 序列。
- * 若当前正在 playFile 的 Promise 中，它会在下一个事件循环内 resolve；
- * 若当前在 playSequence 的循环间隙，sequenceAborted 标记会让它跳出。
+ * 若当前正在 playFile 的 Promise 中,杀掉 audio 元素后 'error' 事件会让
+ * 它在下一个事件循环 resolve。activePlayFileId 同时 ++,让任何还在 await
+ * loadBlobUrl 的 playFile 在恢复时拿不到匹配的 ID,放弃创建新 audio
  */
 export function stop(): void {
-  sequenceAborted = true
+  activePlayFileId++
   teardown()
 }
 
@@ -224,13 +234,18 @@ export async function playFile(relativePath: string, options: PlayFileOptions = 
   const { startMs, endMs } = options
   devLog(`[player] playFile START ${relativePath} startMs=${startMs ?? 0} endMs=${endMs ?? 'eof'}`)
   stop()
-  sequenceAborted = false
+  // 拿一个本次调用专属的 ID。stop() 已经把 activePlayFileId ++ 一次了,
+  // 这里再 ++ 让本调用的 myId 不会跟 stop() 的「废弃信号」重合
+  const myId = ++activePlayFileId
 
   const url = await loadBlobUrl(relativePath)
-  // 窄口竞态守卫：用户在 IPC 读文件期间又点了 stop，这里直接丢弃本次播放
-  if (sequenceAborted) {
+  // 窄口竞态守卫:在 IPC 读文件期间又有新的 playFile 被调用,activePlayFileId
+  // 已经被推到更新值;本次调用的 myId 已过时,放弃创建 audio
+  if (activePlayFileId !== myId) {
     URL.revokeObjectURL(url)
-    devLog(`[player] aborted before play() ${relativePath}`)
+    devLog(
+      `[player] aborted before play() ${relativePath} (id ${myId} → current ${activePlayFileId})`
+    )
     return
   }
   const audio = new Audio(url)

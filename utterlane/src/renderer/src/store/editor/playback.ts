@@ -1,6 +1,5 @@
 import * as player from '@renderer/services/player'
 import { showError } from '@renderer/store/toastStore'
-import { devLog } from '@renderer/lib/devLog'
 import i18n from '@renderer/i18n'
 import { takeEffectiveDurationMs, takeEffectiveRange } from '@shared/project'
 import type { EditorActions, SliceCreator } from './types'
@@ -12,6 +11,20 @@ import { pushWorkspace } from './save'
  */
 const PLAYBACK_RATE_MIN = 0.25
 const PLAYBACK_RATE_MAX = 4
+
+/**
+ * playProject 的会话 ID。每次进入 playProject 会 ++ 拿一个新值,loop 每
+ * 轮迭代前校验自己的 ID 仍是最新——不是就 break。
+ *
+ * 用途:防止「重复点击播放键 → 两个 playProject loop 同时运行 → 互相
+ * 抢 currentAudio,旧 loop 的 audio 还在响,新 loop 的 audio 也开始响」。
+ * 旧 loop 在新 session 启动后立刻失效,不会再 spawn 新 audio。
+ *
+ * 与 player.ts 的 activePlayFileId 配合:player 层防止「await loadBlobUrl
+ * 期间被打断时仍然创建 audio」,playback 层防止「旧 loop 继续往下走 spawn
+ * 更多 playFile」。两层都需要,缺一就有不同 race window
+ */
+let activeProjectSessionId = 0
 
 /**
  * 播放 slice：单段试听 / 工程连读 / 停止 / 暂停。
@@ -154,15 +167,18 @@ export const createPlaybackSlice: SliceCreator<
     let startIdx = items.findIndex((it) => playhead < it.effectiveStartMs + it.effectiveDurationMs)
     if (startIdx < 0) startIdx = 0
     const offsetWithinFirst = Math.max(0, playhead - items[startIdx].effectiveStartMs)
-    devLog(
-      `[playback] playProject playhead=${playhead} → startIdx=${startIdx} (segId=${items[startIdx].segmentId}, segStart=${items[startIdx].effectiveStartMs}, segDur=${items[startIdx].effectiveDurationMs}) offsetWithinFirst=${offsetWithinFirst}`
-    )
 
+    // 拿本次会话的 ID。后续 loop 每轮迭代会校验,避免被新启动的会话抢占
+    const mySession = ++activeProjectSessionId
     set({ playback: 'project', paused: false })
     try {
       for (let i = startIdx; i < items.length; i++) {
         const item = items[i]
-        // stopPlayback 会立刻把 playback 切到 idle，循环这里读一次就退出
+        // 会话校验:用户重新点了播放键会让我们这一轮失效,break 让旧 loop
+        // 不再 spawn 新 playFile。配合 player.ts 的 activePlayFileId 形成
+        // 双层防御
+        if (activeProjectSessionId !== mySession) break
+        // stopPlayback 会立刻把 playback 切到 idle,循环这里读一次就退出
         if (get().playback !== 'project') break
         set({ selectedSegmentId: item.segmentId })
         pushWorkspace(get())
@@ -174,13 +190,19 @@ export const createPlaybackSlice: SliceCreator<
           buildPlayOptions({ startMs: fileStartMs, endMs: item.trimEndMs }, item.fileDurationMs)
         )
       }
-      // 自然播完：把游标停在工程末尾，便于用户看到「播到哪了」
-      if (get().playback === 'project') {
+      // 自然播完：把游标停在工程末尾，便于用户看到「播到哪了」。
+      // 必须确认我们仍是最新会话——新会话已经在写它自己的 playhead,
+      // 不能让旧 loop 把游标拉到工程末尾覆盖它
+      if (activeProjectSessionId === mySession && get().playback === 'project') {
         set({ timelinePlayheadMs: cursor })
         pushWorkspace(get())
       }
     } finally {
-      if (get().playback === 'project') set({ playback: 'idle', paused: false })
+      // 同样:只有最新会话才能把 playback 切回 idle,避免旧 loop 在 finally
+      // 阶段把新会话刚 set 的 'project' 状态覆盖掉
+      if (activeProjectSessionId === mySession && get().playback === 'project') {
+        set({ playback: 'idle', paused: false })
+      }
     }
   },
 
@@ -235,9 +257,6 @@ export const createPlaybackSlice: SliceCreator<
    */
   playProjectFromCurrentSegment: async () => {
     const state = get()
-    devLog(
-      `[playback] fromCurrentSegment ENTRY playback=${state.playback} selId=${state.selectedSegmentId ?? '<none>'}`
-    )
     if (state.playback !== 'idle') {
       player.stop()
       set({ playback: 'idle', paused: false })
@@ -246,7 +265,6 @@ export const createPlaybackSlice: SliceCreator<
     if (!selId) {
       // 没选中段时退回从头播——按钮可能是错误地暴露给用户的状态，但
       // 走「从头」比啥都不做更接近预期
-      devLog('[playback] fromCurrentSegment no selection → falling back to fromStart')
       set({ timelinePlayheadMs: 0 })
       pushWorkspace(get())
       await get().playProject()
@@ -262,9 +280,6 @@ export const createPlaybackSlice: SliceCreator<
       }
       acc += seg?.gapAfter?.ms ?? 0
     }
-    devLog(
-      `[playback] fromCurrentSegment selId=${selId} computedStartMs=${acc} (writing to timelinePlayheadMs)`
-    )
     set({ timelinePlayheadMs: acc })
     pushWorkspace(get())
     await get().playProject()
