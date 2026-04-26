@@ -22,12 +22,14 @@ import { confirm } from './store/confirmStore'
 import { openProjectPath } from './actions/project'
 import { installKeyboardShortcuts } from './shell/keyboardShortcuts'
 import { FONT_SCALE_MAX, FONT_SCALE_MIN } from '@shared/preferences'
+import { COLOR_TOKENS, hexToRgbTriple, resolvePalette, tokenToCssVar } from '@shared/themes'
 
 function App(): React.JSX.Element {
   const hasProject = useEditorStore((s) => s.project !== null)
   const hydrated = usePreferencesStore((s) => s.hydrated)
   const locale = usePreferencesStore((s) => s.prefs.appearance?.locale)
   const fontScale = usePreferencesStore((s) => s.prefs.appearance?.fontScale)
+  const editorTheme = usePreferencesStore((s) => s.prefs.appearance?.editorTheme)
   const importScriptOpen = useDialogStore((s) => s.importScriptOpen)
   const closeImportScript = useDialogStore((s) => s.closeImportScript)
   const preferencesOpen = useDialogStore((s) => s.preferencesOpen)
@@ -56,6 +58,19 @@ function App(): React.JSX.Element {
     const clamped = Math.max(FONT_SCALE_MIN, Math.min(FONT_SCALE_MAX, fontScale ?? 1))
     window.api.window.setZoomFactor(clamped)
   }, [fontScale])
+
+  // 编辑器配色：把 preset + overrides 解析成完整 palette 后逐 token
+  // 写到 :root 的 --c-* 变量上。Tailwind 通过这些变量算最终色，
+  // setProperty 一次就让整 UI 改色，不需要重新渲染任何组件
+  useEffect(() => {
+    const palette = resolvePalette(editorTheme?.preset, editorTheme?.overrides)
+    for (const token of COLOR_TOKENS) {
+      document.documentElement.style.setProperty(
+        `--c-${tokenToCssVar(token)}`,
+        hexToRgbTriple(palette[token])
+      )
+    }
+  }, [editorTheme])
 
   // 启动时：
   //   1. 拉取偏好并订阅变更

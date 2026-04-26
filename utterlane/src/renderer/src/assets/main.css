@@ -23,6 +23,29 @@
     --fs-sm-lh: 18px;
     --fs-base: 13px;
     --fs-base-lh: 20px;
+
+    /*
+     * 颜色 token：'R G B' 三元组字符串，配合 tailwind 的 rgb(var(...) /
+     * <alpha-value>) 语法支持透明度修饰符。默认值是 PRESET_DARK
+     * （shared/themes.ts），保证未 hydrate / 主题切换前的首帧不空白。
+     * 主题切换由 App.tsx 的 useEffect 用 setProperty 覆盖
+     */
+    --c-bg: 30 30 30;
+    --c-bg-deep: 24 24 24;
+    --c-bg-panel: 37 37 38;
+    --c-bg-raised: 45 45 45;
+    --c-chrome: 60 60 60;
+    --c-chrome-hover: 74 74 74;
+    --c-border: 68 68 68;
+    --c-border-strong: 82 82 82;
+    --c-border-subtle: 45 45 45;
+    --c-fg: 204 204 204;
+    --c-fg-muted: 154 154 154;
+    --c-fg-dim: 106 106 106;
+    --c-accent: 14 99 156;
+    --c-accent-soft: 9 71 113;
+    --c-rec: 209 69 69;
+    --c-ok: 115 201 145;
   }
 
   html,

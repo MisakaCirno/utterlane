@@ -133,6 +133,17 @@ export type DockThemeKey =
   | 'replit'
   | 'lightSpaced'
 
+import type { ThemePalette, ThemePresetKey } from './themes'
+
+/**
+ * 编辑器配色：preset 是底色（默认 dark），overrides 是用户在底色上的逐
+ * token 覆盖。两者都缺时整 UI 用 PRESET_DARK
+ */
+export type EditorTheme = {
+  preset?: ThemePresetKey
+  overrides?: Partial<ThemePalette>
+}
+
 export type TextAlign = 'left' | 'center' | 'right'
 
 export type WindowBounds = {
@@ -185,6 +196,8 @@ export type AppPreferences = {
     segmentTextAlign?: TextAlign
     /** Inspector 里文案编辑框的对齐方式（默认左对齐，适合长文本编辑） */
     inspectorTextAlign?: TextAlign
+    /** 编辑器配色：预设主题 + 用户逐 token 覆盖 */
+    editorTheme?: EditorTheme
   }
 
   layout?: {
@@ -248,7 +261,8 @@ export const DEFAULT_PREFERENCES: AppPreferences = {
     fontScale: 1,
     locale: 'zh-CN',
     segmentTextAlign: 'center',
-    inspectorTextAlign: 'left'
+    inspectorTextAlign: 'left',
+    editorTheme: { preset: 'dark' }
   },
   projectDefaults: {
     sampleRate: 48000,

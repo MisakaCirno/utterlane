@@ -19,6 +19,14 @@ import { themeRegistry } from '@renderer/shell/themes'
 import { cn } from '@renderer/lib/cn'
 import { SUPPORTED_LOCALES, type SupportedLocale } from '@renderer/i18n'
 import { enumerateInputDevices, type AudioInputDevice } from '@renderer/services/recorder'
+import {
+  COLOR_TOKENS,
+  THEME_PRESET_KEYS,
+  THEME_PRESETS,
+  resolvePalette,
+  type ColorToken,
+  type ThemePresetKey
+} from '@shared/themes'
 
 /**
  * 设置对话框。
@@ -53,10 +61,11 @@ const SAMPLE_RATE_OPTIONS = [44100, 48000] as const
  */
 const COUNTDOWN_OPTIONS = [0, 1, 3, 5] as const
 
-type PageId = 'appearance' | 'projectDefaults' | 'recording' | 'keyboard'
+type PageId = 'appearance' | 'editorTheme' | 'projectDefaults' | 'recording' | 'keyboard'
 
 const PAGES: Array<{ id: PageId; labelKey: string }> = [
   { id: 'appearance', labelKey: 'preferences.section_appearance' },
+  { id: 'editorTheme', labelKey: 'preferences.section_editor_theme' },
   { id: 'projectDefaults', labelKey: 'preferences.section_project_defaults' },
   { id: 'recording', labelKey: 'preferences.section_recording' },
   { id: 'keyboard', labelKey: 'preferences.section_keyboard' }
@@ -120,6 +129,7 @@ export function PreferencesDialog({
 
             <div className="flex min-w-0 flex-1 flex-col overflow-y-auto px-4 py-3">
               {page === 'appearance' && <AppearancePage />}
+              {page === 'editorTheme' && <EditorThemePage />}
               {page === 'projectDefaults' && <ProjectDefaultsPage />}
               {page === 'recording' && <RecordingPage open={open} />}
               {page === 'keyboard' && <KeyboardPage />}
@@ -387,6 +397,120 @@ function KeyboardPage(): React.JSX.Element {
 function bindingsEqual(a: KeyBinding | null, b: KeyBinding | null): boolean {
   if (a === null || b === null) return a === b
   return a.key === b.key && !!a.ctrl === !!b.ctrl && !!a.alt === !!b.alt && !!a.shift === !!b.shift
+}
+
+/**
+ * 编辑器配色页：preset 选择 + 16 个颜色 token 的 color picker。
+ *
+ * 数据模型：preferences.appearance.editorTheme = { preset, overrides }。
+ *   - preset 选 dark / light / highContrast 之一作为底色；
+ *   - overrides 是用户在底色上的逐 token 覆盖，可以「只改一个 accent」
+ *     而保留其余 preset 默认。
+ *   - 「重置覆盖」按钮把 overrides 清空，回到纯 preset 状态
+ */
+function EditorThemePage(): React.JSX.Element {
+  const { t } = useTranslation()
+  const editorTheme = usePreferencesStore((s) => s.prefs.appearance?.editorTheme)
+  const update = usePreferencesStore((s) => s.update)
+  const preset = editorTheme?.preset ?? 'dark'
+  const overrides = editorTheme?.overrides ?? {}
+  // 当前生效色：preset 的默认 + overrides 覆盖。color picker 显示这个值
+  const palette = resolvePalette(preset, overrides)
+  const hasOverrides = Object.keys(overrides).length > 0
+
+  const setPreset = (next: ThemePresetKey): void => {
+    update({ appearance: { editorTheme: { preset: next, overrides } } })
+  }
+
+  const setOverride = (token: ColorToken, hex: string): void => {
+    // 与当前 preset 默认值相等时移除 override，保持 overrides 只存「用户
+    // 真正改过的」字段——这样切 preset 时被覆盖的 token 会自然回归新
+    // preset 的默认色
+    const presetDefault = THEME_PRESETS[preset][token]
+    const next: Partial<typeof overrides> = { ...overrides }
+    if (hex.toLowerCase() === presetDefault.toLowerCase()) {
+      delete next[token]
+    } else {
+      next[token] = hex
+    }
+    update({ appearance: { editorTheme: { preset, overrides: next } } })
+  }
+
+  const resetOverrides = (): void => {
+    update({ appearance: { editorTheme: { preset, overrides: undefined } } })
+  }
+
+  return (
+    <PageBody>
+      <Row label={t('preferences.label_theme_preset')}>
+        <div className="flex gap-1">
+          {THEME_PRESET_KEYS.map((key) => {
+            const isCurrent = preset === key
+            return (
+              <button
+                key={key}
+                onClick={() => setPreset(key)}
+                className={cn(
+                  'h-6 flex-1 rounded-sm border px-2 text-2xs',
+                  isCurrent
+                    ? 'border-accent bg-accent text-white'
+                    : 'border-border bg-bg-raised text-fg hover:border-border-strong'
+                )}
+              >
+                {t(`preferences.theme_preset_${key}`)}
+              </button>
+            )
+          })}
+        </div>
+      </Row>
+
+      <div className="mt-2 flex items-center justify-between border-t border-border-subtle pt-2">
+        <span className="text-2xs text-fg-muted">{t('preferences.theme_overrides_label')}</span>
+        <button
+          onClick={resetOverrides}
+          disabled={!hasOverrides}
+          title={t('preferences.theme_reset_overrides_hint')}
+          className={cn(
+            'h-5 rounded-sm border border-border px-2 text-2xs',
+            hasOverrides
+              ? 'bg-bg-raised text-fg hover:border-border-strong'
+              : 'cursor-not-allowed opacity-40'
+          )}
+        >
+          {t('preferences.theme_reset_overrides')}
+        </button>
+      </div>
+
+      <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+        {COLOR_TOKENS.map((token) => {
+          const isOverridden = token in overrides
+          return (
+            <label
+              key={token}
+              className="flex items-center gap-2 text-2xs"
+              title={isOverridden ? t('preferences.theme_token_overridden') : undefined}
+            >
+              <input
+                type="color"
+                value={palette[token]}
+                onChange={(e) => setOverride(token, e.currentTarget.value)}
+                className="h-5 w-7 cursor-pointer rounded-sm border border-border bg-transparent"
+              />
+              <span
+                className={cn(
+                  'flex-1 truncate font-mono',
+                  isOverridden ? 'text-accent' : 'text-fg-muted'
+                )}
+              >
+                {token}
+              </span>
+              <span className="font-mono tabular-nums text-fg-dim">{palette[token]}</span>
+            </label>
+          )
+        })}
+      </div>
+    </PageBody>
+  )
 }
 
 // ===========================================================================

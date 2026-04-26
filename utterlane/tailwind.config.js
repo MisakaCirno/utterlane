@@ -4,33 +4,39 @@ export default {
   theme: {
     extend: {
       colors: {
-        // 对齐 dockview Dark 主题 + VSCode Dark+ 调色板
+        // 所有色值都走 CSS 变量 + rgb(... / <alpha-value>)：
+        //   - 主题切换 / 用户自定义 overrides 只需要写一次 :root.style
+        //     setProperty 就全 UI 生效（见 App.tsx 的 useEffect）
+        //   - <alpha-value> 占位让 bg-accent/40 这类 alpha 修饰符仍然
+        //     有效；rgb 函数语法 + 三元组（'R G B'）字符串变量是
+        //     Tailwind 推荐的搭配
+        // 默认值定义在 main.css :root 里，保证未 hydrate 时的首帧不空白
         bg: {
-          DEFAULT: '#1e1e1e', // editor / group view
-          deep: '#181818', // 最深层（input、深凹区）
-          panel: '#252526', // sidebar / tab 栏
-          raised: '#2d2d2d' // hidden tab / 次级面板
+          DEFAULT: 'rgb(var(--c-bg) / <alpha-value>)',
+          deep: 'rgb(var(--c-bg-deep) / <alpha-value>)',
+          panel: 'rgb(var(--c-bg-panel) / <alpha-value>)',
+          raised: 'rgb(var(--c-bg-raised) / <alpha-value>)'
         },
         chrome: {
-          DEFAULT: '#3c3c3c', // titlebar（VSCode 同款）
-          hover: '#4a4a4a'
+          DEFAULT: 'rgb(var(--c-chrome) / <alpha-value>)',
+          hover: 'rgb(var(--c-chrome-hover) / <alpha-value>)'
         },
         border: {
-          DEFAULT: '#444444', // dockview separator (rgb(68,68,68))
-          strong: '#525252',
-          subtle: '#2d2d2d'
+          DEFAULT: 'rgb(var(--c-border) / <alpha-value>)',
+          strong: 'rgb(var(--c-border-strong) / <alpha-value>)',
+          subtle: 'rgb(var(--c-border-subtle) / <alpha-value>)'
         },
         fg: {
-          DEFAULT: '#cccccc', // VSCode 正文
-          muted: '#9a9a9a',
-          dim: '#6a6a6a'
+          DEFAULT: 'rgb(var(--c-fg) / <alpha-value>)',
+          muted: 'rgb(var(--c-fg-muted) / <alpha-value>)',
+          dim: 'rgb(var(--c-fg-dim) / <alpha-value>)'
         },
         accent: {
-          DEFAULT: '#0e639c', // VSCode button / 主题蓝
-          soft: '#094771' // list selection bg
+          DEFAULT: 'rgb(var(--c-accent) / <alpha-value>)',
+          soft: 'rgb(var(--c-accent-soft) / <alpha-value>)'
         },
-        rec: '#d14545',
-        ok: '#73c991' // VSCode git added
+        rec: 'rgb(var(--c-rec) / <alpha-value>)',
+        ok: 'rgb(var(--c-ok) / <alpha-value>)'
       },
       fontFamily: {
         sans: ['Segoe UI', '-apple-system', 'BlinkMacSystemFont', 'Inter', 'sans-serif'],
