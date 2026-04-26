@@ -92,11 +92,6 @@ function IconButton({
   )
 }
 
-/** 控制组内的功能区间隔。代替原本的 1px 竖线,改用 8px 留白 */
-function SegmentSpacer(): React.JSX.Element {
-  return <div className="w-2" aria-hidden />
-}
-
 /**
  * 双图标复合按钮。播放区用 [SkipBack + Play] 表达「回到段头并播放」,
  * 录音区用 [Mic + Plus] / [Mic + RotateCcw] 让两个录音入口都明显属于
@@ -204,130 +199,134 @@ function SegmentControlRow({
         {/* 左：占位，让中间组真正居中（grid 1fr auto 1fr） */}
         <div />
 
-        {/* 中:控制组按功能分区——上下句导航 / Take 切换 / 播放 / 录音。
-            分区之间用 SegmentTimelineView 自己的留白隔开(SegmentSpacer),
-            不再用 1px 竖线;视觉上更轻盈,跟 ProjectTimeline 的分组也呼应 */}
-        <div className="flex items-center gap-0.5 justify-self-center rounded-sm border border-border bg-bg-deep p-0.5">
-          <IconButton
-            title={t('timeline.btn_prev_segment')}
-            onClick={onPrevSegment}
-            disabled={playback !== 'idle' || !selectedId || order.indexOf(selectedId) <= 0}
-          >
-            <ChevronLeft size={13} />
-          </IconButton>
-          <IconButton
-            title={t('timeline.btn_next_segment')}
-            onClick={onNextSegment}
-            disabled={
-              playback !== 'idle' || !selectedId || order.indexOf(selectedId) >= order.length - 1
-            }
-          >
-            <ChevronRight size={13} />
-          </IconButton>
+        {/* 中:三个独立分组,每组自己一个圆框,组间 gap-2 留白:
+              - 导航组(切句段 + 切 Take)
+              - 播放组(从段头 / 从游标 / 停止)
+              - 录音组(录音 / 重录,或录音中 = 停止保存 / 取消)
+            跟 ProjectTimeline 的「播放组 + 倍速组」分双框思路一致——
+            视觉分组比 1px 竖线 / 隐形 spacer 都明显得多 */}
+        <div className="flex items-center gap-2 justify-self-center">
+          {/* 导航组:上一句 / 下一句 / 上一录次 / 下一录次 */}
+          <div className="flex items-center gap-0.5 rounded-sm border border-border bg-bg-deep p-0.5">
+            <IconButton
+              title={t('timeline.btn_prev_segment')}
+              onClick={onPrevSegment}
+              disabled={playback !== 'idle' || !selectedId || order.indexOf(selectedId) <= 0}
+            >
+              <ChevronLeft size={13} />
+            </IconButton>
+            <IconButton
+              title={t('timeline.btn_next_segment')}
+              onClick={onNextSegment}
+              disabled={
+                playback !== 'idle' || !selectedId || order.indexOf(selectedId) >= order.length - 1
+              }
+            >
+              <ChevronRight size={13} />
+            </IconButton>
+            <IconButton
+              title={t('timeline.btn_prev_take')}
+              onClick={() => stepTake(-1)}
+              disabled={playback !== 'idle' || takeCount < 2}
+            >
+              <SkipBack size={12} />
+            </IconButton>
+            <IconButton
+              title={t('timeline.btn_next_take')}
+              onClick={() => stepTake(1)}
+              disabled={playback !== 'idle' || takeCount < 2}
+            >
+              <SkipForward size={12} />
+            </IconButton>
+          </div>
 
-          <SegmentSpacer />
+          {/* 播放组:[⏮▶ 从段头] [▶ ⇄ ⏸ 从游标] [⏹ 停止]。跟
+              ProjectTimeline 的拆分模式一致——「从某起点重新播」用复合
+              图标和单 Play 主键拉开视觉 */}
+          <div className="flex items-center gap-0.5 rounded-sm border border-border bg-bg-deep p-0.5">
+            <CompositeRecordButton
+              title={t('timeline.btn_play_from_head')}
+              onClick={() => void playCurrentSegmentFromHead()}
+              disabled={
+                playback === 'project' || playback === 'recording' || !segment?.selectedTakeId
+              }
+              prefixIcon={<SkipBack size={11} />}
+              suffixIcon={<Play size={9} className="-ml-0.5" />}
+            />
+            <IconButton
+              title={
+                playback === 'segment'
+                  ? paused
+                    ? t('timeline.btn_resume')
+                    : t('timeline.btn_pause')
+                  : t('timeline.btn_play_from_playhead')
+              }
+              active={playback === 'segment' && !paused}
+              disabled={
+                playback === 'segment'
+                  ? false
+                  : playback === 'project' || playback === 'recording' || !segment?.selectedTakeId
+              }
+              onClick={playback === 'segment' ? togglePause : (): void => void playCurrentSegment()}
+            >
+              {playback === 'segment' && !paused ? <Pause size={12} /> : <Play size={12} />}
+            </IconButton>
+            <IconButton
+              title={t('timeline.btn_stop_segment')}
+              onClick={stopPlayback}
+              disabled={playback !== 'segment'}
+            >
+              <Square size={11} />
+            </IconButton>
+          </div>
 
-          <IconButton
-            title={t('timeline.btn_prev_take')}
-            onClick={() => stepTake(-1)}
-            disabled={playback !== 'idle' || takeCount < 2}
-          >
-            <SkipBack size={12} />
-          </IconButton>
-          <IconButton
-            title={t('timeline.btn_next_take')}
-            onClick={() => stepTake(1)}
-            disabled={playback !== 'idle' || takeCount < 2}
-          >
-            <SkipForward size={12} />
-          </IconButton>
-
-          <SegmentSpacer />
-
-          {/* 播放控制三按钮:[⏮▶ 从段头] [▶ ⇄ ⏸ 从游标] [⏹ 停止]。
-              跟 ProjectTimeline 的拆分模式一致——「从某起点重新播」用复合
-              图标和单 Play 主键拉开视觉。SegmentTimeline 只有「段头」和
-              「段内游标」两种起点,不需要再多一个按钮 */}
-          <CompositeRecordButton
-            title={t('timeline.btn_play_from_head')}
-            onClick={() => void playCurrentSegmentFromHead()}
-            disabled={
-              playback === 'project' || playback === 'recording' || !segment?.selectedTakeId
-            }
-            prefixIcon={<SkipBack size={11} />}
-            suffixIcon={<Play size={9} className="-ml-0.5" />}
-          />
-          <IconButton
-            title={
-              playback === 'segment'
-                ? paused
-                  ? t('timeline.btn_resume')
-                  : t('timeline.btn_pause')
-                : t('timeline.btn_play_from_playhead')
-            }
-            active={playback === 'segment' && !paused}
-            disabled={
-              playback === 'segment'
-                ? false
-                : playback === 'project' || playback === 'recording' || !segment?.selectedTakeId
-            }
-            onClick={playback === 'segment' ? togglePause : (): void => void playCurrentSegment()}
-          >
-            {playback === 'segment' && !paused ? <Pause size={12} /> : <Play size={12} />}
-          </IconButton>
-          <IconButton
-            title={t('timeline.btn_stop_segment')}
-            onClick={stopPlayback}
-            disabled={playback !== 'segment'}
-          >
-            <Square size={11} />
-          </IconButton>
-
-          <SegmentSpacer />
-
-          {/* 录音两按钮:idle 时是「新录」(Mic+Plus) 和「重录覆盖当前 Take」
-              (Mic+RotateCcw),都是双图标——明确「都是录音」+ 功能不同;
-              录音中切换为单图标的「停止保存」(Square) 和「取消」(X)。
-              录音状态机收紧:录音中重录按钮被替换成 X 取消,避免「按
-              重录的瞬间隐式提交并立刻又开一段」这种复合操作 */}
-          {isRecordingThis ? (
-            <>
-              <IconButton
-                title={t('timeline.btn_stop_recording')}
-                active
-                danger
-                onClick={() => void stopRecording()}
-              >
-                <Square size={11} />
-              </IconButton>
-              <IconButton title={t('inspector.btn_cancel')} onClick={() => void cancelRecording()}>
-                <X size={12} />
-              </IconButton>
-            </>
-          ) : (
-            <>
-              <CompositeRecordButton
-                title={t('timeline.btn_record')}
-                onClick={onRecordClick}
-                disabled={
-                  isRecordingOther ||
-                  !selectedId ||
-                  playback === 'segment' ||
-                  playback === 'project' ||
-                  playback === 'countdown'
-                }
-                prefixIcon={<Mic size={11} />}
-                suffixIcon={<Plus size={9} className="-ml-0.5" />}
-              />
-              <CompositeRecordButton
-                title={t('timeline.btn_rerecord')}
-                onClick={() => void startRerecording()}
-                disabled={playback !== 'idle' || !segment?.selectedTakeId}
-                prefixIcon={<Mic size={11} />}
-                suffixIcon={<RotateCcw size={9} className="-ml-0.5" />}
-              />
-            </>
-          )}
+          {/* 录音组:idle 时是「新录」(Mic+Plus) 和「重录覆盖」
+              (Mic+RotateCcw)双图标;录音中切换为单图标的「停止保存」
+              (Square) 和「取消」(X)——录音状态机收紧,避免「按重录的瞬
+              间隐式提交并立刻又开一段」这种复合操作 */}
+          <div className="flex items-center gap-0.5 rounded-sm border border-border bg-bg-deep p-0.5">
+            {isRecordingThis ? (
+              <>
+                <IconButton
+                  title={t('timeline.btn_stop_recording')}
+                  active
+                  danger
+                  onClick={() => void stopRecording()}
+                >
+                  <Square size={11} />
+                </IconButton>
+                <IconButton
+                  title={t('inspector.btn_cancel')}
+                  onClick={() => void cancelRecording()}
+                >
+                  <X size={12} />
+                </IconButton>
+              </>
+            ) : (
+              <>
+                <CompositeRecordButton
+                  title={t('timeline.btn_record')}
+                  onClick={onRecordClick}
+                  disabled={
+                    isRecordingOther ||
+                    !selectedId ||
+                    playback === 'segment' ||
+                    playback === 'project' ||
+                    playback === 'countdown'
+                  }
+                  prefixIcon={<Mic size={11} />}
+                  suffixIcon={<Plus size={9} className="-ml-0.5" />}
+                />
+                <CompositeRecordButton
+                  title={t('timeline.btn_rerecord')}
+                  onClick={() => void startRerecording()}
+                  disabled={playback !== 'idle' || !segment?.selectedTakeId}
+                  prefixIcon={<Mic size={11} />}
+                  suffixIcon={<RotateCcw size={9} className="-ml-0.5" />}
+                />
+              </>
+            )}
+          </div>
         </div>
 
         {/* 右：横向 + 纵向缩放滑动条。两轴解耦：横向控制波形 X 轴密度
