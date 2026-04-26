@@ -418,6 +418,15 @@ export const zhCN = {
     position_right: '右侧'
   },
 
+  panel: {
+    segments: '段落',
+    inspector: '检查器',
+    project_settings: '工程设置',
+    segment_timeline: 'Segment 时间轴',
+    project_timeline: '项目时间轴',
+    level_meter: '电平'
+  },
+
   preferences: {
     menu_entry: '偏好设置…',
     title: '偏好设置',

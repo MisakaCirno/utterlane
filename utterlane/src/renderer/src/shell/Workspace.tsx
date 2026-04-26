@@ -1,4 +1,6 @@
 import { DockviewReact, type DockviewReadyEvent, type IDockviewPanelProps } from 'dockview-react'
+import { useEffect } from 'react'
+import i18n from '@renderer/i18n'
 import { SegmentsView } from '@renderer/views/SegmentsView'
 import { InspectorView } from '@renderer/views/InspectorView'
 import { ProjectSettingsView } from '@renderer/views/ProjectSettingsView'
@@ -12,7 +14,12 @@ import {
   type DockLayoutEnvelope
 } from '@shared/preferences'
 import { getThemeByKey } from './themes'
-import { applyDefaultLayout, setWorkspaceApi } from './workspaceHandle'
+import {
+  applyDefaultLayout,
+  refreshDockTabTitles,
+  setWorkspaceApi,
+  syncDockTabTitles
+} from './workspaceHandle'
 import { DockTab } from './DockTab'
 import { devWarn } from '@renderer/lib/devLog'
 
@@ -123,6 +130,10 @@ function onWorkspaceReady(event: DockviewReadyEvent): void {
   if (isLayoutCompatible(saved)) {
     try {
       api.fromJSON(saved!.layout as never)
+      // fromJSON 会带回旧版本持久化时的标题（可能是另一种语言），按当前
+      // 语言重写一遍——applyDefaultLayout 路径不需要这步，它本来就是
+      // 用 t() 拿初始标题
+      syncDockTabTitles(api)
     } catch (err) {
       // 持久化布局解析失败：app 会回落到默认布局继续工作，属于诊断信息
       // 而非用户可见错误——只在 dev 模式下打印
@@ -149,6 +160,15 @@ export function Workspace(): React.JSX.Element {
     (s) => s.prefs.appearance?.dockTheme ?? DEFAULT_PREFERENCES.appearance!.dockTheme!
   )
   const theme = getThemeByKey(themeKey)
+
+  // 语言切换时刷新所有 dock tab 的标题。i18next 'languageChanged' 是
+  // 全局事件——任何调 i18n.changeLanguage 的地方都会触发，跟具体的语言
+  // 来源（preferences / URL 参数等）解耦
+  useEffect(() => {
+    const handler = (): void => refreshDockTabTitles()
+    i18n.on('languageChanged', handler)
+    return () => i18n.off('languageChanged', handler)
+  }, [])
 
   return (
     <div className="flex-1 overflow-hidden">

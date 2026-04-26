@@ -1,5 +1,41 @@
 import type { DockviewApi } from 'dockview-react'
+import i18n from '@renderer/i18n'
 import { usePreferencesStore } from '@renderer/store/preferencesStore'
+
+/**
+ * Panel id ↔ i18n 标题键。Dockview 把 tab 标题作为字符串持久化进
+ * preferences.layout.dockLayout——切换语言后旧标题不会自动更新。
+ *
+ * 策略：所有 panel 的 title 在创建时用 t() 写出当前语言；语言切换时
+ * Workspace 监听 i18n 'languageChanged' 事件，遍历这张表回写新标题
+ */
+export const PANEL_TITLE_KEYS: Record<string, string> = {
+  segments: 'panel.segments',
+  inspector: 'panel.inspector',
+  projectSettings: 'panel.project_settings',
+  segmentTimeline: 'panel.segment_timeline',
+  projectTimeline: 'panel.project_timeline',
+  levelMeter: 'panel.level_meter'
+}
+
+/**
+ * 用当前语言把所有已知 panel 的 tab 标题刷一遍。
+ * 用在两个地方：
+ *   1. 从持久化布局 fromJSON 恢复后（旧语言的标题会被覆盖）
+ *   2. i18n.languageChanged 事件触发时
+ */
+export function syncDockTabTitles(api: DockviewApi): void {
+  const t = i18n.t.bind(i18n)
+  for (const [panelId, key] of Object.entries(PANEL_TITLE_KEYS)) {
+    const panel = api.getPanel(panelId)
+    if (panel) panel.api.setTitle(t(key))
+  }
+}
+
+/** 通过模块作用域的 currentApi 刷新标题，不存在 api 时 no-op */
+export function refreshDockTabTitles(): void {
+  if (currentApi) syncDockTabTitles(currentApi)
+}
 
 /**
  * Workspace 的命令式句柄。
@@ -55,16 +91,20 @@ export function resetWorkspaceLayout(): void {
  *   5. Inspector right of Segments → 切最上行，projectSettings 并入 inspector group tab
  */
 export function applyDefaultLayout(api: DockviewApi): void {
+  // 标题从 i18n 取，跟用户当前语言一致；语言切换由 Workspace 的副作用
+  // 调 syncDockTabTitles 维护
+  const title = (id: string): string => i18n.t(PANEL_TITLE_KEYS[id])
+
   const segments = api.addPanel({
     id: 'segments',
     component: 'segments',
-    title: 'Segments'
+    title: title('segments')
   })
 
   const segmentTimeline = api.addPanel({
     id: 'segmentTimeline',
     component: 'segmentTimeline',
-    title: 'Segment Timeline',
+    title: title('segmentTimeline'),
     position: { referencePanel: segments.id, direction: 'below' }
   })
 
@@ -73,14 +113,14 @@ export function applyDefaultLayout(api: DockviewApi): void {
   api.addPanel({
     id: 'levelMeter',
     component: 'levelMeter',
-    title: 'Level',
+    title: title('levelMeter'),
     position: { referencePanel: segmentTimeline.id, direction: 'right' }
   })
 
   const projectTimeline = api.addPanel({
     id: 'projectTimeline',
     component: 'projectTimeline',
-    title: 'Project Timeline',
+    title: title('projectTimeline'),
     position: { referencePanel: segmentTimeline.id, direction: 'below' }
   })
 
@@ -93,14 +133,14 @@ export function applyDefaultLayout(api: DockviewApi): void {
   const inspector = api.addPanel({
     id: 'inspector',
     component: 'inspector',
-    title: 'Inspector',
+    title: title('inspector'),
     position: { referencePanel: segments.id, direction: 'right' }
   })
 
   api.addPanel({
     id: 'projectSettings',
     component: 'projectSettings',
-    title: 'Project Settings',
+    title: title('projectSettings'),
     position: { referencePanel: inspector.id },
     inactive: true
   })

@@ -425,6 +425,15 @@ export const enUS: TranslationSchema = {
     position_right: 'Right'
   },
 
+  panel: {
+    segments: 'Segments',
+    inspector: 'Inspector',
+    project_settings: 'Project Settings',
+    segment_timeline: 'Segment Timeline',
+    project_timeline: 'Project Timeline',
+    level_meter: 'Level'
+  },
+
   preferences: {
     menu_entry: 'Preferences…',
     title: 'Preferences',
