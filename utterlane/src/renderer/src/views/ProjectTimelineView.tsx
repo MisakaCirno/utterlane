@@ -10,6 +10,7 @@ import {
   Play,
   Plus,
   RefreshCw,
+  Rewind,
   SkipBack,
   Square,
   AlignVerticalJustifyCenter
@@ -106,6 +107,41 @@ function IconButton({
   )
 }
 
+/**
+ * 复合图标按钮:左边一个 prefix 图标(SkipBack / Rewind 等表达「回到
+ * 某个起点」),右边一个 Play 三角。物理媒体播放器(CD / DVD / DAW)的
+ * 「⏮▶」「⏪▶」按钮画法,让「从某起点开始播放」跟单 Play 的「从当前位置
+ * 继续播放」视觉拉开。宽度比单图标按钮的 h-6 w-6 拉宽到 w-10 容下两图标
+ */
+function CompositeButton({
+  title,
+  onClick,
+  disabled,
+  prefixIcon
+}: {
+  title: string
+  onClick: () => void
+  disabled?: boolean
+  prefixIcon: React.ReactNode
+}): React.JSX.Element {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      className={cn(
+        'flex h-6 w-10 items-center justify-center gap-0 rounded-sm text-fg-muted',
+        'disabled:cursor-not-allowed disabled:opacity-40',
+        !disabled && 'hover:bg-chrome-hover hover:text-fg'
+      )}
+    >
+      {prefixIcon}
+      <Play size={9} className="-ml-0.5" />
+    </button>
+  )
+}
+
 function ProjectControlRow({
   zoom,
   onZoomChange
@@ -137,19 +173,29 @@ function ProjectControlRow({
     paragraphMs: projectDefaultGaps?.paragraphMs ?? FALLBACK_PARAGRAPH_GAP_MS
   }
 
-  // 播放控制按钮职责拆分（应 user feedback）：
-  //   按钮 1 ⏮▶ 从项目头：始终把游标归零再播；播放中点 = 重头开始
-  //   按钮 2 ▶ 从当前段头：始终把游标设到当前段起点再播；播放中点 =
-  //     从段头重新开始（**不**变 pause）
-  //   按钮 3 ⏸/▶ 暂停 / 继续：只在 project 播放中启用；这是 #9 说的
-  //     「播放与暂停整合到同一个按钮」
-  //   按钮 4 ⏹ 停止：只在 project 播放中启用
+  // 播放控制按钮职责拆分（4 按钮)：
+  //   按钮 1 [⏮▶] 从项目头:复合图标(SkipBack + Play),始终把游标归零再播
+  //   按钮 2 [⏪▶] 从当前段头:复合图标(Rewind + Play),始终把游标设到
+  //     当前段起点再播——跟按钮 1 同样「先回起点再播」语义,只是 scope
+  //     不同(项目 vs 当前段)
+  //   按钮 3 [▶ ⇄ ⏸] 主播放键:idle 时点 = 从游标位置接着播(playProject
+  //     直接读 timelinePlayheadMs);playing 时点 = pause;paused 时
+  //     点 = resume。这就是任务 #9 说的「播放和暂停整合」
+  //   按钮 4 [⏹] 停止
   //
-  // 关键是按钮 1 / 2 在播放中也保持启用（行为是「重新开始」），录音中
-  // 则全部禁用——录音是 mutually exclusive 的状态
+  // 关键是按钮 1 / 2 在播放中也保持启用(行为是「重新从某起点开始」),
+  // 录音中全部禁用
   const isProjectPlaying = playback === 'project'
   const canStartFromAnywhere = playback !== 'recording' && order.length > 0
   const canStartFromSelected = canStartFromAnywhere && !!selectedSegmentId
+
+  const playProject = useEditorStore((s) => s.playProject)
+  // 按钮 3 的 onClick:在 idle / paused 时启动「从游标位置播放」,在
+  // playing 时切暂停 / 继续
+  const onMainPlay = (): void => {
+    if (isProjectPlaying) togglePause()
+    else void playProject()
+  }
 
   // 布局策略：
   //   - 内层 grid 用 `1fr auto 1fr` 让中间播放控制组在面板够宽时真正
@@ -203,42 +249,38 @@ function ProjectControlRow({
             整合,只在 project 播放中启用 */}
         <div className="flex items-center gap-1 justify-self-center">
           <div className="flex items-center gap-0.5 rounded-sm border border-border bg-bg-deep p-0.5">
-            {/* 1. 从项目头:SkipBack + Play 组合图标(⏮▶),物理媒体播放
-                器常见的「回到起点并播放」画法,跟单 Play 视觉差大 */}
-            <button
-              type="button"
+            {/* 1. 从项目头:SkipBack + Play 复合图标(⏮▶) */}
+            <CompositeButton
+              title={t('timeline.btn_play_project_from_start')}
               onClick={() => void playProjectFromStart()}
               disabled={!canStartFromAnywhere}
-              title={t('timeline.btn_play_project_from_start')}
-              className={cn(
-                'flex h-6 w-10 items-center justify-center gap-0 rounded-sm text-fg-muted',
-                'disabled:cursor-not-allowed disabled:opacity-40',
-                canStartFromAnywhere && 'hover:bg-chrome-hover hover:text-fg'
-              )}
-            >
-              <SkipBack size={11} />
-              <Play size={9} className="-ml-0.5" />
-            </button>
+              prefixIcon={<SkipBack size={11} />}
+            />
 
-            {/* 2. 从当前段头:始终是 Play 图标,始终调
-                playProjectFromCurrentSegment——播放中点也是重新从段头开始,
-                不会变成 pause */}
-            <IconButton
+            {/* 2. 从当前段头:Rewind + Play 复合图标(⏪▶)。跟按钮 1 同款
+                双图标,prefix 换成 Rewind(两个三角)区分 scope——既跟单
+                Play 的「主播放键」视觉拉开,又能跟按钮 1 区分 */}
+            <CompositeButton
               title={t('timeline.btn_play_from_current_segment')}
               onClick={() => void playProjectFromCurrentSegment()}
               disabled={!canStartFromSelected}
-            >
-              <Play size={12} />
-            </IconButton>
+              prefixIcon={<Rewind size={11} />}
+            />
 
-            {/* 3. 暂停 / 继续:只在 project 播放中启用。这是 #9 说的整合
-                按钮——active(播放中)时显示 ⏸,点击 = 暂停;paused 时
-                显示 ▶,点击 = 继续(从当前 playhead 接着播,不归段头) */}
+            {/* 3. 主播放键:从游标位置接着播 / pause / resume 三态合一。
+                idle 时 ▶,点击 = playProject(从 timelinePlayheadMs 起播);
+                playing 时 ⏸,点击 = pause;paused 时 ▶,点击 = resume */}
             <IconButton
-              title={paused ? t('timeline.btn_resume_project') : t('timeline.btn_pause_project')}
+              title={
+                isProjectPlaying
+                  ? paused
+                    ? t('timeline.btn_resume_project')
+                    : t('timeline.btn_pause_project')
+                  : t('timeline.btn_play_from_playhead')
+              }
               active={isProjectPlaying && !paused}
-              disabled={!isProjectPlaying}
-              onClick={togglePause}
+              disabled={!canStartFromAnywhere && !isProjectPlaying}
+              onClick={onMainPlay}
             >
               {isProjectPlaying && !paused ? <Pause size={12} /> : <Play size={12} />}
             </IconButton>
@@ -642,23 +684,18 @@ function TimelineContent({ pxPerMs }: { pxPerMs: number }): React.JSX.Element {
     // SegmentTimeline 试听单句),不该让 ProjectTimeline 的游标也跑——
     // 那会让用户以为「项目在播放」而其实只在试听一句
     if (playback !== 'project') {
-      // 退出 project 播放：把游标颜色还原到 stored，位置由 React 渲染
-      // 重新管控。segment 播放期间也走这一支 → 游标静止在 storedPlayhead
+      // 退出 project 播放：位置由 React 渲染重新管控(走静态分支)。
+      // segment 播放期间也走这一支 → 游标静止在 storedPlayhead
       isLivePlayingRef.current = false
       const el = cursorRef.current
       if (el) {
         el.style.transform = `translate3d(${storedPlayheadMs * pxPerMs}px, 0, 0)`
-        el.classList.remove('bg-rec')
-        el.classList.add('bg-accent')
       }
       return
     }
     isLivePlayingRef.current = true
-    const el = cursorRef.current
-    if (el) {
-      el.classList.remove('bg-accent')
-      el.classList.add('bg-rec')
-    }
+    // 不再切换 bg-rec / bg-accent 颜色——Pr 风格 playhead 全程单色,
+    // 「正在播 vs 不在播」由其他视觉(active 按钮 / 电平表)表达
     return subscribePosition((path, ms) => {
       const target = cursorRef.current
       if (!target) return
@@ -829,7 +866,15 @@ function TimelineContent({ pxPerMs }: { pxPerMs: number }): React.JSX.Element {
             aria-hidden
             className="pointer-events-none absolute top-0 bottom-0 left-0 z-20 w-px bg-accent will-change-transform"
             style={{ transform: `translate3d(${initialCursorPx}px, 0, 0)` }}
-          />
+          >
+            {/* Adobe Pr 风格 playhead:顶部一个三角 marker(尖端朝下衔接
+                竖线),整体单一 accent 色。clip-path polygon 画三角—— 11px
+                宽 / 8px 高,-left-[5px] 让三角中线对齐 1px 竖线 */}
+            <div
+              className="absolute -left-[5px] top-0 h-2 w-[11px] bg-accent"
+              style={{ clipPath: 'polygon(0 0, 100% 0, 50% 100%)' }}
+            />
+          </div>
         </div>
       </div>
     </div>

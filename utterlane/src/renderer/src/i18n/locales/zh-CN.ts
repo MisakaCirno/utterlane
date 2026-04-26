@@ -185,6 +185,7 @@ export const zhCN = {
       '纵向缩放 — 拖动调整振幅高度 · 双击恢复 1x · 波形上 Ctrl+Shift+滚轮也可缩放',
     btn_play_project_from_start: '从项目头开始播放',
     btn_play_from_current_segment: '从当前段开始播放',
+    btn_play_from_playhead: '从游标位置播放',
     btn_play_project: '播放项目',
     btn_stop_project: '停止',
     btn_pause_project: '暂停',

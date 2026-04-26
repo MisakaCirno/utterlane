@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { cn } from '@renderer/lib/cn'
+import { useEditorStore } from '@renderer/store/editorStore'
 import { computePeaks, loadSamples } from '@renderer/services/waveform'
 import { subscribePosition } from '@renderer/services/player'
 import { TimeRuler } from '@renderer/components/TimeRuler'
@@ -148,6 +149,14 @@ export function WaveformView({
     return subscribePosition((playingPath, positionMs) => {
       const el = playheadRef.current
       if (!el) return
+      // 只在 segment 播放语境下显示 playhead——project 连读时游标反馈
+      // 归 ProjectTimeline 管,WaveformView 不再「反向联动」project 播放
+      // 位置(那会让用户以为「单段在播」而其实是项目连读)
+      const playback = useEditorStore.getState().playback
+      if (playback !== 'segment') {
+        el.style.display = 'none'
+        return
+      }
       if (!playingPath || playingPath !== filePath) {
         el.style.display = 'none'
         return
@@ -361,16 +370,22 @@ export function WaveformView({
                 style={{ left: endX, width: innerWidth - endX }}
               />
             )}
-            {/* 播放游标：1px 红色竖线。位置由命令式 useEffect 写
-                transform，不走 React 重渲染。z 叠在波形之上、trim 手柄
-                之下——播放时游标在「裁掉段」上也能看见进度。
-                初始 display: none，subscribePosition 命中本 take 时才显示 */}
+            {/* 播放游标:Adobe Pr 风格——1px 竖线 + 顶部三角 marker,
+                单一 accent 色,不再用红色区分播放态(整个 app 统一用
+                同一种 playhead 视觉)。位置由命令式 useEffect 写 transform,
+                不走 React 重渲染。z 叠在波形之上、trim 手柄之下;
+                初始 display: none,subscribePosition 命中本 take 时才显示 */}
             <div
               ref={playheadRef}
               aria-hidden
-              className="pointer-events-none absolute top-0 bottom-0 left-0 z-10 w-px bg-rec/85 will-change-transform"
+              className="pointer-events-none absolute top-0 bottom-0 left-0 z-10 w-px bg-accent will-change-transform"
               style={{ display: 'none' }}
-            />
+            >
+              <div
+                className="absolute -left-[5px] top-0 h-2 w-[11px] bg-accent"
+                style={{ clipPath: 'polygon(0 0, 100% 0, 50% 100%)' }}
+              />
+            </div>
             {/* trim 手柄：只在传入 onTrimChange 且 innerWidth > 0 时渲染 */}
             {showTrimUi && (
               <>

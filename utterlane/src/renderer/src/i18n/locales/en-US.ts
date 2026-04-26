@@ -179,6 +179,7 @@ export const enUS: TranslationSchema = {
       'Vertical zoom — drag to scale amplitude · double-click to reset · Ctrl+Shift+wheel on the waveform',
     btn_play_project_from_start: 'Play from project start',
     btn_play_from_current_segment: 'Play from current segment',
+    btn_play_from_playhead: 'Play from playhead',
     btn_play_project: 'Play project',
     btn_stop_project: 'Stop',
     btn_pause_project: 'Pause',
