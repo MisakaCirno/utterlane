@@ -137,22 +137,19 @@ function ProjectControlRow({
     paragraphMs: projectDefaultGaps?.paragraphMs ?? FALLBACK_PARAGRAPH_GAP_MS
   }
 
-  // 播放控制状态推导：
-  //   - 「从头」：始终允许（除录音 / 当前在播 segment）
-  //   - 「从当前段」：要求 selectedSegmentId 存在
-  //   - 「Play / Pause」toggle：playback === 'project' 时用 paused 判
-  //     图标；否则展示 Play 图标，点击 = 从当前段开始
+  // 播放控制按钮职责拆分（应 user feedback）：
+  //   按钮 1 ⏮▶ 从项目头：始终把游标归零再播；播放中点 = 重头开始
+  //   按钮 2 ▶ 从当前段头：始终把游标设到当前段起点再播；播放中点 =
+  //     从段头重新开始（**不**变 pause）
+  //   按钮 3 ⏸/▶ 暂停 / 继续：只在 project 播放中启用；这是 #9 说的
+  //     「播放与暂停整合到同一个按钮」
+  //   按钮 4 ⏹ 停止：只在 project 播放中启用
+  //
+  // 关键是按钮 1 / 2 在播放中也保持启用（行为是「重新开始」），录音中
+  // 则全部禁用——录音是 mutually exclusive 的状态
   const isProjectPlaying = playback === 'project'
-  const canStartProject = !isBusy && order.length > 0
-  const canStartFromSelected = canStartProject && !!selectedSegmentId
-
-  const onPlayPauseToggle = (): void => {
-    if (isProjectPlaying) {
-      togglePause()
-    } else if (canStartFromSelected) {
-      void playProjectFromCurrentSegment()
-    }
-  }
+  const canStartFromAnywhere = playback !== 'recording' && order.length > 0
+  const canStartFromSelected = canStartFromAnywhere && !!selectedSegmentId
 
   // 布局策略：
   //   - 内层 grid 用 `1fr auto 1fr` 让中间播放控制组在面板够宽时真正
@@ -199,47 +196,54 @@ function ProjectControlRow({
           </IconButton>
         </div>
 
-        {/* 中：播放控制组。三按钮 = [从项目头] [从当前段 ⇄ 暂停] [停止]
-            + 倍速控件。播放与暂停整合到同一个按钮位置，按 playback +
-            paused 切换图标——主流媒体播放器（VLC / YouTube / DAW）通用 */}
+        {/* 中：播放控制组。四按钮 = [⏮▶ 从项目头] [▶ 从当前段头]
+            [⏸/▶ 暂停继续] [⏹ 停止] + 倍速控件。
+            按钮 1 / 2 始终是「从某起点重新播放」语义,即使正在播也允许
+            点(行为是 stop-then-restart)；按钮 3 是 #9 说的 play↔pause
+            整合,只在 project 播放中启用 */}
         <div className="flex items-center gap-1 justify-self-center">
           <div className="flex items-center gap-0.5 rounded-sm border border-border bg-bg-deep p-0.5">
-            {/* 「从项目头开始播放」:用 SkipBack + Play 组合图标(⏮▶)。
-                单 SkipBack 容易被误读成「上一项」navigation,加一个小
-                Play 三角后视觉表达「回到起点并播放」更清晰——这是物理
-                媒体播放器(CD / DVD)上常见的「⏮▶」按钮画法。
-                单图标按钮 h-6 w-6 不够放,这里把宽度拉到 w-10 */}
+            {/* 1. 从项目头:SkipBack + Play 组合图标(⏮▶),物理媒体播放
+                器常见的「回到起点并播放」画法,跟单 Play 视觉差大 */}
             <button
               type="button"
               onClick={() => void playProjectFromStart()}
-              disabled={!canStartProject}
+              disabled={!canStartFromAnywhere}
               title={t('timeline.btn_play_project_from_start')}
               className={cn(
                 'flex h-6 w-10 items-center justify-center gap-0 rounded-sm text-fg-muted',
                 'disabled:cursor-not-allowed disabled:opacity-40',
-                !canStartProject ? '' : 'hover:bg-chrome-hover hover:text-fg'
+                canStartFromAnywhere && 'hover:bg-chrome-hover hover:text-fg'
               )}
             >
               <SkipBack size={11} />
               <Play size={9} className="-ml-0.5" />
             </button>
+
+            {/* 2. 从当前段头:始终是 Play 图标,始终调
+                playProjectFromCurrentSegment——播放中点也是重新从段头开始,
+                不会变成 pause */}
             <IconButton
-              // 当前在播 = 显示 Pause 图标 + 点击切换 paused / resumed；
-              // idle = 显示 Play + 点击从当前段开始播放。一个按钮承担
-              // 「play / pause / resume」三态，让 UI 不再有 4 颗按钮挤一起
-              title={
-                isProjectPlaying
-                  ? paused
-                    ? t('timeline.btn_resume_project')
-                    : t('timeline.btn_pause_project')
-                  : t('timeline.btn_play_from_current_segment')
-              }
+              title={t('timeline.btn_play_from_current_segment')}
+              onClick={() => void playProjectFromCurrentSegment()}
+              disabled={!canStartFromSelected}
+            >
+              <Play size={12} />
+            </IconButton>
+
+            {/* 3. 暂停 / 继续:只在 project 播放中启用。这是 #9 说的整合
+                按钮——active(播放中)时显示 ⏸,点击 = 暂停;paused 时
+                显示 ▶,点击 = 继续(从当前 playhead 接着播,不归段头) */}
+            <IconButton
+              title={paused ? t('timeline.btn_resume_project') : t('timeline.btn_pause_project')}
               active={isProjectPlaying && !paused}
-              disabled={isProjectPlaying ? false : !canStartFromSelected}
-              onClick={onPlayPauseToggle}
+              disabled={!isProjectPlaying}
+              onClick={togglePause}
             >
               {isProjectPlaying && !paused ? <Pause size={12} /> : <Play size={12} />}
             </IconButton>
+
+            {/* 4. 停止 */}
             <IconButton
               title={t('timeline.btn_stop_project')}
               onClick={stopPlayback}

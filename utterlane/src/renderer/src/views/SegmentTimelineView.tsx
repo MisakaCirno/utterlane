@@ -195,31 +195,31 @@ function SegmentControlRow({
             <SkipForward size={12} />
           </IconButton>
           <div className="mx-0.5 h-4 w-px bg-border" />
-          {/* Play / Pause 同位切换：playback === 'segment' 时显示 Pause，
-              点击切 paused / resumed；idle 时显示 Play，点击 = 试听当前
-              段。停止键独立。和 ProjectTimeline 的播放控件保持同一模式 */}
+          {/* 播放控制三按钮:[▶ 播放当前句] [⏸/▶ 暂停继续] [⏹ 停止]。
+              和 ProjectTimeline 的拆分模式一致——播放按钮始终是「从段头
+              重新播」语义,暂停 / 继续是独立按钮(只在 segment 播放中
+              启用)。 */}
           <IconButton
-            title={
-              playback === 'segment'
-                ? paused
-                  ? t('timeline.btn_resume')
-                  : t('timeline.btn_pause')
-                : t('timeline.btn_play_segment')
-            }
-            active={playback === 'segment' && !paused}
+            title={t('timeline.btn_play_segment')}
+            onClick={() => void playCurrentSegment()}
             disabled={
-              playback === 'segment'
-                ? false
-                : playback === 'project' || playback === 'recording' || !segment?.selectedTakeId
+              playback === 'project' || playback === 'recording' || !segment?.selectedTakeId
             }
-            onClick={playback === 'segment' ? togglePause : (): void => void playCurrentSegment()}
+          >
+            <Play size={12} />
+          </IconButton>
+          <IconButton
+            title={paused ? t('timeline.btn_resume') : t('timeline.btn_pause')}
+            active={playback === 'segment' && !paused}
+            disabled={playback !== 'segment'}
+            onClick={togglePause}
           >
             {playback === 'segment' && !paused ? <Pause size={12} /> : <Play size={12} />}
           </IconButton>
           <IconButton
             title={t('timeline.btn_stop_segment')}
             onClick={stopPlayback}
-            disabled={playback === 'idle' || playback === 'recording'}
+            disabled={playback !== 'segment'}
           >
             <Square size={11} />
           </IconButton>
