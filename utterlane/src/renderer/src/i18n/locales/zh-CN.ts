@@ -234,7 +234,8 @@ export const zhCN = {
     background_none: '后台任务：无',
     segment_index: 'Segment {{index}} / {{total}}',
     take_index: 'Take {{index}} / {{total}}',
-    sample_rate: '{{khz}} kHz · {{channels}}'
+    sample_rate: '{{khz}} kHz · {{channels}}',
+    jump_to_project_settings_hint: '点击跳转到工程设置'
   },
 
   import_dialog: {

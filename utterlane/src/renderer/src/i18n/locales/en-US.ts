@@ -235,7 +235,8 @@ export const enUS: TranslationSchema = {
     background_none: 'Background: idle',
     segment_index: 'Segment {{index}} / {{total}}',
     take_index: 'Take {{index}} / {{total}}',
-    sample_rate: '{{khz}} kHz · {{channels}}'
+    sample_rate: '{{khz}} kHz · {{channels}}',
+    jump_to_project_settings_hint: 'Click to jump to Project Settings'
   },
 
   import_dialog: {

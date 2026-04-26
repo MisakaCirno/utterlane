@@ -1,6 +1,8 @@
-import { Activity, Check, CircleDot, Layers, Mic2 } from 'lucide-react'
+import { Activity, Check, CircleDot, Layers, Mic2, Settings } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useEditorStore } from '@renderer/store/editorStore'
+import { useDialogStore } from '@renderer/store/dialogStore'
+import { focusPanel } from './workspaceHandle'
 import { cn } from '@renderer/lib/cn'
 
 export function StatusBar(): React.JSX.Element {
@@ -14,13 +16,15 @@ export function StatusBar(): React.JSX.Element {
   const segment = useEditorStore((s) =>
     s.selectedSegmentId ? s.segmentsById[s.selectedSegmentId] : undefined
   )
+  const openPreferences = useDialogStore((s) => s.openPreferences)
 
-  // 无工程时状态栏退化成极简模式，只提示「无活动工程」。
-  // 不隐藏整条是为了保持整体布局一致，避免窗口内容区随之抖动。
+  // 无工程时状态栏退化成极简模式：左只提示「无活动工程」，右仍然保留
+  // 设置按钮——偏好对话框跟具体工程无关，应该恒可达
   if (!project) {
     return (
-      <div className="flex h-6 shrink-0 items-center border-t border-border bg-chrome px-3 text-2xs text-fg-dim">
-        {t('statusbar.no_project')}
+      <div className="flex h-6 shrink-0 items-center justify-between border-t border-border bg-chrome px-3 text-2xs text-fg-dim">
+        <span>{t('statusbar.no_project')}</span>
+        <SettingsButton onClick={openPreferences} title={t('preferences.menu_entry')} />
       </div>
     )
   }
@@ -44,6 +48,11 @@ export function StatusBar(): React.JSX.Element {
             ? t('statusbar.playback_idle_unrecorded')
             : t('statusbar.playback_idle_recorded')
 
+  // 采样率 / 输入设备所属配置都在 Project Settings 里——点击直接激活那
+  // 个 panel，比让用户去 dock tab 找省一步操作；title 提示意图避免
+  // 鼠标 hover 时困惑「这是按钮吗」
+  const onJumpToProjectSettings = (): void => focusPanel('projectSettings')
+
   return (
     <div className="flex h-6 shrink-0 items-center justify-between border-t border-border bg-chrome px-3 text-2xs text-fg-muted">
       <div className="flex items-center gap-4">
@@ -51,7 +60,12 @@ export function StatusBar(): React.JSX.Element {
           {saved ? <Check size={11} /> : <CircleDot size={11} />}
           {saved ? t('statusbar.saved') : t('statusbar.unsaved')}
         </span>
-        <span className="flex items-center gap-1">
+        <button
+          type="button"
+          onClick={onJumpToProjectSettings}
+          title={t('statusbar.jump_to_project_settings_hint')}
+          className="flex items-center gap-1 rounded-sm px-1 hover:bg-chrome-hover hover:text-fg"
+        >
           <Activity size={11} />
           {t('statusbar.sample_rate', {
             khz: project.audio.sampleRate / 1000,
@@ -60,11 +74,16 @@ export function StatusBar(): React.JSX.Element {
                 ? t('project_settings.channel_mono')
                 : t('project_settings.channel_stereo')
           })}
-        </span>
-        <span className="flex items-center gap-1">
+        </button>
+        <button
+          type="button"
+          onClick={onJumpToProjectSettings}
+          title={t('statusbar.jump_to_project_settings_hint')}
+          className="flex items-center gap-1 rounded-sm px-1 hover:bg-chrome-hover hover:text-fg"
+        >
           <Mic2 size={11} />
           {t('statusbar.default_input')}
-        </span>
+        </button>
       </div>
 
       <div className="flex items-center gap-4">
@@ -90,7 +109,28 @@ export function StatusBar(): React.JSX.Element {
           )}
         </span>
         <span>{t('statusbar.background_none')}</span>
+        <SettingsButton onClick={openPreferences} title={t('preferences.menu_entry')} />
       </div>
     </div>
+  )
+}
+
+function SettingsButton({
+  onClick,
+  title
+}: {
+  onClick: () => void
+  title: string
+}): React.JSX.Element {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      aria-label={title}
+      className="flex h-5 w-5 items-center justify-center rounded-sm hover:bg-chrome-hover hover:text-fg"
+    >
+      <Settings size={11} />
+    </button>
   )
 }

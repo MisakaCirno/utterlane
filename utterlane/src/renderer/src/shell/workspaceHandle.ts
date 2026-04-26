@@ -71,6 +71,21 @@ export function refreshDockTabTitles(): void {
 }
 
 /**
+ * 把 panel 设为活动 tab。如果 panel 当前不在 layout 里，先按
+ * PANEL_DEFINITIONS 的默认位置加回来再激活——状态栏跳转 / 命令式调
+ * 用都期望「目标可见」，找不到就静默是糟糕的体验
+ */
+export function focusPanel(id: string): void {
+  if (!currentApi) return
+  let panel = currentApi.getPanel(id)
+  if (!panel) {
+    togglePanel(id)
+    panel = currentApi.getPanel(id)
+  }
+  panel?.api.setActive()
+}
+
+/**
  * 切换 panel 的可见性。当前存在则 removePanel，否则按 PANEL_DEFINITIONS
  * 的默认位置 addPanel 回去。
  *
