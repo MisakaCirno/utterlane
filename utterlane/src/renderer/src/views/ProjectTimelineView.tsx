@@ -10,7 +10,7 @@ import {
   Play,
   Plus,
   RefreshCw,
-  Rewind,
+  SkipBack,
   Square,
   AlignVerticalJustifyCenter
 } from 'lucide-react'
@@ -209,7 +209,10 @@ function ProjectControlRow({
               onClick={() => void playProjectFromStart()}
               disabled={!canStartProject}
             >
-              <Rewind size={12} />
+              {/* SkipBack（⏮）= 「跳到开头」，比 Rewind（⏪「快退」）
+                  更准确表达「从项目第一段开始播」的语义；视觉上和右
+                  边的 ▶ Play 按钮也更容易区分 */}
+              <SkipBack size={12} />
             </IconButton>
             <IconButton
               // 当前在播 = 显示 Pause 图标 + 点击切换 paused / resumed；
