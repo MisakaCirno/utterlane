@@ -112,16 +112,15 @@ export function formatBinding(b: KeyBinding): string {
 }
 
 /**
- * 字体缩放档位 + 范围下限/上限。
+ * 整窗缩放（沿用 fontScale 字段名）档位 + 范围下限/上限。
  *
- * App.tsx 用 [FONT_SCALE_MIN, FONT_SCALE_MAX] clamp 用户偏好值（防止偏好
- * 文件被外部编辑成离谱的极值），PreferencesDialog 用 FONT_SCALE_OPTIONS
- * 的离散档位作为 UI 选项。两者一起放这里保证：
- *   - 任意 OPTION 都落在 [MIN, MAX] 区间内
- *   - 改 UI 选项时不会和 clamp 区间脱节
+ * 应用方式：webFrame.setZoomFactor，跟 VSCode 一致——所有字号 / 图标 /
+ * 间距按比例放缩。范围放宽到 0.5 ~ 2 给 4K 屏 / 远视用户更多余地；
+ * PreferencesDialog 的预设档位是这个区间里最常用的几档，但不限制用户
+ * 通过 Ctrl+± 走到任意值
  */
-export const FONT_SCALE_MIN = 0.85
-export const FONT_SCALE_MAX = 1.3
+export const FONT_SCALE_MIN = 0.5
+export const FONT_SCALE_MAX = 2
 export const FONT_SCALE_OPTIONS = [0.85, 1, 1.15, 1.3] as const
 
 export type DockThemeKey =

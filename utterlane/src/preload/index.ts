@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webFrame } from 'electron'
 import type { AppPreferences } from '@shared/preferences'
 import type { Project, ProjectBundle, SegmentsFile, WorkspaceFile } from '@shared/project'
 import type { WriteTakeResult } from '@shared/recording'
@@ -67,7 +67,20 @@ const api = {
       return () => ipcRenderer.removeListener(WINDOW_IPC.closeRequest, listener)
     },
     /** 同意关闭 —— main 会跳过第二次 close 的拦截 */
-    confirmClose: (): void => ipcRenderer.send(WINDOW_IPC.closeConfirmed)
+    confirmClose: (): void => ipcRenderer.send(WINDOW_IPC.closeConfirmed),
+
+    /**
+     * 整窗 UI 缩放（VSCode 风格）。webFrame 是 renderer 的本地 API，不
+     * 走 IPC——比反复跨进程通信顺。1.0 = 100%，限制在 [0.5, 2.5]。
+     * 字号 / 图标 / 间距 / dock tab 高度等所有 UI 元素都跟随，比单纯
+     * 改 font-size CSS 变量更全面（旧实现只缩字号留下「图标和间距没
+     * 跟着变」的怪相）
+     */
+    setZoomFactor: (factor: number): void => {
+      const clamped = Math.max(0.5, Math.min(2.5, factor))
+      webFrame.setZoomFactor(clamped)
+    },
+    getZoomFactor: (): number => webFrame.getZoomFactor()
   },
 
   preferences: {

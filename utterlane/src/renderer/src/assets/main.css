@@ -7,22 +7,22 @@
 @layer base {
   /*
    * 字号 token：所有 Tailwind text-* 工具类的实际值都来源于这里。
-   * --fs-scale 由 preferences.appearance.fontScale 驱动（见 App 组件里的 useEffect）；
-   * 改这一个变量整 UI 的字号就按比例拉伸 / 收缩，不影响行间距的视觉平衡。
    *
-   * 默认 scale 是 1，基础字号与旧 Tailwind fontSize 配置完全一致，
-   * 行高一并乘 scale 保证「相对行距」稳定。
+   * 历史：早先这里有一组 calc(* var(--fs-scale)) 用 CSS 变量做字号缩放，
+   * 但只缩字号不缩间距 / 图标会让 UI 视觉错位。改用 Electron 的
+   * webFrame.setZoomFactor 整窗缩放（preferences.fontScale 字段沿用），
+   * 这套 var 退化成纯 px 常量，但保留间接层，方便未来真要做「编辑器
+   * 字号 vs 窗口缩放」分离时再插回 scale 因子
    */
   :root {
-    --fs-scale: 1;
-    --fs-2xs: calc(10px * var(--fs-scale));
-    --fs-2xs-lh: calc(14px * var(--fs-scale));
-    --fs-xs: calc(11px * var(--fs-scale));
-    --fs-xs-lh: calc(16px * var(--fs-scale));
-    --fs-sm: calc(12px * var(--fs-scale));
-    --fs-sm-lh: calc(18px * var(--fs-scale));
-    --fs-base: calc(13px * var(--fs-scale));
-    --fs-base-lh: calc(20px * var(--fs-scale));
+    --fs-2xs: 10px;
+    --fs-2xs-lh: 14px;
+    --fs-xs: 11px;
+    --fs-xs-lh: 16px;
+    --fs-sm: 12px;
+    --fs-sm-lh: 18px;
+    --fs-base: 13px;
+    --fs-base-lh: 20px;
   }
 
   html,

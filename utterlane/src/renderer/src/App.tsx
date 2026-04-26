@@ -48,13 +48,13 @@ function App(): React.JSX.Element {
     }
   }, [locale])
 
-  // 字体缩放：把 fontScale 写到 documentElement 的 --fs-scale 变量上，
-  // 所有 text-* Tailwind 类会通过 CSS 变量自动跟随。
-  // clamp 范围与 PreferencesDialog 暴露的离散档位共用 shared 常量，
-  // 避免「UI 选项 1.3 而 clamp 上限 1.5」这种含糊状态。
+  // 整窗 UI 缩放（VSCode 风格）：调 webFrame.setZoomFactor 让字号 /
+  // 图标 / 间距 / dock tab 高度全部跟随。preferences.appearance.fontScale
+  // 字段名沿用——旧用户的存储值（0.85 / 1 / 1.15 / 1.3）继续作为 zoom
+  // 因子无缝迁移；只是含义从「字号倍率」变成「窗口缩放」
   useEffect(() => {
     const clamped = Math.max(FONT_SCALE_MIN, Math.min(FONT_SCALE_MAX, fontScale ?? 1))
-    document.documentElement.style.setProperty('--fs-scale', String(clamped))
+    window.api.window.setZoomFactor(clamped)
   }, [fontScale])
 
   // 启动时：

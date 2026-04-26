@@ -446,7 +446,7 @@ export const zhCN = {
     countdown_off: '关闭',
     countdown_seconds: '{{count}} 秒',
     label_dock_theme: 'Dock 主题',
-    label_font_scale: '字体缩放',
+    label_font_scale: '界面缩放',
     label_language: '界面语言',
     label_segment_text_align: 'Segment Timeline 文案对齐',
     label_inspector_text_align: 'Inspector 文案对齐',

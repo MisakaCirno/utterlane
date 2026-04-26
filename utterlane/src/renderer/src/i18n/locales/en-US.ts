@@ -453,7 +453,7 @@ export const enUS: TranslationSchema = {
     countdown_off: 'Off',
     countdown_seconds: '{{count}} sec',
     label_dock_theme: 'Dock theme',
-    label_font_scale: 'Font scale',
+    label_font_scale: 'UI zoom',
     label_language: 'Language',
     label_segment_text_align: 'Segment Timeline alignment',
     label_inspector_text_align: 'Inspector alignment',

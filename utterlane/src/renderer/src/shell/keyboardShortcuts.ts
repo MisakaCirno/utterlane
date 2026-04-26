@@ -54,6 +54,28 @@ export function installKeyboardShortcuts(): () => void {
       return
     }
 
+    // Ctrl/Cmd + +/-/0：VSCode 风格整窗缩放。±0.1 步进，0 复位 1.0；
+    // clamp 由 setZoomFactor 在 preload 里做。直接改 preferences，
+    // App 的 useEffect 会调 webFrame.setZoomFactor 同步生效 + 落盘。
+    // 注意 e.key === '+' / '=' 都要接受——大多数键盘上 + 需要 Shift+=
+    if (mod && (e.key === '=' || e.key === '+')) {
+      e.preventDefault()
+      const cur = usePreferencesStore.getState().prefs.appearance?.fontScale ?? 1
+      usePreferencesStore.getState().update({ appearance: { fontScale: cur + 0.1 } })
+      return
+    }
+    if (mod && e.key === '-') {
+      e.preventDefault()
+      const cur = usePreferencesStore.getState().prefs.appearance?.fontScale ?? 1
+      usePreferencesStore.getState().update({ appearance: { fontScale: cur - 0.1 } })
+      return
+    }
+    if (mod && e.key === '0') {
+      e.preventDefault()
+      usePreferencesStore.getState().update({ appearance: { fontScale: 1 } })
+      return
+    }
+
     if (!hasProject) return
 
     // Ctrl/Cmd+Z / Ctrl/Cmd+Shift+Z / Ctrl/Cmd+Y：undo / redo
